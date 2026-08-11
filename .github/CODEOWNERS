@@ -1,0 +1,9 @@
+# CODEOWNERS — adjust GitHub handles before GA
+* @cvstudio-eng
+
+/apps/api/ @cvstudio-backend
+/apps/web/ @cvstudio-frontend
+/apps/mobile/ @cvstudio-mobile
+/packages/ui/ @cvstudio-frontend
+/infrastructure/ @cvstudio-platform
+/docs/security/ @cvstudio-security

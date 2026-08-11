@@ -1,0 +1,77 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cvstudio
+          POSTGRES_PASSWORD: cvstudio
+          POSTGRES_DB: cvstudio_test
+        options: >-
+          --health-cmd "pg_isready -U cvstudio -d cvstudio_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Run tests with coverage
+        run: pnpm test:coverage
+        env:
+          DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_test?schema=public
+          DIRECT_DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_test?schema=public
+          REDIS_URL: redis://localhost:6379/0
+
+      - name: Enforce coverage thresholds (AI + payments)
+        run: pnpm --filter @cvstudio/api exec jest --config jest.config.json --coverage --coverageReporters=text-summary --testPathPattern="(ai\\.service|ai-quota|ai-gateway|payments\\.service)" --forceExit
+        env:
+          DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_test?schema=public
+          DIRECT_DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_test?schema=public
+          REDIS_URL: redis://localhost:6379/0
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        continue-on-error: true
+        with:
+          files: ./apps/api/coverage/coverage-final.json
+          fail_ci_if_error: false

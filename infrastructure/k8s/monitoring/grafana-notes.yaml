@@ -1,0 +1,11 @@
+# Grafana dashboard provisioning notes — import JSON from ops repo later.
+# Required dashboards: API golden signals, BullMQ, RDS, Redis, SLO burn.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-notes
+  namespace: monitoring
+data:
+  README: |
+    Provision dashboards via grafana sidecar or AMP/AMG.
+    Alerts aligned with docs/security/MONITORING-ALERTS.md and docs/infrastructure/SLO-SLI.md

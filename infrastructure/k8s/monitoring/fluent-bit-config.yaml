@@ -1,0 +1,31 @@
+# Install via Helm in real env:
+# helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+# helm upgrade --install kps prometheus-community/kube-prometheus-stack -n monitoring \
+#   -f values-prometheus.yaml
+
+# Fluent Bit → OpenSearch example ConfigMap fragment
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-cvstudio
+  namespace: monitoring
+data:
+  filter.conf: |
+    [FILTER]
+        Name                kubernetes
+        Match               kube.*
+        Merge_Log           On
+        Keep_Log            Off
+        Labels              Off
+        Annotations         Off
+  output.conf: |
+    [OUTPUT]
+        Name                es
+        Match               *
+        Host                opensearch.monitoring.svc
+        Port                9200
+        Logstash_Format     On
+        Logstash_Prefix     app-api
+        Suppress_Type_Name  On
+        tls                 On
+        tls.verify          On

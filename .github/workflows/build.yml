@@ -1,0 +1,37 @@
+name: Build
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build packages and apps
+        run: pnpm build --filter=@cvstudio/api --filter=@cvstudio/web --filter=@cvstudio/ui --filter=@cvstudio/shared-types --filter=@cvstudio/shared-utils --filter=@cvstudio/ai-service
+
+      - name: Build web (bundle check)
+        run: pnpm build:web
+        continue-on-error: true

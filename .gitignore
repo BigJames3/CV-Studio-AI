@@ -1,0 +1,84 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+.pnpm-store/
+.npm/
+
+# Testing
+coverage/
+.nyc_output
+playwright-report/
+test-results/
+junit.xml
+
+# Production / build
+dist/
+build/
+out/
+.next/
+.nuxt/
+.cache/
+storybook-static/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+!.env*.example
+*.pem
+*.p12
+credentials.json
+secrets/
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Turbo
+.turbo/
+.eslintcache
+
+# Docker
+.docker/
+
+# Prisma local
+.env*.local
+
+# Mobile / Expo
+apps/mobile/.expo/
+apps/mobile/ios/
+apps/mobile/android/
+*.jks
+*.keystore
+
+# Infra local
+infrastructure/terraform/**/.terraform/
+infrastructure/terraform/**/*.tfstate*
+infrastructure/terraform/**/crash.log
+*.tfvars
+!*.tfvars.example
+
+# Misc
+*.local
+.vercel
+.claude
+.cursor/*
+!.cursor/rules/

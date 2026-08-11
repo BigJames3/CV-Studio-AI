@@ -1,0 +1,7 @@
+# Example terraform variables — copy to terraform.tfvars (gitignored)
+aws_region     = "eu-west-1"
+environment    = "dev"
+project_name   = "cvstudio"
+cluster_name   = "cvstudio-dev"
+db_instance    = "db.t4g.medium"
+redis_node     = "cache.t4g.micro"

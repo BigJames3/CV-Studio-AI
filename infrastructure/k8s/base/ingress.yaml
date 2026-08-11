@@ -1,0 +1,36 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cvstudio
+  namespace: cvstudio
+  annotations:
+    kubernetes.ingress.kubernetes.io/scheme: internet-facing
+    kubernetes.ingress.kubernetes.io/target-type: ip
+    kubernetes.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    # ACM ARN set per overlay
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:...
+    alb.ingress.kubernetes.io/healthcheck-path: /api/v1/health
+spec:
+  ingressClassName: alb
+  rules:
+    - host: api.cvstudio.ai
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 80
+    - host: app.cvstudio.ai
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 80

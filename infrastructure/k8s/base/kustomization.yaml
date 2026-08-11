@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cvstudio
+resources:
+  - namespace.yaml
+  - api.yaml
+  - web.yaml
+  - workers.yaml
+  - ingress.yaml
+  - migrate-job.yaml
+  - blue-green-api.yaml
+  - stripe-webhook-retry-cronjob.yaml
+commonLabels:
+  app.kubernetes.io/part-of: cvstudio

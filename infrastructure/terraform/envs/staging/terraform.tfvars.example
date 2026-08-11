@@ -1,0 +1,6 @@
+aws_region     = "eu-west-1"
+environment    = "staging"
+project_name   = "cvstudio"
+cluster_name   = "cvstudio-staging"
+db_instance    = "db.t4g.large"
+redis_node     = "cache.t4g.small"

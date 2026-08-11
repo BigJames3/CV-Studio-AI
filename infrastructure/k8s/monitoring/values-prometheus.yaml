@@ -1,0 +1,12 @@
+grafana:
+  admin:
+    existingSecret: grafana-admin
+  persistence:
+    enabled: true
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+alertmanager:
+  enabled: true

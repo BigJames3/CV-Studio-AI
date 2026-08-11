@@ -1,0 +1,73 @@
+{
+  "expo": {
+    "name": "CV Studio AI",
+    "slug": "cv-studio-ai",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "cvstudio",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ai.cvstudio.app",
+      "associatedDomains": ["applinks:app.cvstudio.ai"],
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Unlock CV Studio AI quickly and securely."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F172A"
+      },
+      "package": "ai.cvstudio.app",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "app.cvstudio.ai",
+              "pathPrefix": "/cv"
+            },
+            {
+              "scheme": "https",
+              "host": "app.cvstudio.ai",
+              "pathPrefix": "/billing"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-notifications",
+      "expo-apple-authentication",
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.ai.cvstudio",
+          "enableGooglePay": true
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "replace-with-eas-project-id"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/replace-with-eas-project-id"
+    }
+  }
+}

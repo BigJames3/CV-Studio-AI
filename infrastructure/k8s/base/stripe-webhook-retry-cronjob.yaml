@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: stripe-webhook-retry
+  namespace: cvstudio
+  labels:
+    app.kubernetes.io/name: stripe-webhook-retry
+    app.kubernetes.io/part-of: cvstudio
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: webhook-retry
+              image: cvstudioai/api:latest
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - secretRef:
+                    name: cvstudio-api-secrets
+              env:
+                - name: NODE_ENV
+                  value: production
+                - name: STRIPE_FAIL_CLOSED
+                  value: "1"
+                - name: WEBHOOK_DLQ_RETRY_LIMIT
+                  value: "50"
+              command: ["node", "dist/scripts/retry-webhook-dlq.js"]

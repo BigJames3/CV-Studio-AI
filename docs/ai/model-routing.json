@@ -1,0 +1,47 @@
+{
+  "version": "1.0.0",
+  "tiers": {
+    "S": {
+      "primary": { "provider": "openai", "model": "gpt-4.1-mini" },
+      "fallback": { "provider": "anthropic", "model": "claude-haiku-4" }
+    },
+    "M": {
+      "primary": { "provider": "openai", "model": "gpt-4.1" },
+      "fallback": { "provider": "anthropic", "model": "claude-sonnet-4" }
+    },
+    "L": {
+      "primary": { "provider": "anthropic", "model": "claude-sonnet-4" },
+      "fallback": { "provider": "openai", "model": "gpt-4.1" }
+    },
+    "embed": {
+      "primary": { "provider": "openai", "model": "text-embedding-3-large" }
+    }
+  },
+  "features": {
+    "cv_generator": { "tier": "M", "prompt": "cv_generator.v1", "temperature": 0.2 },
+    "optimize_resume": {
+      "tier": "S",
+      "prompt": "optimize_resume.v3",
+      "temperature": 0.35,
+      "escalateToMIf": "jobDescriptionPresent"
+    },
+    "cover_letter": { "tier": "M", "prompt": "cover_letter.v2", "temperature": 0.4 },
+    "job_matcher": {
+      "tier": "S",
+      "prompt": "job_matcher.v2",
+      "temperature": 0.2,
+      "embeddings": true
+    },
+    "interview_prep": { "tier": "M", "prompt": "interview_prep.v2", "temperature": 0.5 },
+    "ats_explain": { "tier": "S", "prompt": "ats_explain.v1", "temperature": 0.2 },
+    "career_advisor": { "tier": "M", "prompt": "career_advisor.v1", "temperature": 0.4 },
+    "portfolio_generator": { "tier": "M", "prompt": "portfolio_generator.v1", "temperature": 0.45 },
+    "grammar_check": { "tier": "S", "prompt": "grammar_check.v1", "temperature": 0.05 },
+    "skills_suggest": { "tier": "S", "prompt": "skills_suggest.v1", "temperature": 0.2 },
+    "linkedin_import": { "tier": "S", "prompt": "linkedin_import.v1", "temperature": 0.1 },
+    "pdf_parse_structure": { "tier": "M", "prompt": "pdf_parse_structure.v1", "temperature": 0.0 }
+  },
+  "ocr": {
+    "providers": ["aws_textract", "google_document_ai", "azure_read"]
+  }
+}

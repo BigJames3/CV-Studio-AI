@@ -1,0 +1,79 @@
+name: CD Staging
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-1
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-west-1.amazonaws.com
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: meta
+        run: echo "sha=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push API
+        run: |
+          docker build -t $ECR_REGISTRY/cvstudio/api:${{ steps.meta.outputs.sha }} -f apps/api/Dockerfile apps/api
+          docker push $ECR_REGISTRY/cvstudio/api:${{ steps.meta.outputs.sha }}
+
+      - name: Build & push Web
+        run: |
+          docker build -t $ECR_REGISTRY/cvstudio/web:${{ steps.meta.outputs.sha }} -f apps/web/Dockerfile apps/web
+          docker push $ECR_REGISTRY/cvstudio/web:${{ steps.meta.outputs.sha }}
+
+      - name: Build & push Worker
+        run: |
+          docker build -t $ECR_REGISTRY/cvstudio/worker:${{ steps.meta.outputs.sha }} -f apps/api/Dockerfile.worker apps/api
+          docker push $ECR_REGISTRY/cvstudio/worker:${{ steps.meta.outputs.sha }}
+
+      - name: Trivy image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.ECR_REGISTRY }}/cvstudio/api:${{ steps.meta.outputs.sha }}
+          severity: CRITICAL
+          exit-code: '1'
+
+      - name: Cosign sign
+        env:
+          COSIGN_YES: 'true'
+        run: |
+          curl -sSfL https://github.com/sigstore/cosign/releases/download/v2.4.1/cosign-linux-amd64 -o cosign
+          chmod +x cosign
+          ./cosign sign --yes $ECR_REGISTRY/cvstudio/api:${{ steps.meta.outputs.sha }} || true
+
+      - name: Deploy staging (kustomize)
+        run: |
+          aws eks update-kubeconfig --name cvstudio-staging --region $AWS_REGION
+          cd infrastructure/k8s/overlays/staging
+          kustomize edit set image \
+            $ECR_REGISTRY/cvstudio/api=${{ env.ECR_REGISTRY }}/cvstudio/api:${{ steps.meta.outputs.sha }} \
+            $ECR_REGISTRY/cvstudio/web=${{ env.ECR_REGISTRY }}/cvstudio/web:${{ steps.meta.outputs.sha }} \
+            $ECR_REGISTRY/cvstudio/worker=${{ env.ECR_REGISTRY }}/cvstudio/worker:${{ steps.meta.outputs.sha }}
+          kubectl apply -k .
+          kubectl -n cvstudio rollout status deploy/api --timeout=180s
+
+      - name: Smoke
+        run: |
+          curl -fsS https://api.staging.cvstudio.ai/api/v1/health

@@ -1,0 +1,17 @@
+'use client';
+
+import type { ReactNode } from 'react';
+import { LogoutSync } from '@/components/auth/logout-sync';
+import { QueryProvider } from './query-provider';
+import { ThemeProvider } from './theme-provider';
+
+export function AppProviders({ children }: { children: ReactNode }) {
+  return (
+    <QueryProvider>
+      <ThemeProvider>
+        <LogoutSync />
+        {children}
+      </ThemeProvider>
+    </QueryProvider>
+  );
+}

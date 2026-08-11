@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  namespace: cvstudio
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: api
+      containers:
+        - name: migrate
+          image: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/api:sha-replace
+          command: ['pnpm', 'exec', 'prisma', 'migrate', 'deploy']
+          envFrom:
+            - secretRef:
+                name: api-secrets

@@ -1,0 +1,135 @@
+/* Print / PDF preview — hide chrome, keep template paper look */
+
+@media print {
+  /*
+   * Print-preview dialog is portaled to document.body (.cv-print-dialog).
+   * Hide EVERY sibling of the dialog (AppTopbar, editor, React root, etc.)
+   * so "Save as PDF" contains only the CV.
+   */
+  body:has(.cv-print-dialog) > *:not(.cv-print-dialog) {
+    display: none !important;
+  }
+
+  /* Safety: also collapse live editor if :has() unsupported / dialog nested */
+  body:has(.cv-print-dialog) .editor-shell {
+    display: none !important;
+  }
+
+  /* App chrome when printing without the dialog (Ctrl+P on editor) */
+  .no-print,
+  .app-topbar,
+  .editor-shell > div:first-child,
+  .editor-shell nav,
+  .editor-shell aside,
+  .editor-shell [aria-label='Formulaire'],
+  .editor-shell [aria-label='Sections du CV'],
+  .editor-shell [aria-label='Analyse ATS'],
+  .editor-shell [aria-label='Personnalisation du style'],
+  .editor-shell .md\:hidden.flex.border-b,
+  [data-testid='export-pdf-open'],
+  [data-testid='export-print-preview'] {
+    display: none !important;
+  }
+
+  /* Zoom controls above live preview */
+  .editor-shell [aria-label='Aperçu du CV en temps réel'] > div:first-child {
+    display: none !important;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Default; Letter overridden via injected <style id="cv-print-page-size"> */
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  .cv-print-dialog {
+    position: static !important;
+    inset: auto !important;
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Flatten modal card chrome so only the paper remains */
+  .cv-print-dialog > * {
+    position: static !important;
+    max-height: none !important;
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    overflow: visible !important;
+  }
+
+  .cv-print-dialog .print\:hidden,
+  .cv-print-dialog [class*='print:hidden'] {
+    display: none !important;
+  }
+
+  .cv-print-root {
+    margin: 0 auto !important;
+  }
+
+  [data-cv-preview],
+  .cv-print-root [data-cv-preview],
+  .editor-shell [data-cv-preview] {
+    width: 210mm !important;
+    min-height: 297mm !important;
+    max-width: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+    margin: 0 !important;
+  }
+
+  /* Undo live-preview zoom scale when Ctrl+P without dialog */
+  .editor-shell .origin-top {
+    transform: none !important;
+  }
+
+  .cv-print-root[data-paper='Letter'] [data-cv-preview] {
+    width: 8.5in !important;
+    min-height: 11in !important;
+  }
+
+  .cv-print-root[data-paper='A4'] [data-cv-preview] {
+    width: 210mm !important;
+    min-height: 297mm !important;
+  }
+
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+/* Screen-only paper size for letter preview */
+.cv-print-root[data-paper='Letter'] [data-cv-preview] {
+  width: 8.5in !important;
+  min-height: 11in !important;
+}

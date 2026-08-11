@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CvContentDraft",
+  "type": "object",
+  "required": ["ok", "draft"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "draft": {
+      "type": "object",
+      "required": ["schemaVersion", "identity"],
+      "properties": {
+        "schemaVersion": { "type": "integer", "const": 1 },
+        "identity": {
+          "type": "object",
+          "properties": {
+            "fullName": { "type": "string" },
+            "headline": { "type": "string" },
+            "email": { "type": "string" },
+            "phone": { "type": "string" },
+            "city": { "type": "string" },
+            "links": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": { "type": "string" },
+                  "url": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "summary": {
+          "type": "object",
+          "properties": { "text": { "type": "string" } }
+        },
+        "experiences": { "type": "array" },
+        "education": { "type": "array" },
+        "skills": { "type": "array" },
+        "languages": { "type": "array" },
+        "projects": { "type": "array" },
+        "certificates": { "type": "array" }
+      }
+    },
+    "fieldConfidence": { "type": "object" },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "refusals": { "type": "array", "items": { "type": "string" } }
+  }
+}

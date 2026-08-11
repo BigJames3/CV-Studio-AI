@@ -1,0 +1,40 @@
+# Blue-Green: deploy api-green alongside api (blue). Flip Service selector to version=green after smoke.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-green
+  namespace: cvstudio
+  labels:
+    app: api
+    version: green
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: api
+      version: green
+  template:
+    metadata:
+      labels:
+        app: api
+        version: green
+    spec:
+      serviceAccountName: api
+      containers:
+        - name: api
+          image: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/api:sha-replace
+          ports:
+            - containerPort: 3001
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health/ready
+              port: http
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: '1'
+              memory: 1Gi
+# After smoke: kubectl -n cvstudio patch svc api -p '{"spec":{"selector":{"app":"api","version":"green"}}}'

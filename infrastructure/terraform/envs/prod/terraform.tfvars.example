@@ -1,0 +1,6 @@
+aws_region     = "eu-west-1"
+environment    = "prod"
+project_name   = "cvstudio"
+cluster_name   = "cvstudio-prod"
+db_instance    = "db.r6g.xlarge"
+redis_node     = "cache.r6g.large"

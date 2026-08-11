@@ -2,13 +2,13 @@
 # Local / CI image for Nest API (context: apps/api)
 # For full monorepo builds prefer building from repo root in a later sprint.
 
-FROM node:20-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app
 RUN apk add --no-cache libc6-compat
 COPY package.json pnpm-lock.yaml* ./
 RUN corepack enable && (pnpm install --frozen-lockfile || pnpm install)
 
-FROM node:20-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 RUN apk add --no-cache libc6-compat
 COPY --from=deps /app/node_modules ./node_modules
@@ -16,7 +16,7 @@ COPY . .
 RUN corepack enable && pnpm exec prisma generate || true
 RUN pnpm run build
 
-FROM node:20-alpine AS runner
+FROM node:26-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup -g 10001 -S app && adduser -u 10001 -S app -G app

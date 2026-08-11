@@ -8,6 +8,7 @@ import { useEditorStore } from '@/stores/editor-store';
 import { ApiError } from '@/lib/api/client';
 import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from '@/stores/auth-store';
+import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 
 export function useMe() {
   return useQuery({
@@ -77,11 +78,19 @@ export function useRevokeSession() {
   });
 }
 
+/** Flat list view over useCvsInfinite (same cache key — no dual-fetch). */
 export function useCvs() {
-  return useQuery({
-    queryKey: queryKeys.cvs(),
-    queryFn: () => cvsApi.list(),
-  });
+  const infinite = useCvsInfinite();
+  const items = infinite.data?.pages.flatMap((page) => page.items) ?? [];
+  return {
+    ...infinite,
+    data: infinite.data
+      ? {
+          items,
+          nextCursor: infinite.data.pages.at(-1)?.nextCursor ?? null,
+        }
+      : undefined,
+  };
 }
 
 export function useCv(id: string) {

@@ -1,8 +1,9 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { InfiniteData } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { cvsApi, queryKeys } from '@/lib/api';
+import { cvsApi, queryKeys, type ListCvsResponse } from '@/lib/api';
 import { ApiError } from '@/lib/api/client';
 import { useUiStore } from '@/stores/ui-store';
 
@@ -71,9 +72,10 @@ export function useCvMutations() {
     onError: (err) => {
       // Critical: free-tier quota → paywall only (no error toast)
       if (isEntitlementRequired(err)) {
-        const cached = qc.getQueryData<{ items: unknown[] }>(queryKeys.cvs());
+        const cached = qc.getQueryData<InfiniteData<ListCvsResponse>>(queryKeys.cvs());
+        const cvCount = cached?.pages.flatMap((page) => page.items).length ?? 0;
         openPaywall('cv:duplicate', 'cv:duplicate', {
-          cvCount: cached?.items?.length ?? 0,
+          cvCount,
           cvLimit: 1,
         });
         return;

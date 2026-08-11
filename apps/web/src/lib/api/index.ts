@@ -172,18 +172,41 @@ export const usersApi = {
     apiClient<UserProfile>('/users/me', { method: 'PATCH', body }),
 };
 
+export type CvListItem = {
+  id: string;
+  title: string;
+  updatedAt: string;
+  isPublic?: boolean;
+  isStarred?: boolean;
+  publicUrl?: string | null;
+  templateId?: string | null;
+  viewCount?: number;
+  createdAt?: string;
+};
+
+export type ListCvsParams = {
+  cursor?: string;
+  limit?: number;
+  starred?: boolean;
+};
+
+export type ListCvsResponse = {
+  items: CvListItem[];
+  nextCursor: string | null;
+};
+
 export const cvsApi = {
-  list: () =>
-    apiClient<{
-      items: Array<{
-        id: string;
-        title: string;
-        updatedAt: string;
-        isPublic?: boolean;
-        isStarred?: boolean;
-        publicUrl?: string | null;
-      }>;
-    }>('/cvs'),
+  list: (params?: ListCvsParams) => {
+    const query = new URLSearchParams();
+    if (params?.cursor) query.append('cursor', params.cursor);
+    if (params?.limit != null) query.append('limit', String(params.limit));
+    if (params?.starred !== undefined) {
+      query.append('starred', params.starred ? 'true' : 'false');
+    }
+    const qs = query.toString();
+    // apiClient already prefixes NEXT_PUBLIC_API_URL (/api/v1)
+    return apiClient<ListCvsResponse>(`/cvs${qs ? `?${qs}` : ''}`);
+  },
   get: (id: string) => apiClient<Record<string, unknown>>(`/cvs/${id}`),
   create: (body: { title: string; templateId?: string; content?: unknown }) =>
     apiClient('/cvs', { method: 'POST', body }),

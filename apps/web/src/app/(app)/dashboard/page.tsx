@@ -2,13 +2,16 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useCvs, useCreateCv } from '@/hooks';
+import { useCreateCv } from '@/hooks';
+import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 import { useCvMutations } from '@/hooks/useCvMutations';
 
 export default function DashboardPage() {
-  const { data, isLoading, isError } = useCvs();
+  const { data, isLoading, isError, isFetchingNextPage, hasNextPage, fetchNextPage } =
+    useCvsInfinite();
   const createCv = useCreateCv();
   const { remove, duplicate, rename, publish, star } = useCvMutations();
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -17,6 +20,8 @@ export default function DashboardPage() {
     shareUrl: string;
     qrCodeDataUrl: string;
   } | null>(null);
+
+  const cvs = data?.pages.flatMap((page) => page.items) ?? [];
 
   const commitRename = (id: string, currentTitle: string) => {
     const next = renameValue.trim();
@@ -32,7 +37,8 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-3xl font-semibold">Dashboard</h1>
           <p className="text-[color:var(--cv-text-secondary)]">
-            {data?.items?.length ?? 0} CV{(data?.items?.length ?? 0) === 1 ? '' : 's'}
+            {cvs.length} CV{cvs.length === 1 ? '' : 's'}
+            {hasNextPage ? '+' : ''}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -85,7 +91,7 @@ export default function DashboardPage() {
       )}
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {data?.items?.map((cv) => (
+        {cvs.map((cv) => (
           <div key={cv.id} className="rounded-lg border border-border bg-surface-card p-4 shadow-1">
             <div className="flex items-start justify-between gap-2">
               {renamingId === cv.id ? (
@@ -189,7 +195,7 @@ export default function DashboardPage() {
             </div>
           </div>
         ))}
-        {!isLoading && !data?.items?.length && (
+        {!isLoading && cvs.length === 0 && (
           <div className="col-span-full rounded-lg border border-dashed border-border p-10 text-center">
             <p className="font-medium">Votre premier CV commence ici</p>
             <p className="mt-1 text-sm text-[color:var(--cv-text-secondary)]">
@@ -198,6 +204,33 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {hasNextPage ? (
+        <div className="flex justify-center pt-6">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            disabled={isFetchingNextPage}
+            onClick={() => void fetchNextPage()}
+          >
+            {isFetchingNextPage ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Chargement…
+              </>
+            ) : (
+              'Afficher plus de CV'
+            )}
+          </Button>
+        </div>
+      ) : null}
+
+      {!isLoading && !hasNextPage && cvs.length > 0 ? (
+        <p className="pt-6 text-center text-sm text-[color:var(--cv-text-muted)]">
+          ✓ Tous vos CV sont affichés
+        </p>
+      ) : null}
     </div>
   );
 }

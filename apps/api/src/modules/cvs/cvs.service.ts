@@ -24,14 +24,23 @@ export class CvsService {
 
   async list(userId: string, query: ListCvsQueryDto) {
     const limit = query.limit ?? 20;
+    const cursor = query.cursor;
+
+    // Prisma cursor + skip:1 (stable with updatedAt desc). Avoid id:{gt} which breaks UUID + sort order.
     const items = await this.prisma.cv.findMany({
       where: {
         userId,
         deletedAt: null,
         ...(query.starred !== undefined ? { isStarred: query.starred } : {}),
       },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
+      ...(cursor
+        ? {
+            cursor: { id: cursor },
+            skip: 1,
+          }
+        : {}),
       select: {
         id: true,
         title: true,
@@ -49,7 +58,7 @@ export class CvsService {
     const data = hasMore ? items.slice(0, limit) : items;
     return {
       items: data,
-      nextCursor: hasMore ? data[data.length - 1]?.id : null,
+      nextCursor: hasMore ? (data[data.length - 1]?.id ?? null) : null,
     };
   }
 

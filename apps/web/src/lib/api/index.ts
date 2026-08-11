@@ -67,8 +67,7 @@ export const authApi = {
       }
     }
   },
-  getProfile: () =>
-    apiClient<UserProfile>('/auth/profile'),
+  getProfile: () => apiClient<UserProfile>('/auth/profile'),
   updateProfile: (body: UpdateProfileInput) =>
     apiClient<UserProfile>('/auth/profile', { method: 'PUT', body }),
   changePassword: (currentPassword: string, newPassword: string) =>
@@ -181,6 +180,7 @@ export const cvsApi = {
         title: string;
         updatedAt: string;
         isPublic?: boolean;
+        isStarred?: boolean;
         publicUrl?: string | null;
       }>;
     }>('/cvs'),
@@ -269,12 +269,7 @@ export const aiApi = {
       feature: string;
       model: string;
     }>('/ai/check-ats', { method: 'POST', body }),
-  coverLetter: (body: {
-    cvId: string;
-    jobDescription: string;
-    company?: string;
-    tone?: string;
-  }) =>
+  coverLetter: (body: { cvId: string; jobDescription: string; company?: string; tone?: string }) =>
     apiClient<{
       status: string;
       letter: { subject: string; body: string };

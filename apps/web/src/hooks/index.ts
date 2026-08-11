@@ -103,15 +103,8 @@ export function useSubscription() {
 export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      email,
-      password,
-      totp,
-    }: {
-      email: string;
-      password: string;
-      totp?: string;
-    }) => authApi.login(email, password, totp),
+    mutationFn: ({ email, password, totp }: { email: string; password: string; totp?: string }) =>
+      authApi.login(email, password, totp),
     onSuccess: (data) => {
       if (!('requires2fa' in data)) {
         qc.invalidateQueries({ queryKey: queryKeys.me });
@@ -130,12 +123,19 @@ export function useRegister() {
 
 export function useCreateCv() {
   const qc = useQueryClient();
+  const { data: cvsData } = useCvs();
+
   return useMutation({
     mutationFn: cvsApi.create,
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.cvs() }),
     onError: (err) => {
+      // Show paywall modal only — no toast (global PaywallModal in app layout)
       if (err instanceof ApiError && err.code === 'ENTITLEMENT_REQUIRED') {
-        useUiStore.getState().openPaywall('cv:create', 'cv:create');
+        const cvCount = cvsData?.items?.length ?? 0;
+        useUiStore.getState().openPaywall('cv:create', 'cv:create', {
+          cvCount,
+          cvLimit: 1,
+        });
       }
     },
   });

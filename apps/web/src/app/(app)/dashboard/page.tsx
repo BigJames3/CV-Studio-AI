@@ -2,15 +2,15 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useCvs, useCreateCv } from '@/hooks';
-import { cvsApi, queryKeys } from '@/lib/api';
+import { useCvMutations } from '@/hooks/useCvMutations';
 
 export default function DashboardPage() {
   const { data, isLoading, isError } = useCvs();
   const createCv = useCreateCv();
-  const qc = useQueryClient();
+  const { remove, duplicate, rename, publish, star } = useCvMutations();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [shareInfo, setShareInfo] = useState<{
@@ -18,37 +18,13 @@ export default function DashboardPage() {
     qrCodeDataUrl: string;
   } | null>(null);
 
-  const remove = useMutation({
-    mutationFn: (id: string) => cvsApi.remove(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.cvs() }),
-  });
-
-  const duplicate = useMutation({
-    mutationFn: (id: string) => cvsApi.duplicate(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.cvs() }),
-  });
-
-  const rename = useMutation({
-    mutationFn: ({ id, title }: { id: string; title: string }) =>
-      cvsApi.update(id, { title }),
-    onSuccess: () => {
-      setRenamingId(null);
-      qc.invalidateQueries({ queryKey: queryKeys.cvs() });
-    },
-  });
-
-  const publish = useMutation({
-    mutationFn: async (id: string) => {
-      await cvsApi.publish(id, { isPublic: true });
-      return cvsApi.share(id);
-    },
-    onSuccess: (res) => {
-      if (res.shareUrl && res.qrCodeDataUrl) {
-        setShareInfo({ shareUrl: res.shareUrl, qrCodeDataUrl: res.qrCodeDataUrl });
-      }
-      qc.invalidateQueries({ queryKey: queryKeys.cvs() });
-    },
-  });
+  const commitRename = (id: string, currentTitle: string) => {
+    const next = renameValue.trim();
+    if (next && next !== currentTitle) {
+      rename.mutate({ id, title: next });
+    }
+    setRenamingId(null);
+  };
 
   return (
     <div className="mx-auto max-w-content px-4 py-8">
@@ -110,33 +86,53 @@ export default function DashboardPage() {
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {data?.items?.map((cv) => (
-          <div
-            key={cv.id}
-            className="rounded-lg border border-border bg-surface-card p-4 shadow-1"
-          >
-            {renamingId === cv.id ? (
-              <form
-                className="flex gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  rename.mutate({ id: cv.id, title: renameValue.trim() || cv.title });
-                }}
-              >
-                <input
-                  className="w-full rounded border border-border px-2 py-1 text-sm"
+          <div key={cv.id} className="rounded-lg border border-border bg-surface-card p-4 shadow-1">
+            <div className="flex items-start justify-between gap-2">
+              {renamingId === cv.id ? (
+                <Input
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={() => commitRename(cv.id, cv.title)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      commitRename(cv.id, cv.title);
+                    }
+                    if (e.key === 'Escape') setRenamingId(null);
+                  }}
                   autoFocus
+                  disabled={rename.isPending}
+                  className="h-8"
                 />
-                <Button type="submit" size="sm">
-                  OK
+              ) : (
+                <h3
+                  className="cursor-pointer font-medium hover:text-primary"
+                  onClick={() => {
+                    setRenamingId(cv.id);
+                    setRenameValue(cv.title);
+                  }}
+                >
+                  {cv.title}
+                </h3>
+              )}
+              <div className="flex shrink-0 items-center gap-1">
+                {cv.isPublic ? (
+                  <span className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
+                    ✓ Publié
+                  </span>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="min-h-8 px-2"
+                  disabled={star.isPending}
+                  aria-label={cv.isStarred ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+                  onClick={() => star.mutate({ id: cv.id, isStarred: !cv.isStarred })}
+                >
+                  {star.isPending ? '⏳' : cv.isStarred ? '⭐' : '☆'}
                 </Button>
-              </form>
-            ) : (
-              <Link href={`/editor/${cv.id}`} className="font-medium hover:text-primary">
-                {cv.title}
-              </Link>
-            )}
+              </div>
+            </div>
             <p className="mt-1 text-xs text-[color:var(--cv-text-muted)]">
               Modifié {new Date(cv.updatedAt).toLocaleString('fr-FR')}
             </p>
@@ -148,40 +144,47 @@ export default function DashboardPage() {
               </Link>
               <Button
                 size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setRenamingId(cv.id);
-                  setRenameValue(cv.title);
-                }}
-              >
-                Renommer
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
+                variant="outline"
                 disabled={duplicate.isPending}
                 onClick={() => duplicate.mutate(cv.id)}
               >
-                Dupliquer
+                {duplicate.isPending ? '⏳ Duplication…' : 'Dupliquer'}
               </Button>
               <Button
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 disabled={publish.isPending}
-                onClick={() => publish.mutate(cv.id)}
+                onClick={() =>
+                  publish.mutate(
+                    { id: cv.id, isPublic: !cv.isPublic },
+                    {
+                      onSuccess: (res) => {
+                        if (res.share?.shareUrl && res.share.qrCodeDataUrl) {
+                          setShareInfo({
+                            shareUrl: res.share.shareUrl,
+                            qrCodeDataUrl: res.share.qrCodeDataUrl,
+                          });
+                        } else if (!res.isPublic) {
+                          setShareInfo(null);
+                        }
+                      },
+                    }
+                  )
+                }
               >
-                Partager
+                {publish.isPending ? '⏳' : cv.isPublic ? 'Dépublier' : 'Partager'}
               </Button>
               <Button
                 size="sm"
-                variant="ghost"
-                className="text-error"
+                variant="destructive"
                 disabled={remove.isPending}
                 onClick={() => {
-                  if (confirm('Supprimer ce CV ?')) remove.mutate(cv.id);
+                  if (confirm('Êtes-vous sûr de vouloir supprimer ce CV ?')) {
+                    remove.mutate(cv.id);
+                  }
                 }}
               >
-                Supprimer
+                {remove.isPending ? '⏳ Suppression…' : 'Supprimer'}
               </Button>
             </div>
           </div>

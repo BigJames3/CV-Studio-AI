@@ -10,6 +10,8 @@ import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 
+export { useCvsInfinite };
+
 export function useMe() {
   return useQuery({
     queryKey: queryKeys.me,

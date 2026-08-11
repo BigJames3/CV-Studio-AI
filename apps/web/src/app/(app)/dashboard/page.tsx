@@ -90,146 +90,152 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {cvs.map((cv) => (
-          <div key={cv.id} className="rounded-lg border border-border bg-surface-card p-4 shadow-1">
-            <div className="flex items-start justify-between gap-2">
-              {renamingId === cv.id ? (
-                <Input
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => commitRename(cv.id, cv.title)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      commitRename(cv.id, cv.title);
-                    }
-                    if (e.key === 'Escape') setRenamingId(null);
-                  }}
-                  autoFocus
-                  disabled={rename.isPending}
-                  className="h-8"
-                />
-              ) : (
-                <h3
-                  className="cursor-pointer font-medium hover:text-primary"
-                  onClick={() => {
-                    setRenamingId(cv.id);
-                    setRenameValue(cv.title);
-                  }}
-                >
-                  {cv.title}
-                </h3>
-              )}
-              <div className="flex shrink-0 items-center gap-1">
-                {cv.isPublic ? (
-                  <span className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
-                    ✓ Publié
-                  </span>
-                ) : null}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="min-h-8 px-2"
-                  disabled={star.isPending}
-                  aria-label={cv.isStarred ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-                  onClick={() => star.mutate({ id: cv.id, isStarred: !cv.isStarred })}
-                >
-                  {star.isPending ? '⏳' : cv.isStarred ? '⭐' : '☆'}
-                </Button>
-              </div>
-            </div>
-            <p className="mt-1 text-xs text-[color:var(--cv-text-muted)]">
-              Modifié {new Date(cv.updatedAt).toLocaleString('fr-FR')}
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Link href={`/editor/${cv.id}`}>
-                <Button size="sm" variant="secondary">
-                  Éditer
-                </Button>
-              </Link>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={duplicate.isPending}
-                onClick={() => duplicate.mutate(cv.id)}
-              >
-                {duplicate.isPending ? '⏳ Duplication…' : 'Dupliquer'}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={publish.isPending}
-                onClick={() =>
-                  publish.mutate(
-                    { id: cv.id, isPublic: !cv.isPublic },
-                    {
-                      onSuccess: (res) => {
-                        if (res.share?.shareUrl && res.share.qrCodeDataUrl) {
-                          setShareInfo({
-                            shareUrl: res.share.shareUrl,
-                            qrCodeDataUrl: res.share.qrCodeDataUrl,
-                          });
-                        } else if (!res.isPublic) {
-                          setShareInfo(null);
-                        }
-                      },
-                    }
-                  )
-                }
-              >
-                {publish.isPending ? '⏳' : cv.isPublic ? 'Dépublier' : 'Partager'}
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={remove.isPending}
-                onClick={() => {
-                  if (confirm('Êtes-vous sûr de vouloir supprimer ce CV ?')) {
-                    remove.mutate(cv.id);
-                  }
-                }}
-              >
-                {remove.isPending ? '⏳ Suppression…' : 'Supprimer'}
-              </Button>
-            </div>
-          </div>
-        ))}
-        {!isLoading && cvs.length === 0 && (
-          <div className="col-span-full rounded-lg border border-dashed border-border p-10 text-center">
-            <p className="font-medium">Votre premier CV commence ici</p>
-            <p className="mt-1 text-sm text-[color:var(--cv-text-secondary)]">
-              Créez un document et éditez-le en dual-pane live.
-            </p>
-          </div>
-        )}
-      </div>
-
-      {hasNextPage ? (
-        <div className="flex justify-center pt-6">
-          <Button
-            type="button"
-            variant="outline"
-            className="gap-2"
-            disabled={isFetchingNextPage}
-            onClick={() => void fetchNextPage()}
-          >
-            {isFetchingNextPage ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Chargement…
-              </>
-            ) : (
-              'Afficher plus de CV'
-            )}
-          </Button>
+      {!isLoading && !isError && cvs.length === 0 ? (
+        <div className="mt-8 rounded-lg border border-dashed border-border p-10 text-center">
+          <p className="font-medium">Votre premier CV commence ici</p>
+          <p className="mt-1 text-sm text-[color:var(--cv-text-secondary)]">
+            Créez un document et éditez-le en dual-pane live.
+          </p>
         </div>
       ) : null}
 
-      {!isLoading && !hasNextPage && cvs.length > 0 ? (
-        <p className="pt-6 text-center text-sm text-[color:var(--cv-text-muted)]">
-          ✓ Tous vos CV sont affichés
-        </p>
+      {!isLoading && cvs.length > 0 ? (
+        <>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {cvs.map((cv) => (
+              <div
+                key={cv.id}
+                className="rounded-lg border border-border bg-surface-card p-4 shadow-1"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  {renamingId === cv.id ? (
+                    <Input
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => commitRename(cv.id, cv.title)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          commitRename(cv.id, cv.title);
+                        }
+                        if (e.key === 'Escape') setRenamingId(null);
+                      }}
+                      autoFocus
+                      disabled={rename.isPending}
+                      className="h-8"
+                    />
+                  ) : (
+                    <h3
+                      className="cursor-pointer font-medium hover:text-primary"
+                      onClick={() => {
+                        setRenamingId(cv.id);
+                        setRenameValue(cv.title);
+                      }}
+                    >
+                      {cv.title}
+                    </h3>
+                  )}
+                  <div className="flex shrink-0 items-center gap-1">
+                    {cv.isPublic ? (
+                      <span className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
+                        ✓ Publié
+                      </span>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="min-h-8 px-2"
+                      disabled={star.isPending}
+                      aria-label={cv.isStarred ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+                      onClick={() => star.mutate({ id: cv.id, isStarred: !cv.isStarred })}
+                    >
+                      {star.isPending ? '⏳' : cv.isStarred ? '⭐' : '☆'}
+                    </Button>
+                  </div>
+                </div>
+                <p className="mt-1 text-xs text-[color:var(--cv-text-muted)]">
+                  Modifié {new Date(cv.updatedAt).toLocaleString('fr-FR')}
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Link href={`/editor/${cv.id}`}>
+                    <Button size="sm" variant="secondary">
+                      Éditer
+                    </Button>
+                  </Link>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={duplicate.isPending}
+                    onClick={() => duplicate.mutate(cv.id)}
+                  >
+                    {duplicate.isPending ? '⏳ Duplication…' : 'Dupliquer'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={publish.isPending}
+                    onClick={() =>
+                      publish.mutate(
+                        { id: cv.id, isPublic: !cv.isPublic },
+                        {
+                          onSuccess: (res) => {
+                            if (res.share?.shareUrl && res.share.qrCodeDataUrl) {
+                              setShareInfo({
+                                shareUrl: res.share.shareUrl,
+                                qrCodeDataUrl: res.share.qrCodeDataUrl,
+                              });
+                            } else if (!res.isPublic) {
+                              setShareInfo(null);
+                            }
+                          },
+                        }
+                      )
+                    }
+                  >
+                    {publish.isPending ? '⏳' : cv.isPublic ? 'Dépublier' : 'Partager'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={remove.isPending}
+                    onClick={() => {
+                      if (confirm('Êtes-vous sûr de vouloir supprimer ce CV ?')) {
+                        remove.mutate(cv.id);
+                      }
+                    }}
+                  >
+                    {remove.isPending ? '⏳ Suppression…' : 'Supprimer'}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {hasNextPage ? (
+            <div className="flex justify-center pt-6">
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2"
+                disabled={isFetchingNextPage}
+                onClick={() => void fetchNextPage()}
+              >
+                {isFetchingNextPage ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Chargement…
+                  </>
+                ) : (
+                  'Afficher plus de CV'
+                )}
+              </Button>
+            </div>
+          ) : (
+            <p className="pt-6 text-center text-sm text-[color:var(--cv-text-muted)]">
+              ✓ Tous vos CV sont affichés
+            </p>
+          )}
+        </>
       ) : null}
     </div>
   );

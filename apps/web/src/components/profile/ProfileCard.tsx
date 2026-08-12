@@ -18,11 +18,7 @@ export function ProfileCard({ user, editable, onEdit }: ProfileCardProps) {
         <div className="flex items-center gap-4">
           {user.avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={user.avatarUrl}
-              alt=""
-              className="h-16 w-16 rounded-full object-cover"
-            />
+            <img src={user.avatarUrl} alt="" className="h-16 w-16 rounded-full object-cover" />
           ) : (
             <div
               className="flex h-16 w-16 items-center justify-center rounded-full bg-primary-subtle text-lg font-semibold text-primary"
@@ -35,8 +31,8 @@ export function ProfileCard({ user, editable, onEdit }: ProfileCardProps) {
             <h2 className="text-xl font-semibold">
               {user.firstName} {user.lastName}
             </h2>
-            <p className="text-sm text-[color:var(--cv-text-secondary)]">{user.email}</p>
-            <p className="mt-1 text-xs uppercase tracking-wide text-[color:var(--cv-text-muted)]">
+            <p className="text-sm text-content-secondary">{user.email}</p>
+            <p className="mt-1 text-xs uppercase tracking-wide text-content-muted">
               {user.subscriptionTier}
               {user.isEmailVerified ? ' · email vérifié' : ' · email non vérifié'}
             </p>
@@ -48,20 +44,18 @@ export function ProfileCard({ user, editable, onEdit }: ProfileCardProps) {
           </Button>
         ) : null}
       </div>
-      {user.bio ? (
-        <p className="mt-4 text-sm text-[color:var(--cv-text-secondary)]">{user.bio}</p>
-      ) : null}
+      {user.bio ? <p className="mt-4 text-sm text-content-secondary">{user.bio}</p> : null}
       {(user.phone || user.location) && (
         <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
           {user.phone ? (
             <div>
-              <dt className="text-[color:var(--cv-text-muted)]">Téléphone</dt>
+              <dt className="text-content-muted">Téléphone</dt>
               <dd>{user.phone}</dd>
             </div>
           ) : null}
           {user.location ? (
             <div>
-              <dt className="text-[color:var(--cv-text-muted)]">Localisation</dt>
+              <dt className="text-content-muted">Localisation</dt>
               <dd>{user.location}</dd>
             </div>
           ) : null}

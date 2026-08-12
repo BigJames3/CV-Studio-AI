@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Dialog,
   DialogContent,
@@ -54,6 +54,7 @@ export function PaywallModal({
   cvCount = 0,
   cvLimit = 1,
 }: PaywallModalProps) {
+  const router = useRouter();
   const copy = featureNames[feature] ?? {
     title: '🔒 Fonctionnalité Premium',
     description: 'Cette fonctionnalité est réservée aux utilisateurs Premium.',
@@ -80,7 +81,7 @@ export function PaywallModal({
         {isCvLimit ? (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium text-[color:var(--cv-text-primary)] dark:text-neutral-100">
+              <p className="text-sm font-medium text-content-primary dark:text-neutral-100">
                 {cvCount}/{cvLimit} CV utilisés
               </p>
               <Badge variant="warning">{usagePercent}%</Badge>
@@ -102,10 +103,10 @@ export function PaywallModal({
         ) : null}
 
         <div className="rounded-lg bg-gradient-to-br from-purple-50 to-blue-50 p-4 dark:from-purple-950/40 dark:to-blue-950/40">
-          <p className="mb-2 text-sm font-semibold text-[color:var(--cv-text-primary)] dark:text-neutral-100">
+          <p className="mb-2 text-sm font-semibold text-content-primary dark:text-neutral-100">
             Inclus avec Premium
           </p>
-          <ul className="space-y-1.5 text-sm text-[color:var(--cv-text-secondary)] dark:text-neutral-300">
+          <ul className="space-y-1.5 text-sm text-content-secondary dark:text-neutral-300">
             {PREMIUM_BENEFITS.map((benefit) => (
               <li key={benefit} className="flex items-start gap-2">
                 <span className="mt-0.5 text-purple-600 dark:text-purple-400" aria-hidden>
@@ -121,17 +122,19 @@ export function PaywallModal({
           <Button type="button" variant="outline" onClick={onClose} className="w-full sm:w-auto">
             Plus tard
           </Button>
-          <Link href="/pricing" onClick={onClose} className="w-full sm:w-auto">
-            <Button
-              type="button"
-              className="w-full border-0 bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-1 hover:from-purple-700 hover:to-blue-700"
-            >
-              Passer à Premium
-            </Button>
-          </Link>
+          <Button
+            type="button"
+            className="w-full border-0 bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-1 hover:from-purple-700 hover:to-blue-700 sm:w-auto"
+            onClick={() => {
+              onClose();
+              router.push('/account/billing?utm_source=paywall&utm_medium=modal');
+            }}
+          >
+            Passer à Premium
+          </Button>
         </DialogFooter>
 
-        <p className="text-center text-xs text-[color:var(--cv-text-muted)] dark:text-neutral-500">
+        <p className="text-center text-xs text-content-muted dark:text-neutral-500">
           Premiers 14 jours gratuits
         </p>
       </DialogContent>

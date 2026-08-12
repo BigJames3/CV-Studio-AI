@@ -50,7 +50,7 @@ export default function NewListingPage() {
   return (
     <div className="mx-auto max-w-lg px-4 py-8">
       <h1 className="text-2xl font-semibold">Upload template</h1>
-      <p className="mt-2 text-sm text-[color:var(--cv-text-secondary)]">
+      <p className="mt-2 text-sm text-content-secondary">
         Price $4.99–$49.99 · submit for quality review (≤72h).
       </p>
       <form className="mt-6 space-y-4" onSubmit={onSubmit} data-testid="seller-new-listing-form">
@@ -108,7 +108,7 @@ export default function NewListingPage() {
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-[color:var(--cv-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
           data-testid="seller-listing-submit"
         >
           {pending ? 'Submitting…' : 'Submit for review'}

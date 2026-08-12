@@ -34,7 +34,7 @@ export default function PricingPage() {
   return (
     <div className="mx-auto max-w-content px-4 py-16">
       <h1 className="text-4xl font-semibold">Tarifs simples</h1>
-      <p className="mt-2 text-[color:var(--cv-text-secondary)]">
+      <p className="mt-2 text-content-secondary">
         Sans watermark sur le PDF Free. Annulation self-serve.
       </p>
       <div className="mt-12 grid gap-6 md:grid-cols-3">
@@ -47,7 +47,7 @@ export default function PricingPage() {
           >
             <h2 className="text-xl font-semibold">{p.name}</h2>
             <p className="mt-2 text-3xl font-semibold">{p.price}</p>
-            <ul className="mt-6 space-y-2 text-sm text-[color:var(--cv-text-secondary)]">
+            <ul className="mt-6 space-y-2 text-sm text-content-secondary">
               {p.features.map((f) => (
                 <li key={f}>• {f}</li>
               ))}

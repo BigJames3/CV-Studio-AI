@@ -8,7 +8,7 @@ export function SessionsList() {
   const revoke = useRevokeSession();
 
   if (isLoading) {
-    return <p className="text-sm text-[color:var(--cv-text-secondary)]">Chargement des sessions…</p>;
+    return <p className="text-sm text-content-secondary">Chargement des sessions…</p>;
   }
   if (isError) {
     return <p className="text-sm text-error">Impossible de charger les sessions.</p>;
@@ -16,7 +16,7 @@ export function SessionsList() {
 
   const items = data?.items ?? [];
   if (items.length === 0) {
-    return <p className="text-sm text-[color:var(--cv-text-secondary)]">Aucune session active.</p>;
+    return <p className="text-sm text-content-secondary">Aucune session active.</p>;
   }
 
   return (
@@ -28,7 +28,7 @@ export function SessionsList() {
         >
           <div>
             <p className="font-medium">{s.userAgent?.slice(0, 80) || 'Appareil inconnu'}</p>
-            <p className="text-xs text-[color:var(--cv-text-muted)]">
+            <p className="text-xs text-content-muted">
               {s.ipAddress || 'IP inconnue'} · expire {new Date(s.expiresAt).toLocaleString()}
             </p>
           </div>

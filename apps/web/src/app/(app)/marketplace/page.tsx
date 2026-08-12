@@ -37,7 +37,7 @@ export default function MarketplacePage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Marketplace</h1>
-          <p className="mt-2 max-w-xl text-sm text-[color:var(--cv-text-secondary)]">
+          <p className="mt-2 max-w-xl text-sm text-content-secondary">
             Templates premium par créateurs indépendants. Les vendeurs gardent 70%.
           </p>
         </div>
@@ -47,9 +47,7 @@ export default function MarketplacePage() {
       </div>
 
       {isLoading && <p className="mt-8 text-sm">Chargement…</p>}
-      {isError && (
-        <p className="mt-8 text-sm text-error">Impossible de charger le marketplace.</p>
-      )}
+      {isError && <p className="mt-8 text-sm text-error">Impossible de charger le marketplace.</p>}
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((item) => (
@@ -67,14 +65,14 @@ export default function MarketplacePage() {
               }
             />
             <h2 className="font-semibold">{item.title}</h2>
-            <p className="mt-1 text-sm text-[color:var(--cv-text-secondary)]">
+            <p className="mt-1 text-sm text-content-secondary">
               {(item.priceCents / 100).toFixed(2)} {item.currency}
               {item.ratingAvg != null ? ` · ★ ${Number(item.ratingAvg).toFixed(1)}` : ''}
             </p>
           </Link>
         ))}
         {!isLoading && items.length === 0 && (
-          <p className="col-span-full text-sm text-[color:var(--cv-text-secondary)]">
+          <p className="col-span-full text-sm text-content-secondary">
             Aucune listing publiée pour le moment. Devenez vendeur pour en créer.
           </p>
         )}

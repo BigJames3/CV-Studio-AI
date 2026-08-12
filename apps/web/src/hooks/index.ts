@@ -9,24 +9,17 @@ import { ApiError } from '@/lib/api/client';
 import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCvsInfinite } from '@/hooks/useCvsInfinite';
+import { useMe, useUserPlan } from '@/hooks/useMe';
 
-export { useCvsInfinite };
-
-export function useMe() {
-  return useQuery({
-    queryKey: queryKeys.me,
-    queryFn: () => authApi.getProfile(),
-    retry: false,
-    staleTime: 5 * 60_000,
-  });
-}
+export { useCvsInfinite, useMe, useUserPlan };
+export type { User, SubscriptionTier } from '@/hooks/useMe';
 
 export function useUpdateProfile() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: authApi.updateProfile,
     onSuccess: (data) => {
-      qc.setQueryData(queryKeys.me, data);
+      qc.setQueryData(queryKeys.user.me(), data);
       useAuthStore.getState().setUser({
         id: data.id,
         email: data.email,
@@ -118,7 +111,7 @@ export function useLogin() {
       authApi.login(email, password, totp),
     onSuccess: (data) => {
       if (!('requires2fa' in data)) {
-        qc.invalidateQueries({ queryKey: queryKeys.me });
+        qc.invalidateQueries({ queryKey: queryKeys.user.me() });
       }
     },
   });
@@ -128,7 +121,7 @@ export function useRegister() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: authApi.register,
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.me }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.user.me() }),
   });
 }
 

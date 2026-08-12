@@ -137,7 +137,7 @@ export function EditorShell({ resumeId }: { resumeId: string }) {
     <div className="editor-shell flex h-[calc(100dvh-3.5rem)] flex-col" data-testid="cv-editor">
       <div className="flex items-center justify-between border-b border-border bg-surface-card px-3 py-2">
         <div className="flex items-center gap-3">
-          <div className="text-sm text-[color:var(--cv-text-secondary)]" aria-live="polite">
+          <div className="text-sm text-content-secondary" aria-live="polite">
             {saveStatus === 'saving' && 'Enregistrement…'}
             {saveStatus === 'saved' && 'Enregistré'}
             {saveStatus === 'error' && 'Impossible d’enregistrer'}
@@ -281,7 +281,7 @@ export function EditorShell({ resumeId }: { resumeId: string }) {
             <AtsPanel cvId={resumeId} onClose={() => setDrawer('template')} />
           ) : (
             <>
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--cv-text-secondary)]">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-content-secondary">
                 Style
               </p>
               <label className="mb-3 flex items-center justify-between text-sm">

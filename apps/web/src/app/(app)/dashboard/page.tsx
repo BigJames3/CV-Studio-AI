@@ -5,11 +5,13 @@ import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useCreateCv } from '@/hooks';
+import { useCreateCv, useMe, useUserPlan } from '@/hooks';
 import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 import { useCvMutations } from '@/hooks/useCvMutations';
 
 export default function DashboardPage() {
+  const { data: user } = useMe();
+  const { isFree, tier } = useUserPlan();
   const { data, isLoading, isError, isFetchingNextPage, hasNextPage, fetchNextPage } =
     useCvsInfinite();
   const createCv = useCreateCv();
@@ -22,6 +24,7 @@ export default function DashboardPage() {
   } | null>(null);
 
   const cvs = data?.pages.flatMap((page) => page.items) ?? [];
+  const firstName = user?.firstName?.trim();
 
   const commitRename = (id: string, currentTitle: string) => {
     const next = renameValue.trim();
@@ -35,13 +38,34 @@ export default function DashboardPage() {
     <div className="mx-auto max-w-content px-4 py-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold">Dashboard</h1>
-          <p className="text-[color:var(--cv-text-secondary)]">
+          <h1 className="text-3xl font-semibold">
+            {firstName ? `Bonjour, ${firstName}` : 'Dashboard'}
+          </h1>
+          <p className="text-content-secondary">
             {cvs.length} CV{cvs.length === 1 ? '' : 's'}
             {hasNextPage ? '+' : ''}
+            {user ? (
+              <>
+                {' '}
+                · Plan{' '}
+                <Link
+                  href="/account/billing"
+                  className="capitalize text-primary underline-offset-2 hover:underline"
+                >
+                  {tier}
+                </Link>
+              </>
+            ) : null}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {isFree ? (
+            <Link href="/account/billing">
+              <Button variant="outline" size="sm">
+                Passer à Pro
+              </Button>
+            </Link>
+          ) : null}
           <Link href="/dashboard/templates">
             <Button variant="secondary">Nouveau depuis template</Button>
           </Link>
@@ -93,7 +117,7 @@ export default function DashboardPage() {
       {!isLoading && !isError && cvs.length === 0 ? (
         <div className="mt-8 rounded-lg border border-dashed border-border p-10 text-center">
           <p className="font-medium">Votre premier CV commence ici</p>
-          <p className="mt-1 text-sm text-[color:var(--cv-text-secondary)]">
+          <p className="mt-1 text-sm text-content-secondary">
             Créez un document et éditez-le en dual-pane live.
           </p>
         </div>
@@ -153,7 +177,7 @@ export default function DashboardPage() {
                     </Button>
                   </div>
                 </div>
-                <p className="mt-1 text-xs text-[color:var(--cv-text-muted)]">
+                <p className="mt-1 text-xs text-content-muted">
                   Modifié {new Date(cv.updatedAt).toLocaleString('fr-FR')}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -231,7 +255,7 @@ export default function DashboardPage() {
               </Button>
             </div>
           ) : (
-            <p className="pt-6 text-center text-sm text-[color:var(--cv-text-muted)]">
+            <p className="pt-6 text-center text-sm text-content-muted">
               ✓ Tous vos CV sont affichés
             </p>
           )}

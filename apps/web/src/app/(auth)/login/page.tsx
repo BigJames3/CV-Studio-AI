@@ -35,7 +35,7 @@ export default function LoginPage() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 py-12">
       <h1 className="text-2xl font-semibold">Connexion</h1>
-      <p className="mt-1 text-sm text-[color:var(--cv-text-secondary)]">
+      <p className="mt-1 text-sm text-content-secondary">
         Pas de compte ?{' '}
         <Link href="/register" className="text-primary">
           Créer un compte
@@ -55,7 +55,7 @@ export default function LoginPage() {
             }
           })}
         >
-          <p className="text-sm text-[color:var(--cv-text-secondary)]">
+          <p className="text-sm text-content-secondary">
             Entrez le code de votre application d’authentification.
           </p>
           <div>
@@ -81,9 +81,7 @@ export default function LoginPage() {
           >
             Retour
           </button>
-          {login.isError && (
-            <p className="text-sm text-error">Code invalide ou session expirée.</p>
-          )}
+          {login.isError && <p className="text-sm text-error">Code invalide ou session expirée.</p>}
         </form>
       ) : (
         <>
@@ -114,17 +112,22 @@ export default function LoginPage() {
                 {...form.register('password')}
               />
             </div>
-            <Button type="submit" className="w-full" disabled={login.isPending} data-testid="login-submit">
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={login.isPending}
+              data-testid="login-submit"
+            >
               {login.isPending ? 'Connexion…' : 'Se connecter'}
             </Button>
             {login.isError && (
               <p className="text-sm text-error">Identifiants invalides ou API indisponible.</p>
             )}
           </form>
-          <div className="my-6 flex items-center gap-3 text-xs text-[color:var(--cv-text-secondary)]">
-            <div className="h-px flex-1 bg-[color:var(--cv-border)]" />
+          <div className="my-6 flex items-center gap-3 text-xs text-content-secondary">
+            <div className="h-px flex-1 bg-border" />
             ou
-            <div className="h-px flex-1 bg-[color:var(--cv-border)]" />
+            <div className="h-px flex-1 bg-border" />
           </div>
           <div className="space-y-3">
             <GoogleSignInButton nextPath={nextPath} />

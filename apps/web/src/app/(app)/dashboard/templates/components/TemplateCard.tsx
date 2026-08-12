@@ -29,16 +29,14 @@ export function TemplateCard({
         }}
       >
         <div className="flex h-full flex-col justify-end p-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-[color:var(--cv-text-secondary)]">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-content-secondary">
             {template.category.replace('_', ' ')}
           </span>
           <span className="text-sm font-semibold">{template.name}</span>
         </div>
       </div>
-      <p className="line-clamp-2 text-xs text-[color:var(--cv-text-secondary)]">
-        {template.description}
-      </p>
-      <div className="mt-2 flex items-center justify-between text-xs text-[color:var(--cv-text-secondary)]">
+      <p className="line-clamp-2 text-xs text-content-secondary">{template.description}</p>
+      <div className="mt-2 flex items-center justify-between text-xs text-content-secondary">
         <span>★ {template.rating.toFixed(1)}</span>
         {template.isPremium ? (
           <span className="rounded-full bg-secondary/10 px-2 py-0.5 font-semibold text-secondary">

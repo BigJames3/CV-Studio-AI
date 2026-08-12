@@ -22,6 +22,7 @@ const config: Config = {
           subtle: 'var(--cv-color-primary-subtle)',
           foreground: 'hsl(var(--primary-foreground) / <alpha-value>)',
         },
+        // Brand purple — NOT body copy. For gray text use content.secondary.
         secondary: {
           DEFAULT: 'var(--cv-color-secondary)',
           subtle: 'var(--cv-color-secondary-subtle)',
@@ -35,6 +36,14 @@ const config: Config = {
         muted: {
           DEFAULT: 'hsl(var(--muted) / <alpha-value>)',
           foreground: 'hsl(var(--muted-foreground) / <alpha-value>)',
+        },
+        // Semantic text (gray scale) — use text-content-* to avoid colliding with text-secondary (brand).
+        content: {
+          primary: 'var(--cv-text-primary)',
+          secondary: 'var(--cv-text-secondary)',
+          muted: 'var(--cv-text-muted)',
+          disabled: 'var(--cv-text-disabled)',
+          'on-primary': 'var(--cv-text-on-primary)',
         },
         destructive: {
           DEFAULT: 'hsl(var(--destructive) / <alpha-value>)',

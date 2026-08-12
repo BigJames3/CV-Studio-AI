@@ -10,7 +10,8 @@
   }
 
   body {
-    @apply bg-surface-app text-[color:var(--cv-text-primary)] font-sans antialiased;
+    @apply bg-surface-app font-sans antialiased;
+    color: var(--cv-text-primary);
   }
 
   :focus-visible {

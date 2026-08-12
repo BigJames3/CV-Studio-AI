@@ -32,12 +32,15 @@ export default function ProfilePage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-8" data-testid="profile-page">
       <h1 className="text-3xl font-semibold">Mon Profil</h1>
-      <p className="mt-2 text-sm text-[color:var(--cv-text-secondary)]">
+      <p className="mt-2 text-sm text-content-secondary">
         Vos informations de compte et paramètres de sécurité.
       </p>
 
       {savedMsg ? (
-        <p className="mt-4 rounded-md bg-primary-subtle px-3 py-2 text-sm text-primary" role="status">
+        <p
+          className="mt-4 rounded-md bg-primary-subtle px-3 py-2 text-sm text-primary"
+          role="status"
+        >
           {savedMsg}
         </p>
       ) : null}
@@ -61,7 +64,7 @@ export default function ProfilePage() {
       <section className="mt-10 space-y-4">
         <h2 className="text-xl font-semibold">Sécurité</h2>
         <div>
-          <h3 className="mb-3 text-sm font-medium text-[color:var(--cv-text-secondary)]">
+          <h3 className="mb-3 text-sm font-medium text-content-secondary">
             Changer le mot de passe
           </h3>
           <ChangePasswordForm
@@ -73,12 +76,10 @@ export default function ProfilePage() {
           />
         </div>
         <div>
-          <h3 className="mb-3 text-sm font-medium text-[color:var(--cv-text-secondary)]">
-            Sessions actives
-          </h3>
+          <h3 className="mb-3 text-sm font-medium text-content-secondary">Sessions actives</h3>
           <SessionsList />
         </div>
-        <p className="text-xs text-[color:var(--cv-text-muted)]">
+        <p className="text-xs text-content-muted">
           Authentification à deux facteurs (TOTP) : prévue en Phase 2.
         </p>
       </section>

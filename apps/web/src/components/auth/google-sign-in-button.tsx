@@ -75,7 +75,7 @@ export function GoogleSignInButton({ nextPath = '/dashboard' }: Props) {
     <div className="space-y-2">
       <div ref={btnRef} className="flex min-h-10 w-full justify-center" />
       {!ready && !error && (
-        <p className="text-center text-xs text-[color:var(--cv-text-secondary)]">Chargement Google…</p>
+        <p className="text-center text-xs text-content-secondary">Chargement Google…</p>
       )}
       {error && <p className="text-sm text-error">{error}</p>}
     </div>

@@ -19,7 +19,7 @@ export default function RegisterPage() {
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 py-12">
       <h1 className="text-2xl font-semibold">Créer un compte</h1>
-      <p className="mt-1 text-sm text-[color:var(--cv-text-secondary)]">
+      <p className="mt-1 text-sm text-content-secondary">
         Déjà inscrit ?{' '}
         <Link href="/login" className="text-primary">
           Se connecter
@@ -50,14 +50,19 @@ export default function RegisterPage() {
           <Label htmlFor="password">Mot de passe</Label>
           <Input id="password" type="password" {...form.register('password')} />
         </div>
-        <Button type="submit" className="w-full" disabled={registerMutation.isPending} data-testid="register-submit">
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={registerMutation.isPending}
+          data-testid="register-submit"
+        >
           Créer mon compte
         </Button>
       </form>
-      <div className="my-6 flex items-center gap-3 text-xs text-[color:var(--cv-text-secondary)]">
-        <div className="h-px flex-1 bg-[color:var(--cv-border)]" />
+      <div className="my-6 flex items-center gap-3 text-xs text-content-secondary">
+        <div className="h-px flex-1 bg-border" />
         ou
-        <div className="h-px flex-1 bg-[color:var(--cv-border)]" />
+        <div className="h-px flex-1 bg-border" />
       </div>
       <div className="space-y-3">
         <GoogleSignInButton nextPath="/dashboard" />

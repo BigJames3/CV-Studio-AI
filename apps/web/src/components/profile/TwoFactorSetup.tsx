@@ -42,7 +42,7 @@ export function TwoFactorSetup({ enabled }: { enabled?: boolean }) {
       setSetup(null);
       setCode('');
       setMessage('2FA activée');
-      await qc.invalidateQueries({ queryKey: queryKeys.me });
+      await qc.invalidateQueries({ queryKey: queryKeys.user.me() });
     } catch {
       setError('Code invalide');
     } finally {
@@ -57,7 +57,7 @@ export function TwoFactorSetup({ enabled }: { enabled?: boolean }) {
       await authApi.disable2fa(disableCode);
       setDisableCode('');
       setMessage('2FA désactivée');
-      await qc.invalidateQueries({ queryKey: queryKeys.me });
+      await qc.invalidateQueries({ queryKey: queryKeys.user.me() });
     } catch {
       setError('Code invalide');
     } finally {
@@ -66,9 +66,12 @@ export function TwoFactorSetup({ enabled }: { enabled?: boolean }) {
   }
 
   return (
-    <div className="mt-8 space-y-4 rounded-lg border border-border p-4" data-testid="two-factor-setup">
+    <div
+      className="mt-8 space-y-4 rounded-lg border border-border p-4"
+      data-testid="two-factor-setup"
+    >
       <h2 className="text-lg font-semibold">Authentification à deux facteurs (TOTP)</h2>
-      <p className="text-sm text-[color:var(--cv-text-secondary)]">
+      <p className="text-sm text-content-secondary">
         Sécurisez votre compte avec une app type Google Authenticator ou Authy.
       </p>
 
@@ -85,7 +88,12 @@ export function TwoFactorSetup({ enabled }: { enabled?: boolean }) {
               inputMode="numeric"
             />
           </div>
-          <Button type="button" variant="secondary" disabled={busy || disableCode.length !== 6} onClick={disable}>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy || disableCode.length !== 6}
+            onClick={disable}
+          >
             Désactiver la 2FA
           </Button>
         </div>
@@ -93,9 +101,7 @@ export function TwoFactorSetup({ enabled }: { enabled?: boolean }) {
         <div className="space-y-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={setup.qrCodeDataUrl} alt="QR code 2FA" className="h-[220px] w-[220px]" />
-          <p className="break-all font-mono text-xs text-[color:var(--cv-text-secondary)]">
-            {setup.secret}
-          </p>
+          <p className="break-all font-mono text-xs text-content-secondary">{setup.secret}</p>
           <div>
             <Label htmlFor="enable-totp">Code de confirmation</Label>
             <Input

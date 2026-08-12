@@ -11,8 +11,8 @@ const buttonVariants = cva(
         primary: 'bg-primary text-white hover:bg-primary-hover shadow-1',
         secondary: 'bg-secondary-subtle text-secondary border border-secondary/20',
         outline:
-          'border border-border bg-transparent text-[color:var(--cv-text-primary)] hover:bg-[color:var(--cv-color-neutral-100)] dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-800',
-        ghost: 'hover:bg-[color:var(--cv-color-neutral-100)] text-[color:var(--cv-text-secondary)]',
+          'border border-border bg-transparent text-content-primary hover:bg-[color:var(--cv-color-neutral-100)] dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-800',
+        ghost: 'hover:bg-[color:var(--cv-color-neutral-100)] text-content-secondary',
         destructive: 'bg-error text-white',
         link: 'text-primary underline-offset-4 hover:underline h-auto min-h-0 px-0',
       },

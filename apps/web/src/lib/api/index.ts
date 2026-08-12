@@ -2,7 +2,13 @@ import { apiClient, setAccessToken } from './client';
 import { useAuthStore } from '@/stores/auth-store';
 
 export const queryKeys = {
-  me: ['me'] as const,
+  user: {
+    all: () => ['user'] as const,
+    me: () => ['user', 'me'] as const,
+    profile: () => ['user', 'profile'] as const,
+  },
+  /** @deprecated Prefer queryKeys.user.me() */
+  me: ['user', 'me'] as const,
   cvs: (filters?: unknown) => ['cvs', filters] as const,
   cv: (id: string) => ['cvs', id] as const,
   templates: (q?: unknown) => ['templates', q] as const,
@@ -168,6 +174,7 @@ export type UpdateProfileInput = {
 
 export const usersApi = {
   me: () => apiClient<UserProfile>('/users/me'),
+  getMe: () => apiClient<UserProfile>('/users/me'),
   updateMe: (body: UpdateProfileInput) =>
     apiClient<UserProfile>('/users/me', { method: 'PATCH', body }),
 };

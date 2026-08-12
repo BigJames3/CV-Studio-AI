@@ -58,7 +58,7 @@ export function AtsPanel({ cvId, onClose }: Props) {
   return (
     <div className="flex h-full flex-col" data-testid="ats-panel">
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--cv-text-secondary)]">
+        <p className="text-xs font-semibold uppercase tracking-wide text-content-secondary">
           Score ATS
         </p>
         <button
@@ -71,7 +71,7 @@ export function AtsPanel({ cvId, onClose }: Props) {
         </button>
       </div>
 
-      <p className="mb-3 text-sm text-[color:var(--cv-text-secondary)]">
+      <p className="mb-3 text-sm text-content-secondary">
         Vérifiez la lisibilité machine et l’alignement mots-clés avec une offre (optionnel).
       </p>
 
@@ -115,14 +115,14 @@ export function AtsPanel({ cvId, onClose }: Props) {
             <p className={cn('text-3xl font-semibold tabular-nums', scoreTone(report.atsScore))}>
               {Math.round(report.atsScore)}
             </p>
-            <p className="text-xs text-[color:var(--cv-text-secondary)]">/ 100</p>
+            <p className="text-xs text-content-secondary">/ 100</p>
             {report.explanation ? (
               <p className="mt-2 text-sm" data-testid="ats-explanation">
                 {report.explanation}
               </p>
             ) : null}
             {!jobDescription.trim() && (
-              <p className="mt-2 text-xs text-[color:var(--cv-text-secondary)]">
+              <p className="mt-2 text-xs text-content-secondary">
                 Score structure (sans offre). Ajoutez une JD pour le matching mots-clés.
               </p>
             )}
@@ -130,7 +130,7 @@ export function AtsPanel({ cvId, onClose }: Props) {
 
           {report.improvements && report.improvements.length > 0 ? (
             <div data-testid="ats-improvements">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--cv-text-secondary)]">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-content-secondary">
                 Quick wins
               </p>
               <ul className="list-disc space-y-1.5 pl-4 text-sm">
@@ -143,7 +143,7 @@ export function AtsPanel({ cvId, onClose }: Props) {
 
           {report.missingKeywords && report.missingKeywords.length > 0 && (
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--cv-text-secondary)]">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-content-secondary">
                 Mots-clés manquants
               </p>
               <ul className="flex flex-wrap gap-1.5">
@@ -161,7 +161,7 @@ export function AtsPanel({ cvId, onClose }: Props) {
 
           {report.matchedKeywords && report.matchedKeywords.length > 0 && (
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--cv-text-secondary)]">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-content-secondary">
                 Mots-clés couverts
               </p>
               <ul className="flex flex-wrap gap-1.5">
@@ -179,20 +179,21 @@ export function AtsPanel({ cvId, onClose }: Props) {
 
           {(report.recommendations?.format?.length || report.recommendations?.content?.length) && (
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--cv-text-secondary)]">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-content-secondary">
                 Recommandations
               </p>
               <ul className="list-disc space-y-1.5 pl-4 text-sm">
-                {[...(report.recommendations?.format ?? []), ...(report.recommendations?.content ?? [])].map(
-                  (tip) => (
-                    <li key={tip}>{tip}</li>
-                  )
-                )}
+                {[
+                  ...(report.recommendations?.format ?? []),
+                  ...(report.recommendations?.content ?? []),
+                ].map((tip) => (
+                  <li key={tip}>{tip}</li>
+                ))}
               </ul>
             </div>
           )}
 
-          <p className="text-[10px] leading-relaxed text-[color:var(--cv-text-secondary)]">
+          <p className="text-[10px] leading-relaxed text-content-secondary">
             Indication heuristique — ne garantit pas le passage de tous les ATS.
           </p>
         </div>

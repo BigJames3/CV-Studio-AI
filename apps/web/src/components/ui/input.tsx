@@ -10,7 +10,7 @@ export const Input = React.forwardRef<
     type={type}
     className={cn(
       'flex h-10 w-full rounded-md border border-border bg-surface-card px-3 py-2 text-sm',
-      'placeholder:text-[color:var(--cv-text-muted)]',
+      'placeholder:text-content-muted',
       'disabled:cursor-not-allowed disabled:opacity-50',
       className
     )}
@@ -22,10 +22,7 @@ Input.displayName = 'Input';
 export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) {
   return (
     <label
-      className={cn(
-        'mb-1.5 block text-sm font-medium text-[color:var(--cv-text-primary)]',
-        className
-      )}
+      className={cn('mb-1.5 block text-sm font-medium text-content-primary', className)}
       {...props}
     />
   );

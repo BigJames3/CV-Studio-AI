@@ -11,7 +11,7 @@ export default function SellerPayoutsPage() {
   return (
     <div className="mx-auto max-w-content px-4 py-8">
       <h1 className="text-2xl font-semibold">Payouts</h1>
-      <p className="mt-2 text-sm text-[color:var(--cv-text-secondary)]">
+      <p className="mt-2 text-sm text-content-secondary">
         Weekly Stripe Connect transfers · minimum $25 · new sellers: 14-day 10% reserve.
       </p>
     </div>

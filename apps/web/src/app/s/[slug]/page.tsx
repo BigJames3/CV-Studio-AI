@@ -52,7 +52,7 @@ export default async function PublicCvPage({ params }: { params: { slug: string 
     return (
       <main id="main" className="mx-auto max-w-3xl px-4 py-16">
         <h1 className="text-2xl font-semibold">CV introuvable</h1>
-        <p className="mt-2 text-sm text-[color:var(--cv-text-secondary)]">
+        <p className="mt-2 text-sm text-content-secondary">
           Ce CV n’est pas disponible ou n’est plus public.
         </p>
       </main>
@@ -68,19 +68,15 @@ export default async function PublicCvPage({ params }: { params: { slug: string 
   return (
     <main id="main" className="mx-auto max-w-3xl px-4 py-12">
       <header className="border-b border-border pb-6">
-        <p className="text-sm text-[color:var(--cv-text-muted)]">CV Studio AI · partage public</p>
+        <p className="text-sm text-content-muted">CV Studio AI · partage public</p>
         <h1 className="mt-2 text-3xl font-semibold">{identity.fullName || cv.title}</h1>
-        {identity.title && (
-          <p className="mt-1 text-lg text-[color:var(--cv-text-secondary)]">{identity.title}</p>
-        )}
-        {identity.email && (
-          <p className="mt-2 text-sm text-[color:var(--cv-text-muted)]">{identity.email}</p>
-        )}
+        {identity.title && <p className="mt-1 text-lg text-content-secondary">{identity.title}</p>}
+        {identity.email && <p className="mt-2 text-sm text-content-muted">{identity.email}</p>}
       </header>
 
       {summary && (
         <section className="mt-8">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--cv-text-muted)]">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-content-muted">
             Résumé
           </h2>
           <p className="mt-2 whitespace-pre-wrap">{summary}</p>
@@ -89,7 +85,7 @@ export default async function PublicCvPage({ params }: { params: { slug: string 
 
       {experiences.length > 0 && (
         <section className="mt-8">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--cv-text-muted)]">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-content-muted">
             Expérience
           </h2>
           <ul className="mt-3 space-y-4">
@@ -100,12 +96,12 @@ export default async function PublicCvPage({ params }: { params: { slug: string 
                   {exp.company ? ` · ${exp.company}` : ''}
                 </p>
                 {(exp.startDate || exp.endDate) && (
-                  <p className="text-xs text-[color:var(--cv-text-muted)]">
+                  <p className="text-xs text-content-muted">
                     {[exp.startDate, exp.endDate].filter(Boolean).join(' — ')}
                   </p>
                 )}
                 {exp.description && (
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-[color:var(--cv-text-secondary)]">
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-content-secondary">
                     {exp.description}
                   </p>
                 )}
@@ -117,7 +113,7 @@ export default async function PublicCvPage({ params }: { params: { slug: string 
 
       {education.length > 0 && (
         <section className="mt-8">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--cv-text-muted)]">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-content-muted">
             Formation
           </h2>
           <ul className="mt-3 space-y-2">
@@ -134,10 +130,10 @@ export default async function PublicCvPage({ params }: { params: { slug: string 
 
       {skills.length > 0 && (
         <section className="mt-8">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--cv-text-muted)]">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-content-muted">
             Compétences
           </h2>
-          <p className="mt-2 text-sm text-[color:var(--cv-text-secondary)]">
+          <p className="mt-2 text-sm text-content-secondary">
             {skills
               .map((s) => (typeof s === 'string' ? s : s.name))
               .filter(Boolean)

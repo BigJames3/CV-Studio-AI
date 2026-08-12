@@ -26,14 +26,14 @@ export function TemplateCustomizer({
     >
       <div>
         <h2 className="text-sm font-semibold">Customize</h2>
-        <p className="mt-1 text-xs text-[color:var(--cv-text-secondary)]">
+        <p className="mt-1 text-xs text-content-secondary">
           Live preview updates instantly. Saved on your CV when you create.
         </p>
       </div>
 
       {!atsLocked ? (
         <fieldset className="space-y-3">
-          <legend className="text-xs font-semibold uppercase tracking-wide text-[color:var(--cv-text-secondary)]">
+          <legend className="text-xs font-semibold uppercase tracking-wide text-content-secondary">
             Colors
           </legend>
           <ColorField
@@ -65,13 +65,13 @@ export function TemplateCustomizer({
           </div>
         </fieldset>
       ) : (
-        <p className="text-xs text-[color:var(--cv-text-secondary)]">
+        <p className="text-xs text-content-secondary">
           ATS template locks colors to black on white for maximum parseability.
         </p>
       )}
 
       <fieldset className="space-y-3">
-        <legend className="text-xs font-semibold uppercase tracking-wide text-[color:var(--cv-text-secondary)]">
+        <legend className="text-xs font-semibold uppercase tracking-wide text-content-secondary">
           Fonts
         </legend>
         <div>
@@ -107,7 +107,7 @@ export function TemplateCustomizer({
       </fieldset>
 
       <fieldset>
-        <legend className="text-xs font-semibold uppercase tracking-wide text-[color:var(--cv-text-secondary)]">
+        <legend className="text-xs font-semibold uppercase tracking-wide text-content-secondary">
           Size
         </legend>
         <div className="mt-2 flex gap-2">
@@ -130,7 +130,7 @@ export function TemplateCustomizer({
       </fieldset>
 
       <fieldset className="space-y-2">
-        <legend className="text-xs font-semibold uppercase tracking-wide text-[color:var(--cv-text-secondary)]">
+        <legend className="text-xs font-semibold uppercase tracking-wide text-content-secondary">
           Sections
         </legend>
         <Toggle

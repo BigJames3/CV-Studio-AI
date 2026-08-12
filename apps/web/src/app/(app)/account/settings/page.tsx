@@ -37,7 +37,7 @@ export default function SettingsPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold">Paramètres</h1>
-          <p className="mt-2 text-sm text-[color:var(--cv-text-secondary)]">
+          <p className="mt-2 text-sm text-content-secondary">
             Gérez votre profil, la sécurité et les sessions.
           </p>
         </div>
@@ -56,7 +56,7 @@ export default function SettingsPage() {
             className={
               tab === t.id
                 ? 'border-b-2 border-primary px-3 py-2 text-sm font-medium text-primary'
-                : 'px-3 py-2 text-sm text-[color:var(--cv-text-secondary)]'
+                : 'px-3 py-2 text-sm text-content-secondary'
             }
             onClick={() => setTab(t.id)}
           >

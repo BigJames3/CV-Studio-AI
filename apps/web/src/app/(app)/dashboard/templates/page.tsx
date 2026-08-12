@@ -25,7 +25,7 @@ export default function TemplatesPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Choose a template</h1>
-          <p className="mt-2 max-w-xl text-sm text-[color:var(--cv-text-secondary)]">
+          <p className="mt-2 max-w-xl text-sm text-content-secondary">
             Five professional layouts — customize colors, fonts, and sections, then create your CV.
             Preview updates in real time.
           </p>

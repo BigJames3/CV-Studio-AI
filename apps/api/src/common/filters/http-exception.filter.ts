@@ -7,11 +7,14 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { SentryExceptionCaptured } from '@sentry/nestjs';
+import { captureServerEvent } from '../../lib/analytics/posthog-server';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
 
+  @SentryExceptionCaptured()
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -41,6 +44,16 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       }
     } else if (exception instanceof Error) {
       this.logger.error(exception.message, exception.stack, requestId);
+    }
+
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      const userId = (request as Request & { user?: { id?: string } }).user?.id;
+      const err = exception instanceof Error ? exception : new Error(String(exception));
+      captureServerEvent(userId || 'anonymous', 'error_occurred', {
+        error: err.message.slice(0, 500),
+        context: request.url,
+        status,
+      });
     }
 
     response.status(status).json({

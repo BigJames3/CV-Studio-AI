@@ -10,6 +10,7 @@ import {
 } from 'next/font/google';
 import { AppProviders } from '@/providers/app-providers';
 import { absoluteUrl } from '@/lib/utils';
+import './tokens.css';
 import './globals.css';
 
 const inter = Inter({

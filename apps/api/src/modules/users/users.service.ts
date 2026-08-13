@@ -2,12 +2,14 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.module';
 import { AuthSessionService } from '../auth/auth-session.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { AnalyticsEventsService } from '../analytics/analytics-events.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly sessions: AuthSessionService
+    private readonly sessions: AuthSessionService,
+    private readonly analyticsEvents: AnalyticsEventsService
   ) {}
 
   async me(userId: string) {
@@ -23,6 +25,7 @@ export class UsersService {
         location: true,
         bio: true,
         subscriptionTier: true,
+        subscriptionEndDate: true,
         isEmailVerified: true,
         is2faEnabled: true,
         lastLoginAt: true,
@@ -41,7 +44,7 @@ export class UsersService {
           ? null
           : dto.avatarUrl;
 
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id: userId },
       data: {
         ...(dto.firstName !== undefined ? { firstName: dto.firstName } : {}),
@@ -64,6 +67,8 @@ export class UsersService {
         updatedAt: true,
       },
     });
+    this.analyticsEvents.trackSettingsUpdated(userId, 'profile');
+    return updated;
   }
 
   async deleteMe(userId: string) {

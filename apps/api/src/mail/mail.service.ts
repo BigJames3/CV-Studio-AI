@@ -83,4 +83,29 @@ export class MailService implements OnModuleInit {
       html: `<p>Your payment of <strong>${amountLabel}</strong> failed.</p><p>${retryLine}</p><p><a href="${billingUrl}">Update billing</a></p>`,
     });
   }
+
+  async sendSubscriptionCancelScheduled(to: string, opts: { plan: string; accessUntil: Date }) {
+    const dateLabel = opts.accessUntil.toLocaleDateString('fr-FR', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const billingUrl = `${this.appUrl}/account/billing`;
+    await this.send({
+      to,
+      subject: 'Annulation programmée — CV Studio AI',
+      text: `Votre abonnement ${opts.plan} est annulé. Accès jusqu'au ${dateLabel}. Réactivez ici: ${billingUrl}`,
+      html: `<p>Votre abonnement <strong>${opts.plan}</strong> est programmé pour annulation.</p><p>Vous conservez l'accès jusqu'au <strong>${dateLabel}</strong>.</p><p><a href="${billingUrl}">Gérer ou réactiver</a></p>`,
+    });
+  }
+
+  async sendSubscriptionReactivated(to: string, opts: { plan: string }) {
+    const billingUrl = `${this.appUrl}/account/billing`;
+    await this.send({
+      to,
+      subject: 'Abonnement réactivé — CV Studio AI',
+      text: `Votre abonnement ${opts.plan} est à nouveau actif et se renouvellera automatiquement. ${billingUrl}`,
+      html: `<p>Votre abonnement <strong>${opts.plan}</strong> a été réactivé.</p><p>Le renouvellement automatique est rétabli.</p><p><a href="${billingUrl}">Voir la facturation</a></p>`,
+    });
+  }
 }

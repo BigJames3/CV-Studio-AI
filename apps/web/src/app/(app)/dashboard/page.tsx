@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { useCreateCv, useMe, useUserPlan } from '@/hooks';
 import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 import { useCvMutations } from '@/hooks/useCvMutations';
+import { track } from '@/lib/analytics';
 
 export default function DashboardPage() {
   const { data: user } = useMe();
@@ -25,6 +26,10 @@ export default function DashboardPage() {
 
   const cvs = data?.pages.flatMap((page) => page.items) ?? [];
   const firstName = user?.firstName?.trim();
+
+  useEffect(() => {
+    track('dashboard_accessed');
+  }, []);
 
   const commitRename = (id: string, currentTitle: string) => {
     const next = renameValue.trim();

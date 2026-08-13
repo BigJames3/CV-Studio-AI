@@ -11,11 +11,13 @@ import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../../database/prisma.module';
 import { RedisService } from '../../redis/redis.module';
 import { MailService } from '../../mail/mail.service';
+import { EmailService } from '../email/email.service';
 import { AuthSessionService, SessionMeta } from './auth-session.service';
 import { AuthRateLimitService } from './auth-rate-limit.service';
 import { AuthAuditService } from './auth-audit.service';
 import { TotpService } from './totp.service';
 import { decryptUtf8, encryptUtf8 } from './crypto.util';
+import { AnalyticsEventsService } from '../analytics/analytics-events.service';
 import {
   RegisterDto,
   LoginDto,
@@ -47,10 +49,12 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly redis: RedisService,
     private readonly mail: MailService,
+    private readonly emailService: EmailService,
     private readonly sessions: AuthSessionService,
     private readonly rateLimit: AuthRateLimitService,
     private readonly audit: AuthAuditService,
-    private readonly totp: TotpService
+    private readonly totp: TotpService,
+    private readonly analyticsEvents: AnalyticsEventsService
   ) {}
 
   async register(dto: RegisterDto, ctx: RequestContext): Promise<TokenBundle> {
@@ -74,6 +78,12 @@ export class AuthService {
     });
 
     await this.sendVerificationEmail(user.id, user.email);
+
+    const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || 'there';
+    await this.emailService.sendWelcomeEmail(user.email, displayName);
+
+    this.analyticsEvents.trackSignup(user.id, user.email, 'password');
+
     await this.audit.log({
       userId: user.id,
       action: 'auth.register',
@@ -98,6 +108,7 @@ export class AuthService {
         userAgent: ctx.userAgent,
         meta: { email: dto.email.toLowerCase(), reason: 'unknown_user' },
       });
+      this.analyticsEvents.trackLoginFailed('anonymous', 'unknown_user');
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'Invalid email or password',
@@ -113,6 +124,7 @@ export class AuthService {
         userAgent: ctx.userAgent,
         meta: { reason: 'bad_password' },
       });
+      this.analyticsEvents.trackLoginFailed(user.id, 'bad_password');
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'Invalid email or password',
@@ -156,6 +168,8 @@ export class AuthService {
       ip: ctx.ip,
       userAgent: ctx.userAgent,
     });
+
+    this.analyticsEvents.trackLoginSucceeded(user.id, user.email, user.subscriptionTier);
 
     return this.issueTokens(user.id, user.email, user.subscriptionTier, ctx, user.isEmailVerified);
   }
@@ -212,14 +226,11 @@ export class AuthService {
       });
     }
 
-    return this.issueTokens(
-      user.id,
-      user.email,
-      user.subscriptionTier,
-      ctx,
-      user.isEmailVerified,
-      { jti: newJti, familyId: payload.fid, skipSessionCreate: true }
-    );
+    return this.issueTokens(user.id, user.email, user.subscriptionTier, ctx, user.isEmailVerified, {
+      jti: newJti,
+      familyId: payload.fid,
+      skipSessionCreate: true,
+    });
   }
 
   async logout(userId: string, refreshToken: string | undefined, ctx: RequestContext) {
@@ -245,6 +256,8 @@ export class AuthService {
       ip: ctx.ip,
       userAgent: ctx.userAgent,
     });
+
+    this.analyticsEvents.trackLogout(userId);
 
     return { revoked: true };
   }
@@ -308,6 +321,7 @@ export class AuthService {
             },
           },
         });
+        this.analyticsEvents.trackSignup(user.id, user.email, 'google');
       }
     }
 
@@ -326,6 +340,8 @@ export class AuthService {
       ip: ctx.ip,
       userAgent: ctx.userAgent,
     });
+
+    this.analyticsEvents.trackLoginSucceeded(user.id, user.email, user.subscriptionTier);
 
     return this.issueTokens(user.id, user.email, user.subscriptionTier, ctx, user.isEmailVerified);
   }
@@ -381,6 +397,7 @@ export class AuthService {
             },
           },
         });
+        this.analyticsEvents.trackSignup(user.id, user.email, 'linkedin');
       }
     }
 
@@ -399,6 +416,8 @@ export class AuthService {
       ip: ctx.ip,
       userAgent: ctx.userAgent,
     });
+
+    this.analyticsEvents.trackLoginSucceeded(user.id, user.email, user.subscriptionTier);
 
     return this.issueTokens(user.id, user.email, user.subscriptionTier, ctx, user.isEmailVerified);
   }
@@ -569,6 +588,8 @@ export class AuthService {
       ip: ctx.ip,
       userAgent: ctx.userAgent,
     });
+
+    this.analyticsEvents.trackEmailVerified(userId);
 
     return { verified: true };
   }
@@ -932,9 +953,7 @@ export class AuthService {
         ...profile,
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
-        expiresAt: tokens.expires_in
-          ? new Date(Date.now() + tokens.expires_in * 1000)
-          : undefined,
+        expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : undefined,
       };
     }
 

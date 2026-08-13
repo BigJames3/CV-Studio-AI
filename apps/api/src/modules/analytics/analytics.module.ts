@@ -1,10 +1,12 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { AnalyticsController } from './analytics.controller';
 import { AnalyticsService } from './analytics.service';
+import { AnalyticsEventsService } from './analytics-events.service';
 
+@Global()
 @Module({
   controllers: [AnalyticsController],
-  providers: [AnalyticsService],
-  exports: [AnalyticsService],
+  providers: [AnalyticsService, AnalyticsEventsService],
+  exports: [AnalyticsService, AnalyticsEventsService],
 })
 export class AnalyticsModule {}

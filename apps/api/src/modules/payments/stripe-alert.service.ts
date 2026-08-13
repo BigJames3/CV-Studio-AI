@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as Sentry from '@sentry/nestjs';
 
 /**
  * Production alerting for payment-loss scenarios.
@@ -34,6 +35,13 @@ export class StripeAlertService {
 
     this.logger.error(`[payment-alert:${level}] ${err.message}`, JSON.stringify(payload));
 
+    Sentry.captureException(err, {
+      level,
+      tags: { module: 'stripe-webhook' },
+      extra: payload,
+    });
+    if (Sentry.getClient()) return;
+
     const dsn = process.env.SENTRY_DSN;
     if (!dsn || dsn.includes('xxx')) return;
 
@@ -62,7 +70,12 @@ export class StripeAlertService {
             type: err.name,
             value: err.message,
             stacktrace: err.stack
-              ? { frames: err.stack.split('\n').slice(1).map((l) => ({ filename: l.trim() })) }
+              ? {
+                  frames: err.stack
+                    .split('\n')
+                    .slice(1)
+                    .map((l) => ({ filename: l.trim() })),
+                }
               : undefined,
           },
         ],

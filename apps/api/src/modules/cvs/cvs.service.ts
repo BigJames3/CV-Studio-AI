@@ -10,6 +10,7 @@ import { EntitlementsService } from '../subscriptions/entitlements.service';
 import { CreateCvDto, UpdateCvDto, PublishCvDto, ListCvsQueryDto } from './dto/cv.dto';
 import { PdfExportService } from './export/pdf-export.service';
 import { EMPTY_CV_CONTENT, normalizeCvContent } from './cv-content.util';
+import { AnalyticsEventsService } from '../analytics/analytics-events.service';
 import { randomBytes } from 'crypto';
 
 const EMPTY_CONTENT = EMPTY_CV_CONTENT as Prisma.InputJsonValue;
@@ -19,7 +20,8 @@ export class CvsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly entitlements: EntitlementsService,
-    private readonly pdfExport: PdfExportService
+    private readonly pdfExport: PdfExportService,
+    private readonly analyticsEvents: AnalyticsEventsService
   ) {}
 
   async list(userId: string, query: ListCvsQueryDto) {
@@ -72,7 +74,7 @@ export class CvsService {
       });
     }
 
-    return this.prisma.cv.create({
+    const cv = await this.prisma.cv.create({
       data: {
         userId,
         title: dto.title,
@@ -81,6 +83,8 @@ export class CvsService {
         locale: dto.locale ?? 'fr-FR',
       },
     });
+    this.analyticsEvents.trackCVCreated(userId, cv.id);
+    return cv;
   }
 
   async get(userId: string, id: string) {
@@ -101,7 +105,7 @@ export class CvsService {
       dto.content !== undefined
         ? (normalizeCvContent(dto.content) as Prisma.InputJsonValue)
         : undefined;
-    return this.prisma.cv.update({
+    const updated = await this.prisma.cv.update({
       where: { id },
       data: {
         title: dto.title,
@@ -112,6 +116,10 @@ export class CvsService {
         paper: dto.paper,
       },
     });
+    if (dto.isStarred !== undefined) {
+      this.analyticsEvents.trackCVStarred(userId, id, dto.isStarred);
+    }
+    return updated;
   }
 
   async remove(userId: string, id: string) {
@@ -120,6 +128,7 @@ export class CvsService {
       where: { id },
       data: { deletedAt: new Date() },
     });
+    this.analyticsEvents.trackCVDeleted(userId, id);
     return { deleted: true };
   }
 
@@ -177,7 +186,7 @@ export class CvsService {
       });
     }
 
-    return this.prisma.cv.create({
+    const copy = await this.prisma.cv.create({
       data: {
         userId,
         title: `${source.title} (copie)`,
@@ -187,6 +196,8 @@ export class CvsService {
         paper: source.paper,
       },
     });
+    this.analyticsEvents.trackCVDuplicated(userId, copy.id);
+    return copy;
   }
 
   async shareMeta(userId: string, id: string) {

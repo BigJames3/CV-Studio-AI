@@ -13,7 +13,14 @@ export const queryKeys = {
   cv: (id: string) => ['cvs', id] as const,
   templates: (q?: unknown) => ['templates', q] as const,
   subscription: ['subscription', 'me'] as const,
+  invoices: ['invoices'] as const,
   analyticsDashboard: ['analytics', 'dashboard'] as const,
+  adminMetrics: ['analytics', 'metrics'] as const,
+  adminRevenue: ['analytics', 'revenue-history'] as const,
+  adminFunnel: ['analytics', 'funnel'] as const,
+  adminCohort: ['analytics', 'cohort-retention'] as const,
+  adminCac: ['analytics', 'cac'] as const,
+  adminLtv: ['analytics', 'ltv'] as const,
   marketplace: ['marketplace', 'templates'] as const,
   sessions: ['auth', 'sessions'] as const,
 };
@@ -156,6 +163,7 @@ export type UserProfile = {
   location?: string | null;
   bio?: string | null;
   subscriptionTier: string;
+  subscriptionEndDate?: string | null;
   isEmailVerified?: boolean;
   is2faEnabled?: boolean;
   lastLoginAt?: string | null;
@@ -267,13 +275,71 @@ export const templatesApi = {
   byCategory: (category: string) => apiClient(`/templates/category/${category}`),
 };
 
+export type SubscriptionMeResponse = {
+  tier: 'free' | 'pro' | 'business' | string;
+  status: 'free' | 'active' | 'canceling' | 'past_due' | 'canceled';
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: string | null;
+  subscriptionEndDate: string | null;
+  entitlements?: {
+    cvCreate?: boolean;
+    aiOptimize?: boolean;
+    exportDocx?: boolean;
+  };
+  subscription?: {
+    id: string;
+    status: string;
+    cancelAtPeriodEnd: boolean;
+    currentPeriodEnd: string;
+    currentPeriodStart: string;
+    stripeSubscriptionId?: string | null;
+    plan?: { name: string } | null;
+  } | null;
+};
+
 export const subscriptionsApi = {
-  me: () => apiClient('/subscriptions/me'),
+  me: () => apiClient<SubscriptionMeResponse>('/subscriptions/me'),
   checkout: (plan: 'pro' | 'business', interval: 'month' | 'year') =>
-    apiClient<{ url: string; mode?: string }>('/subscriptions/checkout', {
+    apiClient<{ url: string; mode?: string; sessionId?: string }>('/subscriptions/checkout', {
       method: 'POST',
       body: { plan, interval },
     }),
+  portal: () =>
+    apiClient<{ url: string }>('/subscriptions/portal', {
+      method: 'POST',
+      body: {},
+    }),
+  reactivate: () =>
+    apiClient<SubscriptionMeResponse & { reactivated?: boolean; alreadyActive?: boolean }>(
+      '/subscriptions/me/reactivate',
+      {
+        method: 'POST',
+        body: {},
+      }
+    ),
+};
+
+export type InvoiceListItem = {
+  id: string;
+  invoiceNumber: string;
+  amount: string | number;
+  currency: string;
+  status: string;
+  pdfUrl?: string | null;
+  paidAt?: string | null;
+  dueDate: string;
+  createdAt: string;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  source?: 'stripe' | 'db';
+};
+
+export const invoicesApi = {
+  list: () => apiClient<{ items: InvoiceListItem[] }>('/invoices'),
+  download: (id: string) =>
+    apiClient<{ url: string | null; invoiceNumber: string; message?: string }>(
+      `/invoices/${id}/download`
+    ),
 };
 
 export const aiApi = {
@@ -351,4 +417,82 @@ export const marketplaceApi = {
       sellerShareCents: number;
       listings: unknown[];
     }>('/marketplace/seller/analytics'),
+};
+
+export type PlatformMetrics = {
+  totalUsers: number;
+  tierBreakdown: Record<string, number>;
+  mrr: number;
+  paidUsers: number;
+  activePaidUsers: number;
+  cancelingUsers: number;
+  canceledThisMonth: number;
+  churnRate: number;
+  revenueThisMonth: number;
+  generatedAt: string;
+};
+
+export type RevenueHistoryItem = {
+  month: string;
+  monthKey: string;
+  revenue: number;
+};
+
+export type FunnelStep = {
+  count: number;
+  rate: number;
+};
+
+export type FunnelAnalysis = {
+  signup: FunnelStep;
+  emailVerified: FunnelStep;
+  dashboard: FunnelStep;
+  cvCreated: FunnelStep;
+  upgraded: FunnelStep;
+};
+
+export type CohortRow = {
+  month: string;
+  monthKey: string;
+  cohortSize: number;
+  retained: number;
+  retainedPaid: number;
+  retentionRate: number;
+  paidRetentionRate: number;
+};
+
+export type CacMetrics = {
+  period: string;
+  marketingSpend: number;
+  newCustomers: number;
+  cac: number;
+};
+
+export type LtvMetrics = {
+  ltv: number;
+  arpu: number;
+  avgLifetimeMonths: number;
+  paidUsers: number;
+  mrr: number;
+};
+
+export const analyticsApi = {
+  dashboard: () =>
+    apiClient<{
+      cvsCreated: number;
+      totalViews: number;
+      latestAtsScore: number | null;
+      latestAtsAt: string | null;
+    }>('/analytics/dashboard'),
+  metrics: () => apiClient<PlatformMetrics>('/analytics/metrics'),
+  revenueHistory: (months = 12) =>
+    apiClient<{ items: RevenueHistoryItem[]; months: number }>(
+      `/analytics/revenue-history?months=${months}`
+    ),
+  funnel: () => apiClient<FunnelAnalysis>('/analytics/funnel'),
+  cohortRetention: (months = 12) =>
+    apiClient<CohortRow[]>(`/analytics/cohort-retention?months=${months}`),
+  cac: (period: 'month' | 'quarter' | 'year' = 'month') =>
+    apiClient<CacMetrics>(`/analytics/cac?period=${period}`),
+  ltv: () => apiClient<LtvMetrics>('/analytics/ltv'),
 };

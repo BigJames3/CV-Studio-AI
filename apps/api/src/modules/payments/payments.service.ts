@@ -9,8 +9,10 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.module';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { MailService } from '../../mail/mail.service';
+import { EmailService } from '../email/email.service';
 import { StripeWebhookStoreService } from './stripe-webhook-store.service';
 import { StripeAlertService } from './stripe-alert.service';
+import { AnalyticsEventsService } from '../analytics/analytics-events.service';
 
 const MAX_RETRIES = 3;
 
@@ -31,8 +33,10 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly subscriptions: SubscriptionsService,
     private readonly mail: MailService,
+    private readonly emailService: EmailService,
     private readonly webhookStore: StripeWebhookStoreService,
-    private readonly alerts: StripeAlertService
+    private readonly alerts: StripeAlertService,
+    private readonly analyticsEvents: AnalyticsEventsService
   ) {
     const key = process.env.STRIPE_SECRET_KEY;
     if (key && !key.includes('xxx')) {
@@ -55,10 +59,13 @@ export class PaymentsService {
     const secret = process.env.STRIPE_WEBHOOK_SECRET;
     if (!this.stripe || !secret || secret.includes('xxx')) {
       if (isProduction()) {
-        this.alerts.captureException(new Error('Stripe webhook received but Stripe is not configured'), {
-          level: 'fatal',
-          extra: { failClosed: true },
-        });
+        this.alerts.captureException(
+          new Error('Stripe webhook received but Stripe is not configured'),
+          {
+            level: 'fatal',
+            extra: { failClosed: true },
+          }
+        );
         throw new ServiceUnavailableException({
           code: 'STRIPE_NOT_CONFIGURED',
           message: 'Stripe webhooks are not configured (fail-closed)',
@@ -140,6 +147,10 @@ export class PaymentsService {
       retries: MAX_RETRIES,
       level: 'fatal',
     });
+    this.analyticsEvents.trackStripeWebhookFailed(
+      event.type,
+      lastError?.message ?? 'Webhook processing failed'
+    );
 
     throw lastError ?? new Error('Webhook processing failed');
   }
@@ -231,6 +242,11 @@ export class PaymentsService {
     const stripeSubId =
       typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
     const stripeSub = await this.stripe!.subscriptions.retrieve(stripeSubId);
+    const stripeCustomerId =
+      typeof session.customer === 'string'
+        ? session.customer
+        : (session.customer?.id ??
+          (typeof stripeSub.customer === 'string' ? stripeSub.customer : stripeSub.customer?.id));
 
     await this.subscriptions.applyStripeSubscription({
       userId,
@@ -239,27 +255,59 @@ export class PaymentsService {
       status: stripeSub.status,
       currentPeriodStart: new Date(stripeSub.current_period_start * 1000),
       currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
+      stripeCustomerId,
+      cancelAtPeriodEnd: stripeSub.cancel_at_period_end,
     });
 
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { email: true, firstName: true, lastName: true },
+    });
+    if (user) {
+      const upgradePlan = plan.toLowerCase() === 'business' ? 'business' : 'pro';
+      const displayName =
+        [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || 'there';
+      await this.emailService.sendUpgradeConfirmationEmail(
+        user.email,
+        displayName,
+        upgradePlan,
+        session.id,
+        session.amount_total ?? 0,
+        session.currency ?? 'usd',
+        new Date(stripeSub.current_period_end * 1000)
+      );
+    }
+
     this.logger.log(`Subscription synced for user ${userId} via checkout ${session.id}`);
+    this.analyticsEvents.trackUpgradeCompleted(
+      userId,
+      plan,
+      session.amount_total != null ? session.amount_total / 100 : undefined
+    );
   }
 
   private async onSubscriptionChanged(stripeSub: Stripe.Subscription) {
     let userId = stripeSub.metadata?.userId;
+    let previousCancelAtPeriodEnd = false;
+
+    const local = await this.prisma.subscription.findFirst({
+      where: userId ? { userId } : { stripeSubscriptionId: stripeSub.id },
+      include: { user: { select: { email: true, subscriptionTier: true } } },
+    });
+
     if (!userId) {
-      const local = await this.prisma.subscription.findFirst({
-        where: { stripeSubscriptionId: stripeSub.id },
-      });
       if (!local) {
         throw new Error(`Subscription not found for Stripe ID: ${stripeSub.id}`);
       }
       userId = local.userId;
     }
 
+    previousCancelAtPeriodEnd = Boolean(local?.cancelAtPeriodEnd);
+
     const planName =
       stripeSub.status === 'canceled' || stripeSub.status === 'unpaid'
-        ? stripeSub.metadata?.plan ?? 'free'
-        : stripeSub.metadata?.plan ?? 'pro';
+        ? (stripeSub.metadata?.plan ?? 'free')
+        : (stripeSub.metadata?.plan ?? 'pro');
 
     await this.subscriptions.applyStripeSubscription({
       userId,
@@ -268,16 +316,30 @@ export class PaymentsService {
       status: stripeSub.status === 'canceled' ? 'canceled' : stripeSub.status,
       currentPeriodStart: new Date(stripeSub.current_period_start * 1000),
       currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
+      stripeCustomerId:
+        typeof stripeSub.customer === 'string' ? stripeSub.customer : stripeSub.customer?.id,
+      cancelAtPeriodEnd: stripeSub.cancel_at_period_end,
     });
 
+    if (stripeSub.cancel_at_period_end && !previousCancelAtPeriodEnd) {
+      const email = local?.user?.email;
+      if (email) {
+        await this.mail.sendSubscriptionCancelScheduled(email, {
+          plan: local?.user?.subscriptionTier ?? planName,
+          accessUntil: new Date(stripeSub.current_period_end * 1000),
+        });
+      }
+    }
+
     this.logger.log(`Subscription ${stripeSub.id} status=${stripeSub.status} for user ${userId}`);
+    if (stripeSub.status === 'canceled') {
+      this.analyticsEvents.trackSubscriptionCanceled(userId, planName);
+    }
   }
 
   private async onInvoicePaid(invoice: Stripe.Invoice) {
     const stripeSubId =
-      typeof invoice.subscription === 'string'
-        ? invoice.subscription
-        : invoice.subscription?.id;
+      typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
     if (!stripeSubId) {
       throw new Error(`invoice.paid missing subscription (invoice=${invoice.id})`);
     }
@@ -332,13 +394,16 @@ export class PaymentsService {
     });
 
     this.logger.log(`Payment recorded for subscription ${sub.id} invoice=${invoice.id}`);
+    this.analyticsEvents.trackPaymentCompleted(
+      sub.userId,
+      (invoice.amount_paid ?? 0) / 100,
+      (invoice.currency ?? 'usd').toUpperCase()
+    );
   }
 
   private async onInvoiceFailed(invoice: Stripe.Invoice) {
     const stripeSubId =
-      typeof invoice.subscription === 'string'
-        ? invoice.subscription
-        : invoice.subscription?.id;
+      typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
     if (!stripeSubId) {
       throw new Error(`invoice.payment_failed missing subscription (invoice=${invoice.id})`);
     }

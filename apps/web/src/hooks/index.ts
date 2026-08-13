@@ -8,17 +8,42 @@ import { useEditorStore } from '@/stores/editor-store';
 import { ApiError } from '@/lib/api/client';
 import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from '@/stores/auth-store';
+import { track, identify, reset } from '@/lib/analytics';
 import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 import { useMe, useUserPlan } from '@/hooks/useMe';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import { useInvoices } from '@/hooks/useInvoices';
+import {
+  useAdminMetrics,
+  useAdminRevenueHistory,
+  useAdminFunnel,
+  useAdminCohort,
+  useAdminCac,
+  useAdminLtv,
+} from '@/hooks/useAdminAnalytics';
 
-export { useCvsInfinite, useMe, useUserPlan };
+export {
+  useCvsInfinite,
+  useMe,
+  useUserPlan,
+  useSubscriptionStatus,
+  useInvoices,
+  useAdminMetrics,
+  useAdminRevenueHistory,
+  useAdminFunnel,
+  useAdminCohort,
+  useAdminCac,
+  useAdminLtv,
+};
 export type { User, SubscriptionTier } from '@/hooks/useMe';
+export type { BillingStatus } from '@/hooks/useSubscriptionStatus';
 
 export function useUpdateProfile() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: authApi.updateProfile,
     onSuccess: (data) => {
+      track('settings_updated', { setting: 'profile' });
       qc.setQueryData(queryKeys.user.me(), data);
       useAuthStore.getState().setUser({
         id: data.id,
@@ -50,6 +75,7 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => authApi.logout(),
     onSettled: () => {
+      reset();
       qc.clear();
       useAuthStore.getState().clearSession();
       router.replace('/login');
@@ -101,6 +127,8 @@ export function useSubscription() {
   return useQuery({
     queryKey: queryKeys.subscription,
     queryFn: () => subscriptionsApi.me(),
+    staleTime: 30_000,
+    refetchOnMount: 'always',
   });
 }
 
@@ -111,8 +139,16 @@ export function useLogin() {
       authApi.login(email, password, totp),
     onSuccess: (data) => {
       if (!('requires2fa' in data)) {
+        track('login_succeeded');
+        identify(data.user.id, {
+          email: data.user.email,
+          plan: data.user.subscriptionTier,
+        });
         qc.invalidateQueries({ queryKey: queryKeys.user.me() });
       }
+    },
+    onError: () => {
+      track('login_failed');
     },
   });
 }
@@ -120,7 +156,21 @@ export function useLogin() {
 export function useRegister() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: authApi.register,
+    mutationFn: async (payload: Parameters<typeof authApi.register>[0]) => {
+      track('signup_started', { email: payload.email });
+      try {
+        const data = await authApi.register(payload);
+        track('signup_succeeded', { email: payload.email });
+        identify(data.user.id, {
+          email: data.user.email,
+          plan: data.user.subscriptionTier,
+        });
+        return data;
+      } catch (err) {
+        track('signup_failed', { email: payload.email });
+        throw err;
+      }
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.user.me() }),
   });
 }
@@ -131,7 +181,11 @@ export function useCreateCv() {
 
   return useMutation({
     mutationFn: cvsApi.create,
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.cvs() }),
+    onSuccess: (cv) => {
+      const id = (cv as { id?: string })?.id;
+      track('cv_created', { cvId: id });
+      qc.invalidateQueries({ queryKey: queryKeys.cvs() });
+    },
     onError: (err) => {
       // Show paywall modal only — no toast (global PaywallModal in app layout)
       if (err instanceof ApiError && err.code === 'ENTITLEMENT_REQUIRED') {
@@ -226,9 +280,8 @@ export function useAutosave(resumeId: string | null) {
 
 export function useEntitlement(feature: string) {
   const { data } = useSubscription();
-  const tier = (data as { tier?: string } | undefined)?.tier ?? 'free';
-  const entitlements = (data as { entitlements?: Record<string, boolean> } | undefined)
-    ?.entitlements;
+  const tier = data?.tier ?? 'free';
+  const entitlements = data?.entitlements;
 
   const map: Record<string, boolean> = {
     'cv:create': entitlements?.cvCreate ?? tier !== 'free',

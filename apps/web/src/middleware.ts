@@ -16,7 +16,7 @@ export function middleware(request: NextRequest) {
     request.cookies.get('cv_session')?.value === '1' ||
     Boolean(request.cookies.get('access_token')?.value);
 
-  const appOnly = ['/dashboard', '/editor', '/account', '/analytics'];
+  const appOnly = ['/dashboard', '/editor', '/account', '/analytics', '/admin'];
   const mustAuth = appOnly.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   if (mustAuth && !hasSession) {
@@ -43,6 +43,7 @@ export const config = {
     '/editor/:path*',
     '/account/:path*',
     '/analytics/:path*',
+    '/admin/:path*',
     '/login',
     '/register',
   ],

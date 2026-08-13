@@ -1,4 +1,5 @@
 import { AnalyticsEvents, type AnalyticsEventName, type AnalyticsProps } from './events';
+import { captureEvent, identifyUser, initPostHog, logoutUser } from './posthog-client';
 
 type IdentifyTraits = Record<string, string | number | boolean | null | undefined>;
 
@@ -23,11 +24,16 @@ function superProps(): AnalyticsProps {
   };
 }
 
-/** Call after cookie consent accepted. */
+function hasPostHogKey() {
+  const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
+  return Boolean(key && !key.includes('xxx'));
+}
+
+/** Call after cookie consent accepted, or on app boot when PostHog is configured. */
 export function enableAnalytics() {
   consented = true;
   ensureSession();
-  // TODO: init Amplitude with NEXT_PUBLIC_AMPLITUDE_KEY
+  initPostHog();
 }
 
 export function disableAnalytics() {
@@ -37,10 +43,15 @@ export function disableAnalytics() {
 export function identify(id: string, traits?: IdentifyTraits) {
   userId = id;
   if (!consented) return;
-  // amplitude.setUserId(id); amplitude.identify(traits)
+  identifyUser(id, traits);
   if (process.env.NODE_ENV === 'development') {
     console.debug('[analytics] identify', id, traits);
   }
+}
+
+export function reset() {
+  userId = null;
+  logoutUser();
 }
 
 export function track(event: AnalyticsEventName, properties: AnalyticsProps = {}) {
@@ -51,25 +62,22 @@ export function track(event: AnalyticsEventName, properties: AnalyticsProps = {}
     return;
   }
   ensureSession();
-  if (!consented && event !== 'page_viewed') {
-    // allow only anonymized page_viewed if cookieless mode later
-  }
-  if (!consented) return;
+  if (!consented && !hasPostHogKey()) return;
 
   const payload = {
-    event,
-    user_id: userId,
-    timestamp: new Date().toISOString(),
     ...superProps(),
-    properties,
+    ...properties,
   };
 
   if (process.env.NODE_ENV === 'development') {
-    console.debug('[analytics]', payload);
+    console.debug('[analytics]', event, payload);
   }
-  // amplitude.track(event, { ...superProps(), ...properties })
+
+  captureEvent(event, payload);
 }
 
 export function page(path: string, props: AnalyticsProps = {}) {
   track('page_viewed', { path, ...props });
 }
+
+export { captureEvent, identifyUser, logoutUser, initPostHog } from './posthog-client';

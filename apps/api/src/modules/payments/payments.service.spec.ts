@@ -12,7 +12,14 @@ describe('PaymentsService webhook fail-closed', () => {
     },
     payment: { create: jest.fn(), findMany: jest.fn() },
     invoice: { upsert: jest.fn() },
-    user: { update: jest.fn() },
+    user: {
+      update: jest.fn(),
+      findFirst: jest.fn().mockResolvedValue({
+        email: 'user@example.com',
+        firstName: 'Test',
+        lastName: 'User',
+      }),
+    },
   };
 
   const subscriptions = {
@@ -21,6 +28,11 @@ describe('PaymentsService webhook fail-closed', () => {
 
   const mail = {
     sendPaymentFailed: jest.fn().mockResolvedValue(undefined),
+    sendSubscriptionCancelScheduled: jest.fn().mockResolvedValue(undefined),
+  };
+
+  const emailService = {
+    sendUpgradeConfirmationEmail: jest.fn().mockResolvedValue({ success: true }),
   };
 
   const webhookStore = {
@@ -50,8 +62,15 @@ describe('PaymentsService webhook fail-closed', () => {
       prisma as never,
       subscriptions as never,
       mail as never,
+      emailService as never,
       webhookStore as never,
-      alerts as never
+      alerts as never,
+      {
+        trackUpgradeCompleted: jest.fn(),
+        trackStripeWebhookFailed: jest.fn(),
+        trackPaymentCompleted: jest.fn(),
+        trackSubscriptionCanceled: jest.fn(),
+      } as never
     );
   });
 

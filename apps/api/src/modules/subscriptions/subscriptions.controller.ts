@@ -31,9 +31,21 @@ export class SubscriptionsController {
     return this.subscriptions.cancel(user.id);
   }
 
+  @Post('me/reactivate')
+  @ApiOperation({ summary: 'Undo cancel_at_period_end (reactivate subscription)' })
+  reactivate(@CurrentUser() user: AuthUser) {
+    return this.subscriptions.reactivate(user.id);
+  }
+
   @Post('checkout')
   @ApiOperation({ summary: 'Create Stripe Checkout Session' })
   checkout(@CurrentUser() user: AuthUser, @Body() dto: CheckoutDto) {
     return this.subscriptions.checkout(user.id, dto);
+  }
+
+  @Post('portal')
+  @ApiOperation({ summary: 'Create Stripe Customer Portal session' })
+  portal(@CurrentUser() user: AuthUser) {
+    return this.subscriptions.createBillingPortalSession(user.id);
   }
 }

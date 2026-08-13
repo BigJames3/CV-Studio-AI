@@ -1,6 +1,8 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
+import { track } from '@/lib/analytics';
 import {
   Dialog,
   DialogContent,
@@ -64,6 +66,12 @@ export function PaywallModal({
   const safeLimit = Math.max(cvLimit, 1);
   const usagePercent = Math.min(100, Math.round((cvCount / safeLimit) * 100));
 
+  useEffect(() => {
+    if (isOpen) {
+      track('paywall_viewed', { feature });
+    }
+  }, [isOpen, feature]);
+
   return (
     <Dialog
       open={isOpen}
@@ -126,8 +134,10 @@ export function PaywallModal({
             type="button"
             className="w-full border-0 bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-1 hover:from-purple-700 hover:to-blue-700 sm:w-auto"
             onClick={() => {
+              track('paywall_cta_clicked', { feature, plan: 'pro' });
+              track('upgrade_clicked', { plan: 'pro', source: 'paywall' });
               onClose();
-              router.push('/account/billing?utm_source=paywall&utm_medium=modal');
+              router.push('/account/billing?plan=pro&utm_source=paywall&utm_medium=modal');
             }}
           >
             Passer à Premium

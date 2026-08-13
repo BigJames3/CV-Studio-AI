@@ -198,6 +198,7 @@ model User {
   subscriptionTier           SubscriptionTier @default(free) @map("subscription_tier")
   subscriptionStartDate      DateTime?        @map("subscription_start_date") @db.Timestamptz(6)
   subscriptionEndDate        DateTime?        @map("subscription_end_date") @db.Timestamptz(6)
+  stripeCustomerId           String?          @unique @map("stripe_customer_id") @db.VarChar(255)
   isEmailVerified            Boolean          @default(false) @map("is_email_verified")
   is2faEnabled               Boolean          @default(false) @map("is_2fa_enabled")
   twoFactorSecretEncrypted   Bytes?           @map("two_factor_secret_encrypted") // AES-GCM ciphertext

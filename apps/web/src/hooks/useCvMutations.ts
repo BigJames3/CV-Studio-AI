@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { cvsApi, queryKeys, type ListCvsResponse } from '@/lib/api';
 import { ApiError } from '@/lib/api/client';
 import { useUiStore } from '@/stores/ui-store';
+import { track } from '@/lib/analytics';
 
 type RenameInput = { id: string; title: string };
 type PublishInput = { id: string; isPublic: boolean };
@@ -44,7 +45,8 @@ export function useCvMutations() {
 
   const remove = useMutation({
     mutationFn: (id: string) => cvsApi.remove(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      track('cv_deleted', { cvId: id });
       invalidateCvs();
       toast.success('✅ CV supprimé avec succès', {
         description: 'Le CV a été définitivement supprimé de votre bibliothèque',
@@ -63,7 +65,8 @@ export function useCvMutations() {
 
   const duplicate = useMutation({
     mutationFn: (id: string) => cvsApi.duplicate(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      track('cv_duplicated', { cvId: id });
       invalidateCvs();
       toast.success('✅ CV dupliqué avec succès', {
         description: 'Le nouveau CV est prêt à être modifié',
@@ -94,7 +97,8 @@ export function useCvMutations() {
       }
       return cvsApi.update(id, { title: trimmed });
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      track('cv_edited', { cvId: variables.id, action: 'rename' });
       invalidateCvs();
       toast.success('✅ CV renommé avec succès');
     },
@@ -143,6 +147,7 @@ export function useCvMutations() {
   const star = useMutation({
     mutationFn: ({ id, isStarred }: StarInput) => cvsApi.update(id, { isStarred }),
     onSuccess: (_data, variables) => {
+      track(variables.isStarred ? 'cv_starred' : 'cv_unstarred', { cvId: variables.id });
       invalidateCvs();
       if (variables.isStarred) {
         toast.success('⭐ CV ajouté aux favoris');

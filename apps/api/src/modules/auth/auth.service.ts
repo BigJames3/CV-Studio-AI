@@ -16,6 +16,7 @@ import { AuthRateLimitService } from './auth-rate-limit.service';
 import { AuthAuditService } from './auth-audit.service';
 import { TotpService } from './totp.service';
 import { decryptUtf8, encryptUtf8 } from './crypto.util';
+import { AnalyticsService } from '../analytics/analytics.service';
 import {
   RegisterDto,
   LoginDto,
@@ -40,6 +41,13 @@ export type TokenBundle = {
 
 type RefreshPayload = { sub: string; typ?: string; jti?: string; fid?: string };
 
+function isTwoFactorFeatureEnabled() {
+  const raw = process.env.ENABLE_TWO_FACTOR?.trim().toLowerCase();
+  if (raw === 'false' || raw === '0' || raw === 'off') return false;
+  if (raw === 'true' || raw === '1' || raw === 'on') return true;
+  return process.env.NODE_ENV !== 'test';
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -50,7 +58,8 @@ export class AuthService {
     private readonly sessions: AuthSessionService,
     private readonly rateLimit: AuthRateLimitService,
     private readonly audit: AuthAuditService,
-    private readonly totp: TotpService
+    private readonly totp: TotpService,
+    private readonly analytics: AnalyticsService
   ) {}
 
   async register(dto: RegisterDto, ctx: RequestContext): Promise<TokenBundle> {
@@ -80,6 +89,7 @@ export class AuthService {
       ip: ctx.ip,
       userAgent: ctx.userAgent,
     });
+    this.safeTrack(user.id, 'signup_succeeded');
 
     return this.issueTokens(user.id, user.email, user.subscriptionTier, ctx, false);
   }
@@ -156,6 +166,7 @@ export class AuthService {
       ip: ctx.ip,
       userAgent: ctx.userAgent,
     });
+    this.safeTrack(user.id, 'login_succeeded');
 
     return this.issueTokens(user.id, user.email, user.subscriptionTier, ctx, user.isEmailVerified);
   }
@@ -212,14 +223,11 @@ export class AuthService {
       });
     }
 
-    return this.issueTokens(
-      user.id,
-      user.email,
-      user.subscriptionTier,
-      ctx,
-      user.isEmailVerified,
-      { jti: newJti, familyId: payload.fid, skipSessionCreate: true }
-    );
+    return this.issueTokens(user.id, user.email, user.subscriptionTier, ctx, user.isEmailVerified, {
+      jti: newJti,
+      familyId: payload.fid,
+      skipSessionCreate: true,
+    });
   }
 
   async logout(userId: string, refreshToken: string | undefined, ctx: RequestContext) {
@@ -411,6 +419,7 @@ export class AuthService {
   }
 
   async enable2fa(userId: string) {
+    this.assertTwoFactorFeatureEnabled();
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
     });
@@ -443,6 +452,7 @@ export class AuthService {
   }
 
   async verify2fa(userId: string, code: string) {
+    this.assertTwoFactorFeatureEnabled();
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
     });
@@ -471,6 +481,7 @@ export class AuthService {
   }
 
   async disable2fa(userId: string, dto: TwoFactorDisableDto) {
+    this.assertTwoFactorFeatureEnabled();
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
     });
@@ -739,6 +750,19 @@ export class AuthService {
     return createHash('sha256').update(raw).digest('hex');
   }
 
+  private assertTwoFactorFeatureEnabled() {
+    if (!isTwoFactorFeatureEnabled()) {
+      throw new BadRequestException({
+        code: 'TWO_FACTOR_DISABLED',
+        message: 'Two-factor authentication is disabled',
+      });
+    }
+  }
+
+  private safeTrack(userId: string, event: string) {
+    void this.analytics.track(userId, { event, platform: 'web' }).catch(() => undefined);
+  }
+
   private async issueTokens(
     userId: string,
     email: string,
@@ -932,9 +956,7 @@ export class AuthService {
         ...profile,
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
-        expiresAt: tokens.expires_in
-          ? new Date(Date.now() + tokens.expires_in * 1000)
-          : undefined,
+        expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : undefined,
       };
     }
 

@@ -1,4 +1,15 @@
+'use client';
+
 import { AnalyticsEvents, type AnalyticsEventName, type AnalyticsProps } from './events';
+import {
+  capturePostHog,
+  identifyPostHog,
+  initPostHog,
+  optInPostHog,
+  optOutPostHog,
+  resetPostHog,
+  shouldAutoEnable,
+} from './posthog-client';
 
 type IdentifyTraits = Record<string, string | number | boolean | null | undefined>;
 
@@ -14,6 +25,11 @@ function ensureSession() {
   }
 }
 
+function ensureReady() {
+  if (consented) return;
+  hydrateAnalyticsConsent();
+}
+
 function superProps(): AnalyticsProps {
   return {
     platform: 'web',
@@ -23,21 +39,29 @@ function superProps(): AnalyticsProps {
   };
 }
 
-/** Call after cookie consent accepted. */
+/** Call after cookie consent accepted (or automatically in development). */
 export function enableAnalytics() {
   consented = true;
   ensureSession();
-  // TODO: init Amplitude with NEXT_PUBLIC_AMPLITUDE_KEY
+  initPostHog();
+  optInPostHog();
 }
 
 export function disableAnalytics() {
   consented = false;
+  optOutPostHog();
+}
+
+export function resetAnalytics() {
+  userId = null;
+  resetPostHog();
 }
 
 export function identify(id: string, traits?: IdentifyTraits) {
   userId = id;
+  ensureReady();
   if (!consented) return;
-  // amplitude.setUserId(id); amplitude.identify(traits)
+  identifyPostHog(id, traits);
   if (process.env.NODE_ENV === 'development') {
     console.debug('[analytics] identify', id, traits);
   }
@@ -50,10 +74,8 @@ export function track(event: AnalyticsEventName, properties: AnalyticsProps = {}
     }
     return;
   }
+  ensureReady();
   ensureSession();
-  if (!consented && event !== 'page_viewed') {
-    // allow only anonymized page_viewed if cookieless mode later
-  }
   if (!consented) return;
 
   const payload = {
@@ -64,12 +86,28 @@ export function track(event: AnalyticsEventName, properties: AnalyticsProps = {}
     properties,
   };
 
+  capturePostHog(event, { ...superProps(), ...properties, user_id: userId });
+
   if (process.env.NODE_ENV === 'development') {
     console.debug('[analytics]', payload);
   }
-  // amplitude.track(event, { ...superProps(), ...properties })
 }
 
 export function page(path: string, props: AnalyticsProps = {}) {
   track('page_viewed', { path, ...props });
 }
+
+/** Restore session consent before the first paint of child effects. */
+export function hydrateAnalyticsConsent(): boolean {
+  initPostHog();
+  if (shouldAutoEnable()) {
+    consented = true;
+    ensureSession();
+    optInPostHog();
+    return true;
+  }
+  return false;
+}
+
+export type { AnalyticsEventName, AnalyticsProps };
+export { AnalyticsEvents } from './events';

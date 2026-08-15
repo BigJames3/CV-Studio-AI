@@ -9,3 +9,5 @@ export function absoluteUrl(path = '') {
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
   return `${base.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
 }
+
+export { suggestPaymentMethod, type PaymentProvider } from '@cvstudio/shared-utils';

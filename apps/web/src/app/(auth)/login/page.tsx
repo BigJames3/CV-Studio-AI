@@ -33,7 +33,10 @@ export default function LoginPage() {
   const nextPath = search.get('next') || '/dashboard';
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 py-12">
+    <div
+      className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 py-12"
+      data-testid="login-page"
+    >
       <h1 className="text-2xl font-semibold">Connexion</h1>
       <p className="mt-1 text-sm text-content-secondary">
         Pas de compte ?{' '}
@@ -98,7 +101,13 @@ export default function LoginPage() {
           >
             <div>
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" autoComplete="email" {...form.register('email')} />
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                data-testid="login-email"
+                {...form.register('email')}
+              />
               {form.formState.errors.email && (
                 <p className="mt-1 text-xs text-error">{form.formState.errors.email.message}</p>
               )}
@@ -109,6 +118,7 @@ export default function LoginPage() {
                 id="password"
                 type="password"
                 autoComplete="current-password"
+                data-testid="login-password"
                 {...form.register('password')}
               />
             </div>
@@ -121,7 +131,9 @@ export default function LoginPage() {
               {login.isPending ? 'Connexion…' : 'Se connecter'}
             </Button>
             {login.isError && (
-              <p className="text-sm text-error">Identifiants invalides ou API indisponible.</p>
+              <p className="text-sm text-error" data-testid="login-error" role="alert">
+                Identifiants invalides ou API indisponible.
+              </p>
             )}
           </form>
           <div className="my-6 flex items-center gap-3 text-xs text-content-secondary">

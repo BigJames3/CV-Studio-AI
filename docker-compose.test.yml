@@ -1,0 +1,40 @@
+# Isolated Postgres + Redis for API Jest e2e and Playwright.
+# Do not run this together with `pnpm docker:up` (both bind 5432 / 6379).
+#
+#   pnpm docker:test
+#   pnpm --filter @cvstudio/api exec prisma migrate deploy
+#   pnpm test:e2e:api
+#   pnpm test:e2e
+#
+# API/web are started by Playwright webServer (or `pnpm dev`), not this file.
+# The API image is a production Nest build and is not used for local e2e.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cv_studio_test
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_test:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d cv_studio_test']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_test:

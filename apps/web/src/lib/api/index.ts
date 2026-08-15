@@ -16,6 +16,8 @@ export const queryKeys = {
   analyticsDashboard: ['analytics', 'dashboard'] as const,
   marketplace: ['marketplace', 'templates'] as const,
   sessions: ['auth', 'sessions'] as const,
+  payments: ['payments', 'history'] as const,
+  paymentMethods: ['payments', 'methods'] as const,
 };
 
 export type AuthResponse = {
@@ -156,6 +158,7 @@ export type UserProfile = {
   location?: string | null;
   bio?: string | null;
   subscriptionTier: string;
+  countryCode?: string | null;
   isEmailVerified?: boolean;
   is2faEnabled?: boolean;
   lastLoginAt?: string | null;
@@ -177,6 +180,7 @@ export const usersApi = {
   getMe: () => apiClient<UserProfile>('/users/me'),
   updateMe: (body: UpdateProfileInput) =>
     apiClient<UserProfile>('/users/me', { method: 'PATCH', body }),
+  deleteMe: () => apiClient<{ deleted: boolean }>('/users/me', { method: 'DELETE' }),
 };
 
 export type CvListItem = {
@@ -268,12 +272,58 @@ export const templatesApi = {
 };
 
 export const subscriptionsApi = {
-  me: () => apiClient('/subscriptions/me'),
-  checkout: (plan: 'pro' | 'business', interval: 'month' | 'year') =>
-    apiClient<{ url: string; mode?: string }>('/subscriptions/checkout', {
-      method: 'POST',
-      body: { plan, interval },
-    }),
+  me: () =>
+    apiClient<{
+      subscription: {
+        status: string;
+        cancelAtPeriodEnd: boolean;
+        currentPeriodEnd: string;
+        currentPeriodStart: string;
+      } | null;
+      tier: 'free' | 'pro' | 'business';
+      entitlements: { cvCreate: boolean; aiOptimize: boolean; exportDocx: boolean };
+    }>('/subscriptions/me'),
+  checkout: (params: {
+    plan: 'pro' | 'business';
+    interval: 'month' | 'year';
+    paymentMethod?: 'stripe' | 'cinetpay';
+  }) =>
+    apiClient<{ url: string; mode?: string; transactionId?: string; paymentMethod?: string }>(
+      '/subscriptions/checkout',
+      {
+        method: 'POST',
+        body: params,
+      }
+    ),
+  cancel: () =>
+    apiClient<{
+      status: string;
+      cancelAtPeriodEnd: boolean;
+      currentPeriodEnd: string;
+    }>('/subscriptions/me/cancel', { method: 'DELETE' }),
+};
+
+export type PaymentHistoryItem = {
+  id: string;
+  amount: string | number;
+  currency: string;
+  status: string;
+  paymentMethod: string;
+  createdAt: string;
+};
+
+export const paymentsApi = {
+  history: () => apiClient<{ items: PaymentHistoryItem[] }>('/payments/history'),
+  methods: () =>
+    apiClient<{ stripe: boolean; cinetpay: boolean; cinetpayFailClosed: boolean }>(
+      '/payments/methods'
+    ),
+  getStatus: (transactionId: string) =>
+    apiClient<{
+      status: string;
+      paymentMethod?: string;
+      transactionId: string;
+    }>(`/payments/status/${encodeURIComponent(transactionId)}`),
 };
 
 export const aiApi = {
@@ -322,6 +372,17 @@ export const marketplaceApi = {
   sellerMe: () => apiClient('/marketplace/seller/me'),
   applySeller: (body: { displayName: string; slug: string; country: string; bio?: string }) =>
     apiClient('/marketplace/seller/apply', { method: 'POST', body }),
+  listMyTemplates: () =>
+    apiClient<{ items: Array<{ id: string; name: string; category: string }> }>(
+      '/marketplace/seller/templates'
+    ),
+  createSellerTemplate: (body: {
+    name: string;
+    description: string;
+    category: string;
+    previewImageUrl: string;
+    designData: Record<string, unknown>;
+  }) => apiClient('/marketplace/seller/templates', { method: 'POST', body }),
   createListing: (body: {
     templateId: string;
     title: string;
@@ -330,6 +391,21 @@ export const marketplaceApi = {
     priceCents: number;
     tags?: string[];
   }) => apiClient('/marketplace/seller/listings', { method: 'POST', body }),
+  getListing: (id: string) => apiClient<Record<string, unknown>>(`/marketplace/templates/${id}`),
+  getDesign: (id: string) =>
+    apiClient<{ listingId: string; templateId: string; designData: unknown }>(
+      `/marketplace/templates/${id}/design`
+    ),
+  createPaymentIntent: (listingId: string) =>
+    apiClient<{ clientSecret: string | null; paymentIntentId: string }>(
+      `/marketplace/templates/${listingId}/payment-intent`,
+      { method: 'POST', body: {} }
+    ),
+  purchase: (listingId: string, paymentIntentId: string) =>
+    apiClient(`/marketplace/templates/${listingId}/purchase`, {
+      method: 'POST',
+      body: { paymentIntentId },
+    }),
   sales: () =>
     apiClient<{
       listings: Array<{

@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { marketplaceApi, templatesApi } from '@/lib/api';
+import { marketplaceApi } from '@/lib/api';
 
 export default function NewListingPage() {
   const router = useRouter();
@@ -11,7 +11,7 @@ export default function NewListingPage() {
   const [templates, setTemplates] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
-    void templatesApi.list().then((res) => {
+    void marketplaceApi.listMyTemplates().then((res) => {
       setTemplates(res.items.map((t) => ({ id: t.id, name: t.name })));
     });
   }, []);

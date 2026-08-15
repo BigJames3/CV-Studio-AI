@@ -55,19 +55,43 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      - name: Prisma generate
+        run: pnpm --filter @cvstudio/api exec prisma generate
+
       - name: Run tests with coverage
         run: pnpm test:coverage
         env:
+          NODE_ENV: test
           DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_test?schema=public
           DIRECT_DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_test?schema=public
           REDIS_URL: redis://localhost:6379/0
+          JWT_ACCESS_SECRET: ci-access-secret-min-32-characters!!
+          JWT_REFRESH_SECRET: ci-refresh-secret-min-32-characters!
 
-      - name: Enforce coverage thresholds (AI + payments)
-        run: pnpm --filter @cvstudio/api exec jest --config jest.config.json --coverage --coverageReporters=text-summary --testPathPattern="(ai\\.service|ai-quota|ai-gateway|payments\\.service)" --forceExit
+      - name: Enforce coverage thresholds (AI + payments + marketplace)
+        run: >
+          pnpm --filter @cvstudio/api exec jest --config jest.config.json --coverage
+          --coverageReporters=text-summary --coverageReporters=json
+          --testPathPattern="(ai|payments|marketplace)"
+          --collectCoverageFrom="**/modules/ai/ai.service.ts"
+          --collectCoverageFrom="**/modules/ai/ai-quota.service.ts"
+          --collectCoverageFrom="**/modules/payments/payments.service.ts"
+          --collectCoverageFrom="**/modules/marketplace/marketplace.service.ts"
+          --forceExit
         env:
+          NODE_ENV: test
           DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_test?schema=public
           DIRECT_DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_test?schema=public
           REDIS_URL: redis://localhost:6379/0
+          JWT_ACCESS_SECRET: ci-access-secret-min-32-characters!!
+          JWT_REFRESH_SECRET: ci-refresh-secret-min-32-characters!
+          AUTH_RATE_LIMIT_DISABLED: 'true'
+          CINETPAY_API_KEY: test_api_key
+          CINETPAY_SITE_ID: test_site_id
+          CINETPAY_FAIL_CLOSED: 'true'
+          APP_URL: http://localhost:3000
+          API_URL: http://localhost:3001
+          PORT: '3001'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -75,3 +99,30 @@ jobs:
         with:
           files: ./apps/api/coverage/coverage-final.json
           fail_ci_if_error: false
+
+      - name: Prisma migrate (API e2e)
+        run: pnpm --filter @cvstudio/api exec prisma migrate deploy
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_test?schema=public
+          DIRECT_DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_test?schema=public
+
+      - name: API e2e (CinetPay + Stripe regression)
+        run: pnpm --filter @cvstudio/api exec jest --config ./test/jest-e2e.json --runInBand --forceExit
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_test?schema=public
+          DIRECT_DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_test?schema=public
+          REDIS_URL: redis://localhost:6379/0
+          JWT_ACCESS_SECRET: ci-access-secret-min-32-characters!!
+          JWT_REFRESH_SECRET: ci-refresh-secret-min-32-characters!
+          AUTH_RATE_LIMIT_DISABLED: 'true'
+          CINETPAY_API_KEY: test_api_key
+          CINETPAY_SITE_ID: test_site_id
+          CINETPAY_FAIL_CLOSED: 'true'
+          APP_URL: http://localhost:3000
+          API_URL: http://localhost:3001
+          PORT: '3001'
+
+      # Playwright: .github/workflows/e2e-tests.yml (job `e2e` in ci.yml).
+      # Reports: apps/web/playwright-report/ uploaded on failure.

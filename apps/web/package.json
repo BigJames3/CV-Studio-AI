@@ -11,7 +11,11 @@
     "analyze": "ANALYZE=true next build",
     "clean": "rimraf .next .turbo",
     "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:stripe": "playwright test --grep @stripe"
   },
   "dependencies": {
     "@cvstudio/shared-types": "workspace:*",
@@ -24,6 +28,7 @@
     "@radix-ui/react-slot": "^1.1.1",
     "@radix-ui/react-tabs": "^1.1.2",
     "@radix-ui/react-toast": "^1.2.4",
+    "@sentry/nextjs": "^8.55.0",
     "@tanstack/react-query": "^5.62.8",
     "@tanstack/react-query-devtools": "^5.62.8",
     "class-variance-authority": "^0.7.1",
@@ -31,6 +36,7 @@
     "framer-motion": "^11.15.0",
     "lucide-react": "^0.469.0",
     "next": "^14.2.21",
+    "posthog-js": "^1.417.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.54.2",

@@ -1,0 +1,25 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+        informational: false
+    patch:
+      default:
+        target: 90%
+        informational: true
+ignore:
+  - '**/dto/**'
+  - '**/*.module.ts'
+  - '**/main.ts'
+  - '**/scripts/**'
+  - '**/dist/**'
+  - '**/.next/**'
+ignore:
+  - '**/dto/**'
+  - '**/*.module.ts'
+  - '**/main.ts'
+  - '**/scripts/**'
+  - '**/dist/**'
+  - '**/.next/**'

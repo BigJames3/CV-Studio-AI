@@ -40,6 +40,12 @@ export class RedisService implements OnModuleDestroy {
     }
   }
 
+  /** SET NX EX — true only if the key was created. Used as a distributed lock. */
+  async setNx(key: string, value: string, ttlSeconds: number): Promise<boolean> {
+    const result = await this.client.set(key, value, 'EX', ttlSeconds, 'NX');
+    return result === 'OK';
+  }
+
   async del(...keys: string[]): Promise<void> {
     if (keys.length) await this.client.del(...keys);
   }

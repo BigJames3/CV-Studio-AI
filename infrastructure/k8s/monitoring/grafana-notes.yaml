@@ -9,3 +9,5 @@ data:
   README: |
     Provision dashboards via grafana sidecar or AMP/AMG.
     Alerts aligned with docs/security/MONITORING-ALERTS.md and docs/infrastructure/SLO-SLI.md
+    Payment logs (LOG_FORMAT=json, LOG_PAYMENTS): Payment created, CinetPay API error,
+    Expired pending payments. Health: observability.payments.{stripe,cinetpay,cinetpayFailClosed}.

@@ -27,6 +27,8 @@ storybook-static/
 .env.*
 !.env.example
 !.env*.example
+!.env.test
+!.env*.test
 *.pem
 *.p12
 credentials.json
@@ -79,6 +81,8 @@ infrastructure/terraform/**/crash.log
 # Misc
 *.local
 .vercel
+.sentryclirc
+.claude
 .claude
 .cursor/*
 !.cursor/rules/

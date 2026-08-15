@@ -179,16 +179,18 @@ describe('Auth (e2e)', () => {
       .expect(201);
     const access = reg.body.data.accessToken as string;
 
-    await request(app.getHttpServer())
+    const enableRes = await request(app.getHttpServer())
       .post('/api/v1/auth/2fa/enable')
       .set('Authorization', `Bearer ${access}`)
       .expect(400);
+    expect(enableRes.body.error.code).toBe('TWO_FACTOR_DISABLED');
 
-    await request(app.getHttpServer())
+    const verifyRes = await request(app.getHttpServer())
       .post('/api/v1/auth/2fa/verify')
       .set('Authorization', `Bearer ${access}`)
       .send({ code: '123456' })
       .expect(400);
+    expect(verifyRes.body.error.code).toBe('TWO_FACTOR_DISABLED');
   });
 
   it('lists and revokes sessions', async () => {
@@ -231,9 +233,7 @@ describe('Auth (e2e)', () => {
       .expect(201);
     const access = reg.body.data.accessToken as string;
 
-    const unauthorized = await request(app.getHttpServer())
-      .get('/api/v1/auth/profile')
-      .expect(401);
+    const unauthorized = await request(app.getHttpServer()).get('/api/v1/auth/profile').expect(401);
     expect(unauthorized.body.success).toBe(false);
 
     const profile = await request(app.getHttpServer())

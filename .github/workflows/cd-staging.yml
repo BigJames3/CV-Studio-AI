@@ -1,8 +1,7 @@
 name: CD Staging
 
 on:
-  push:
-    branches: [main]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -17,6 +16,7 @@ jobs:
   build-push-deploy:
     runs-on: ubuntu-latest
     environment: staging
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -73,7 +73,38 @@ jobs:
             $ECR_REGISTRY/cvstudio/worker=${{ env.ECR_REGISTRY }}/cvstudio/worker:${{ steps.meta.outputs.sha }}
           kubectl apply -k .
           kubectl -n cvstudio rollout status deploy/api --timeout=180s
+          kubectl -n cvstudio rollout status deploy/web --timeout=180s
+          kubectl -n cvstudio rollout status deploy/worker --timeout=180s || true
 
       - name: Smoke
         run: |
+          curl -fsS https://api.staging.cvstudio.ai/api/v1/health/ready
           curl -fsS https://api.staging.cvstudio.ai/api/v1/health
+          curl -fsS -o /dev/null -w "%{http_code}\n" https://staging.cvstudio.ai/
+          curl -fsS -o /dev/null -w "%{http_code}\n" https://staging.cvstudio.ai/marketplace
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Staging deploy or smoke failed — rolling back"
+          aws eks update-kubeconfig --name cvstudio-staging --region $AWS_REGION || true
+          kubectl -n cvstudio rollout undo deploy/api || true
+          kubectl -n cvstudio rollout undo deploy/web || true
+          kubectl -n cvstudio rollout undo deploy/worker || true
+          kubectl -n cvstudio rollout status deploy/api --timeout=180s || true
+          kubectl -n cvstudio rollout status deploy/web --timeout=180s || true
+          kubectl -n cvstudio rollout status deploy/worker --timeout=180s || true
+          curl -fsS https://api.staging.cvstudio.ai/api/v1/health/ready || echo "::error::Staging health failed after rollback"
+
+      - name: Slack on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL not set — skip"
+            exit 0
+          fi
+          curl -sS -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            --data "{\"text\":\"Staging deploy failed on ${GITHUB_REF} (${GITHUB_SHA::7}) — rollback attempted — ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"

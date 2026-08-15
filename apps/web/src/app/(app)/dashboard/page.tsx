@@ -35,10 +35,10 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="mx-auto max-w-content px-4 py-8">
+    <div className="mx-auto max-w-content px-4 py-8" data-testid="dashboard-page">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold">
+          <h1 className="text-3xl font-semibold" data-testid="welcome">
             {firstName ? `Bonjour, ${firstName}` : 'Dashboard'}
           </h1>
           <p className="text-content-secondary">
@@ -61,7 +61,7 @@ export default function DashboardPage() {
         <div className="flex items-center gap-2">
           {isFree ? (
             <Link href="/account/billing">
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" data-testid="upgrade-to-pro">
                 Passer à Pro
               </Button>
             </Link>
@@ -129,6 +129,8 @@ export default function DashboardPage() {
             {cvs.map((cv) => (
               <div
                 key={cv.id}
+                data-testid="cv-card"
+                data-cv-title={cv.title}
                 className="rounded-lg border border-border bg-surface-card p-4 shadow-1"
               >
                 <div className="flex items-start justify-between gap-2">

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './database/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { MailModule } from './mail/mail.module';
@@ -20,8 +21,18 @@ import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: [
+        ...(process.env.NODE_ENV === 'test' ? ['.env.test'] : []),
+        '.env.local',
+        '.env',
+      ],
+    }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    ...(process.env.WORKER_KIND || process.env.NODE_ENV === 'test'
+      ? []
+      : [ScheduleModule.forRoot()]),
     PrismaModule,
     RedisModule,
     MailModule,

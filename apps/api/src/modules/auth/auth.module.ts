@@ -8,6 +8,7 @@ import { AuthSessionService } from './auth-session.service';
 import { AuthRateLimitService } from './auth-rate-limit.service';
 import { AuthAuditService } from './auth-audit.service';
 import { TotpService } from './totp.service';
+import { AnalyticsModule } from '../analytics/analytics.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { TotpService } from './totp.service';
     JwtModule.register({
       secret: process.env.JWT_ACCESS_SECRET ?? 'dev-access-secret-change-me',
     }),
+    AnalyticsModule,
   ],
   controllers: [AuthController],
   providers: [

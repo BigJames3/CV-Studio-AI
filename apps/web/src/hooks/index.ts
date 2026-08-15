@@ -10,6 +10,7 @@ import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 import { useMe, useUserPlan } from '@/hooks/useMe';
+import { identify, resetAnalytics, track } from '@/lib/analytics';
 
 export { useCvsInfinite, useMe, useUserPlan };
 export type { User, SubscriptionTier } from '@/hooks/useMe';
@@ -49,6 +50,10 @@ export function useLogout() {
   const router = useRouter();
   return useMutation({
     mutationFn: () => authApi.logout(),
+    onMutate: () => {
+      track('logout');
+      resetAnalytics();
+    },
     onSettled: () => {
       qc.clear();
       useAuthStore.getState().clearSession();
@@ -111,8 +116,13 @@ export function useLogin() {
       authApi.login(email, password, totp),
     onSuccess: (data) => {
       if (!('requires2fa' in data)) {
+        identify(data.user.id, { plan: data.user.subscriptionTier });
+        track('login_succeeded');
         qc.invalidateQueries({ queryKey: queryKeys.user.me() });
       }
+    },
+    onError: () => {
+      track('login_failed');
     },
   });
 }
@@ -121,7 +131,14 @@ export function useRegister() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: authApi.register,
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.user.me() }),
+    onSuccess: (data) => {
+      identify(data.user.id, { plan: data.user.subscriptionTier });
+      track('signup_succeeded');
+      qc.invalidateQueries({ queryKey: queryKeys.user.me() });
+    },
+    onError: () => {
+      track('signup_failed');
+    },
   });
 }
 
@@ -131,7 +148,10 @@ export function useCreateCv() {
 
   return useMutation({
     mutationFn: cvsApi.create,
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.cvs() }),
+    onSuccess: () => {
+      track('cv_created');
+      qc.invalidateQueries({ queryKey: queryKeys.cvs() });
+    },
     onError: (err) => {
       // Show paywall modal only — no toast (global PaywallModal in app layout)
       if (err instanceof ApiError && err.code === 'ENTITLEMENT_REQUIRED') {

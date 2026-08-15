@@ -3,6 +3,9 @@ import { Prisma, TemplateCategory } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.module';
 import { TEMPLATE_SEEDS } from './template-seeds';
 
+/** Official catalog only — seller-owned marketplace templates never appear here. */
+const CATALOG_WHERE = { isPublished: true, createdBy: null } as const;
+
 @Injectable()
 export class TemplatesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -28,7 +31,7 @@ export class TemplatesService {
     try {
       const items = await this.prisma.template.findMany({
         where: {
-          isPublished: true,
+          ...CATALOG_WHERE,
           ...(query.premium !== undefined ? { isPremium: query.premium } : {}),
         },
         orderBy: { rating: 'desc' },
@@ -61,7 +64,7 @@ export class TemplatesService {
   async get(id: string) {
     try {
       const template = await this.prisma.template.findFirst({
-        where: { id, isPublished: true },
+        where: { id, ...CATALOG_WHERE },
       });
       if (template) return template;
     } catch {
@@ -77,7 +80,7 @@ export class TemplatesService {
     try {
       const items = await this.prisma.template.findMany({
         where: {
-          isPublished: true,
+          ...CATALOG_WHERE,
           category: category as TemplateCategory,
         },
         orderBy: { rating: 'desc' },

@@ -21,6 +21,7 @@ export class UsersService {
         avatarUrl: true,
         phone: true,
         location: true,
+        countryCode: true,
         bio: true,
         subscriptionTier: true,
         isEmailVerified: true,

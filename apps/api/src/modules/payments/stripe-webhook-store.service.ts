@@ -1,9 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.module';
 import { RedisService } from '../../redis/redis.module';
 
 const REDIS_PROCESSED_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+/** Covers Stripe retrieve + 3 retries with backoff; expires so a crashed pod cannot block Stripe retries. */
+export const WEBHOOK_LOCK_TTL_SECONDS = 60;
 const REDIS_PREFIX = 'stripe:webhook:';
 
 export type DlqMessage = {
@@ -17,10 +19,28 @@ export type DlqMessage = {
 
 @Injectable()
 export class StripeWebhookStoreService {
+  private readonly logger = new Logger(StripeWebhookStoreService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService
   ) {}
+
+  async acquireProcessingLock(eventId: string): Promise<boolean> {
+    const ok = await this.redis.setNx(
+      `${REDIS_PREFIX}lock:${eventId}`,
+      '1',
+      WEBHOOK_LOCK_TTL_SECONDS
+    );
+    if (!ok) {
+      this.logger.warn(`Webhook ${eventId} already processing (redis lock)`);
+    }
+    return ok;
+  }
+
+  async releaseProcessingLock(eventId: string): Promise<void> {
+    await this.redis.del(`${REDIS_PREFIX}lock:${eventId}`);
+  }
 
   async isProcessed(eventId: string): Promise<boolean> {
     const cached = await this.redis.get(`${REDIS_PREFIX}processed:${eventId}`);
@@ -51,7 +71,10 @@ export class StripeWebhookStoreService {
           where: { id: eventId },
         });
         if (existing?.status === 'processed') return false;
-        return existing?.status === 'dlq';
+        // Reclaim `processing` after a crash (Redis lock expired). Never reclaim `dlq`
+        // — that path is retryDlqEvent only, to avoid racing the DLQ worker.
+        if (existing?.status === 'processing') return true;
+        return false;
       }
       throw err;
     }

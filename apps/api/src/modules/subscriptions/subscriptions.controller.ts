@@ -32,7 +32,9 @@ export class SubscriptionsController {
   }
 
   @Post('checkout')
-  @ApiOperation({ summary: 'Create Stripe Checkout Session' })
+  @ApiOperation({
+    summary: 'Create checkout session (Stripe by default; CinetPay coming in Phase 2)',
+  })
   checkout(@CurrentUser() user: AuthUser, @Body() dto: CheckoutDto) {
     return this.subscriptions.checkout(user.id, dto);
   }

@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { captureServerException } from '../../observability';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -41,6 +42,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       }
     } else if (exception instanceof Error) {
       this.logger.error(exception.message, exception.stack, requestId);
+    }
+
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      captureServerException(exception, {
+        tags: { request_id: requestId, path: request.url },
+        extra: { code, status },
+      });
     }
 
     response.status(status).json({

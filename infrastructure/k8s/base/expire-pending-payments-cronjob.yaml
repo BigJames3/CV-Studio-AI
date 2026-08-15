@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: expire-pending-payments
+  namespace: cvstudio
+  labels:
+    app.kubernetes.io/name: expire-pending-payments
+    app.kubernetes.io/part-of: cvstudio
+spec:
+  schedule: '10 * * * *'
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: expire-pending
+              image: cvstudioai/api:latest
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - secretRef:
+                    name: api-secrets
+              env:
+                - name: NODE_ENV
+                  value: production
+                - name: WORKER_KIND
+                  value: expire-pending
+              command: ['node', 'dist/scripts/expire-pending-payments.js']

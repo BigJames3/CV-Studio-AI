@@ -10,16 +10,27 @@ export class LoggingInterceptor implements NestInterceptor {
     const { method, url } = req;
     const userId = req.user?.id ?? '-';
     const started = Date.now();
+    const jsonLogs = process.env.LOG_FORMAT === 'json';
 
     return next.handle().pipe(
       tap({
         next: () => {
           const ms = Date.now() - started;
-          this.logger.log(`${method} ${url} ${ms}ms user=${userId}`);
+          if (jsonLogs) {
+            this.logger.log(JSON.stringify({ msg: 'http', method, url, ms, userId }));
+          } else {
+            this.logger.log(`${method} ${url} ${ms}ms user=${userId}`);
+          }
         },
         error: (err: Error) => {
           const ms = Date.now() - started;
-          this.logger.warn(`${method} ${url} ${ms}ms user=${userId} err=${err.message}`);
+          if (jsonLogs) {
+            this.logger.warn(
+              JSON.stringify({ msg: 'http_error', method, url, ms, userId, err: err.message })
+            );
+          } else {
+            this.logger.warn(`${method} ${url} ${ms}ms user=${userId} err=${err.message}`);
+          }
         },
       })
     );

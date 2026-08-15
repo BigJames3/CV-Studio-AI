@@ -41,6 +41,10 @@ services:
       DATABASE_URL: postgresql://cvstudio:cvstudio@postgres:5432/cvstudio?schema=public
       REDIS_URL: redis://redis:6379
       PORT: '3001'
+      API_URL: http://localhost:3001
+      APP_URL: http://localhost:3000
+      CINETPAY_FAIL_CLOSED: 'true'
+      LOG_FORMAT: json
     ports:
       - '3001:3001'
     depends_on:

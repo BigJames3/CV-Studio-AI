@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { track } from '@/lib/analytics';
 import {
   Dialog,
   DialogContent,
@@ -64,6 +66,10 @@ export function PaywallModal({
   const safeLimit = Math.max(cvLimit, 1);
   const usagePercent = Math.min(100, Math.round((cvCount / safeLimit) * 100));
 
+  useEffect(() => {
+    if (isOpen) track('paywall_viewed', { feature });
+  }, [isOpen, feature]);
+
   return (
     <Dialog
       open={isOpen}
@@ -72,7 +78,7 @@ export function PaywallModal({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" data-testid="paywall-modal">
         <DialogHeader>
           <DialogTitle>{copy.title}</DialogTitle>
           <DialogDescription>{copy.description}</DialogDescription>
@@ -124,8 +130,10 @@ export function PaywallModal({
           </Button>
           <Button
             type="button"
+            data-testid="paywall-upgrade"
             className="w-full border-0 bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-1 hover:from-purple-700 hover:to-blue-700 sm:w-auto"
             onClick={() => {
+              track('paywall_cta_clicked', { feature });
               onClose();
               router.push('/account/billing?utm_source=paywall&utm_medium=modal');
             }}

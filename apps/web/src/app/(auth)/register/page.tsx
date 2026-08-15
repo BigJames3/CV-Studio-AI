@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
@@ -10,14 +11,22 @@ import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 import { LinkedInSignInButton } from '@/components/auth/linkedin-sign-in-button';
+import { track } from '@/lib/analytics';
 
 export default function RegisterPage() {
   const router = useRouter();
   const registerMutation = useRegister();
   const form = useForm<RegisterInput>({ resolver: zodResolver(registerSchema) });
 
+  useEffect(() => {
+    track('signup_started');
+  }, []);
+
   return (
-    <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 py-12">
+    <div
+      className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 py-12"
+      data-testid="register-page"
+    >
       <h1 className="text-2xl font-semibold">Créer un compte</h1>
       <p className="mt-1 text-sm text-content-secondary">
         Déjà inscrit ?{' '}

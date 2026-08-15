@@ -1,8 +1,17 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+  Optional,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import Stripe from 'stripe';
 import { PrismaService } from '../../database/prisma.module';
 import { EntitlementsService } from './entitlements.service';
 import { CheckoutDto, UpdateSubscriptionDto, CreateSubscriptionDto } from './dto/subscription.dto';
+import { CinetpayGateway } from '../payments/gateways/cinetpay.gateway';
 
 @Injectable()
 export class SubscriptionsService {
@@ -11,7 +20,10 @@ export class SubscriptionsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly entitlements: EntitlementsService
+    private readonly entitlements: EntitlementsService,
+    @Optional()
+    @Inject(forwardRef(() => CinetpayGateway))
+    private readonly cinetpayGateway?: CinetpayGateway
   ) {
     const key = process.env.STRIPE_SECRET_KEY;
     if (key && !key.includes('xxx')) {
@@ -81,6 +93,12 @@ export class SubscriptionsService {
   }
 
   async checkout(userId: string, dto: CheckoutDto) {
+    const paymentMethod = dto.paymentMethod ?? 'stripe';
+
+    if (paymentMethod === 'cinetpay') {
+      return this.checkoutCinetpay(userId, dto);
+    }
+
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
     });
@@ -173,13 +191,16 @@ export class SubscriptionsService {
     };
   }
 
-  async applyStripeSubscription(params: {
+  async applyPaidEntitlement(params: {
     userId: string;
-    planName: string;
-    stripeSubscriptionId: string;
-    status: string;
-    currentPeriodStart: Date;
-    currentPeriodEnd: Date;
+    plan: string;
+    provider: 'stripe' | 'cinetpay';
+    status?: string;
+    periodEnd: Date;
+    periodStart?: Date;
+    stripeSubscriptionId?: string;
+    cinetpayTransactionId?: string;
+    cancelAtPeriodEnd?: boolean;
   }) {
     const statusMap: Record<string, 'active' | 'canceled' | 'past_due' | 'trialing'> = {
       active: 'active',
@@ -189,53 +210,140 @@ export class SubscriptionsService {
       unpaid: 'past_due',
     };
 
-    const mappedStatus = statusMap[params.status] ?? 'active';
+    const mappedStatus = statusMap[params.status ?? 'active'] ?? 'active';
     const isCanceled = mappedStatus === 'canceled';
+    const cancelAtPeriodEnd = Boolean(params.cancelAtPeriodEnd) && !isCanceled;
+    const periodStart = params.periodStart ?? new Date();
     const tier =
-      isCanceled || params.planName.toLowerCase() === 'free'
+      isCanceled || params.plan.toLowerCase() === 'free'
         ? 'free'
-        : params.planName.toLowerCase() === 'business'
+        : params.plan.toLowerCase() === 'business'
           ? 'business'
-          : params.planName.toLowerCase() === 'pro'
+          : params.plan.toLowerCase() === 'pro'
             ? 'pro'
-            : 'free';
+            : null;
+
+    if (!tier) {
+      throw new Error(
+        `Unknown plan for ${params.provider} sync: ${params.plan}. ` +
+          `Please ensure STRIPE_PRICE_PRO_* and STRIPE_PRICE_BUSINESS_* are configured correctly.`
+      );
+    }
 
     const planName = tier === 'free' ? 'Free' : this.planName(tier);
     const plan = await this.prisma.plan.findUnique({ where: { name: planName } });
     if (!plan) {
-      this.logger.warn(`Plan not found for Stripe sync: ${planName}`);
-      return;
+      throw new Error(
+        `Unknown plan for ${params.provider} sync: ${planName}. Seed the plans table before processing webhooks.`
+      );
     }
 
-    await this.prisma.subscription.upsert({
+    const providerIds = {
+      ...(params.stripeSubscriptionId !== undefined
+        ? { stripeSubscriptionId: params.stripeSubscriptionId }
+        : {}),
+      ...(params.cinetpayTransactionId !== undefined
+        ? { cinetpayTransactionId: params.cinetpayTransactionId }
+        : {}),
+    };
+
+    const subscription = await this.prisma.subscription.upsert({
       where: { userId: params.userId },
       create: {
         userId: params.userId,
         planId: plan.id,
         status: mappedStatus,
-        currentPeriodStart: params.currentPeriodStart,
-        currentPeriodEnd: params.currentPeriodEnd,
-        stripeSubscriptionId: params.stripeSubscriptionId,
-        canceledAt: isCanceled ? new Date() : null,
-      },
+        provider: params.provider,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: params.periodEnd,
+        lastPaymentError: null,
+        cancelAtPeriodEnd,
+        canceledAt: isCanceled || cancelAtPeriodEnd ? new Date() : null,
+        ...providerIds,
+      } as never,
       update: {
         planId: plan.id,
         status: mappedStatus,
-        currentPeriodStart: params.currentPeriodStart,
-        currentPeriodEnd: params.currentPeriodEnd,
-        stripeSubscriptionId: params.stripeSubscriptionId,
-        cancelAtPeriodEnd: false,
-        canceledAt: isCanceled ? new Date() : null,
-      },
+        provider: params.provider,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: params.periodEnd,
+        lastPaymentError: null,
+        cancelAtPeriodEnd,
+        canceledAt: isCanceled || cancelAtPeriodEnd ? new Date() : null,
+        ...providerIds,
+      } as never,
     });
 
     await this.prisma.user.update({
       where: { id: params.userId },
       data: {
         subscriptionTier: tier,
-        subscriptionStartDate: params.currentPeriodStart,
-        subscriptionEndDate: params.currentPeriodEnd,
+        subscriptionStartDate: periodStart,
+        subscriptionEndDate: params.periodEnd,
       },
+    });
+
+    this.logger.log(`Entitlement granted: ${params.userId} → ${tier} (via ${params.provider})`);
+    return subscription;
+  }
+
+  /** @deprecated Prefer applyPaidEntitlement — kept for Stripe call-site compatibility. */
+  async applyStripeSubscription(params: {
+    userId: string;
+    planName: string;
+    stripeSubscriptionId: string;
+    status: string;
+    currentPeriodStart: Date;
+    currentPeriodEnd: Date;
+    cancelAtPeriodEnd?: boolean;
+  }) {
+    return this.applyPaidEntitlement({
+      userId: params.userId,
+      plan: params.planName,
+      provider: 'stripe',
+      status: params.status,
+      periodStart: params.currentPeriodStart,
+      periodEnd: params.currentPeriodEnd,
+      stripeSubscriptionId: params.stripeSubscriptionId,
+      cancelAtPeriodEnd: params.cancelAtPeriodEnd,
+    });
+  }
+
+  private async checkoutCinetpay(userId: string, dto: CheckoutDto) {
+    if (!this.cinetpayGateway) {
+      throw new BadRequestException({
+        code: 'CINETPAY_NOT_CONFIGURED',
+        message: 'CinetPay is not configured in this environment',
+      });
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+    });
+    if (!user) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found' });
+
+    const plan = await this.prisma.plan.findUnique({
+      where: { name: this.planName(dto.plan) },
+    });
+    if (!plan) throw new NotFoundException({ code: 'PLAN_NOT_FOUND', message: 'Plan not found' });
+
+    const now = new Date();
+    const subscription = await this.prisma.subscription.upsert({
+      where: { userId },
+      create: {
+        userId,
+        planId: plan.id,
+        status: 'trialing',
+        currentPeriodStart: now,
+        currentPeriodEnd: now,
+      },
+      update: {},
+    });
+
+    return this.cinetpayGateway.createPayment(userId, {
+      plan: dto.plan,
+      interval: dto.interval,
+      subscriptionId: subscription.id,
     });
   }
 

@@ -8,9 +8,23 @@ import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { bootstrapObservability } from './observability';
+import { closeSentry } from './observability/sentry';
+import { shutdownPostHog } from './observability/posthog';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
+  bootstrapObservability();
+  const logLevel = (process.env.LOG_LEVEL ??
+    (process.env.NODE_ENV === 'production' ? 'log' : 'debug')) as
+    'log' | 'error' | 'warn' | 'debug' | 'verbose';
+  const loggerLevels: Array<'log' | 'error' | 'warn' | 'debug' | 'verbose'> =
+    logLevel === 'debug' || logLevel === 'verbose'
+      ? ['error', 'warn', 'log', 'debug']
+      : ['error', 'warn', 'log'];
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+    logger: loggerLevels,
+  });
 
   // WYSIWYG HTML can include inlined styles + photos
   app.useBodyParser('json', { limit: '10mb' });
@@ -62,9 +76,15 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, document);
 
   const port = Number(process.env.PORT ?? 3001);
+  app.enableShutdownHooks();
   await app.listen(port);
   // eslint-disable-next-line no-console
   console.log(`API listening on :${port} — Swagger /docs`);
 }
 
 bootstrap();
+
+process.once('beforeExit', () => {
+  void closeSentry();
+  void shutdownPostHog();
+});

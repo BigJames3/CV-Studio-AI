@@ -1,49 +1,27 @@
-name: Deploy Gate
+name: Deploy to Production (manual)
 
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'ECR image tag to deploy (sha-...). Must already exist from a green CI/staging build.'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
 
 concurrency:
-  group: deploy-gate-${{ github.ref }}
+  group: deploy-prod
   cancel-in-progress: false
 
 jobs:
-  gate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9.15.0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: '.nvmrc'
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Type check
-        run: pnpm type-check
-
-      - name: Test
-        run: pnpm test
-
-      - name: Build
-        run: pnpm build --filter=@cvstudio/api --filter=@cvstudio/web
-
-      - name: Hand off to CD
-        run: |
-          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
-            echo "Staging deploy handled by cd-staging.yml"
-          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "Production deploy handled by cd-prod.yml"
-          fi
+  deploy:
+    uses: ./.github/workflows/cd-prod.yml
+    with:
+      image_tag: ${{ inputs.image_tag }}
+    secrets: inherit
+    permissions:
+      id-token: write
+      contents: read

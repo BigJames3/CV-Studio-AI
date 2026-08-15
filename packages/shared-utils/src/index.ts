@@ -59,6 +59,33 @@ export function slugify(input: string) {
     .replace(/^-+|-+$/g, '');
 }
 
+export type PaymentProvider = 'stripe' | 'cinetpay';
+
+/** WAEMU + CEMAC + other CinetPay-supported countries (ISO 3166-1 alpha-2). */
+const CINETPAY_COUNTRIES = new Set([
+  'SN',
+  'CI',
+  'BF',
+  'ML',
+  'BJ',
+  'TG',
+  'NE',
+  'GW',
+  'CM',
+  'CF',
+  'CG',
+  'GQ',
+  'GA',
+  'TD',
+  'CD',
+  'GN',
+]);
+
+export function suggestPaymentMethod(countryCode?: string | null): PaymentProvider {
+  if (!countryCode) return 'stripe';
+  return CINETPAY_COUNTRIES.has(countryCode.toUpperCase()) ? 'cinetpay' : 'stripe';
+}
+
 export const emailSchema = z.string().email();
 export const passwordSchema = z
   .string()

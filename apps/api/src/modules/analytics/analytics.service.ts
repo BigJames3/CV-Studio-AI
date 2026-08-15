@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.module';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import {
+  captureServerEvent,
+  getMarketingSpendMonthly,
+  sanitizeEventProperties,
+} from '../../observability/posthog';
 
 @Injectable()
 export class AnalyticsService {
@@ -39,8 +45,39 @@ export class AnalyticsService {
   }
 
   /**
-   * Dual-write: persist to analytics_events + forward to Amplitude (TODO).
-   * Never accept CV body / secrets in properties — validated by API layer conventions.
+   * CAC = monthly marketing spend / new paid customers this calendar month.
+   * Returns null CAC when spend is 0 (dashboard should show "—").
+   */
+  async unitEconomics() {
+    const marketingSpendMonthly = getMarketingSpendMonthly();
+    const start = new Date();
+    start.setUTCDate(1);
+    start.setUTCHours(0, 0, 0, 0);
+
+    const newPaidCustomers = await this.prisma.user.count({
+      where: {
+        deletedAt: null,
+        subscriptionTier: { in: ['pro', 'business'] },
+        createdAt: { gte: start },
+      },
+    });
+
+    const cac =
+      marketingSpendMonthly > 0 && newPaidCustomers > 0
+        ? Math.round((marketingSpendMonthly / newPaidCustomers) * 100) / 100
+        : null;
+
+    return {
+      marketingSpendMonthly,
+      newPaidCustomers,
+      cac,
+      periodStart: start.toISOString(),
+    };
+  }
+
+  /**
+   * Dual-write: persist to analytics_events + forward to PostHog.
+   * Never accept CV body / secrets in properties — stripped server-side.
    */
   async track(
     userId: string,
@@ -51,20 +88,24 @@ export class AnalyticsService {
       platform?: string;
     }
   ) {
-    const props = {
+    const props = sanitizeEventProperties({
       ...(input.properties ?? {}),
       session_id: input.sessionId,
       platform: input.platform ?? 'web',
-    };
+    });
     const row = await this.prisma.analyticsEvent.create({
       data: {
         userId,
         eventType: input.event,
-        eventData: props,
+        eventData: props as Prisma.InputJsonValue,
         sessionId: input.sessionId,
       },
     });
-    // TODO: Amplitude HTTP API forward (server key from Secrets Manager)
+    captureServerEvent({
+      distinctId: userId,
+      event: input.event,
+      properties: props,
+    });
     return { id: row.id, event: row.eventType, createdAt: row.createdAt };
   }
 }

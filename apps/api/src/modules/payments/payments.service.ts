@@ -3,6 +3,8 @@ import {
   Logger,
   BadRequestException,
   ServiceUnavailableException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import Stripe from 'stripe';
 import { Prisma } from '@prisma/client';
@@ -11,6 +13,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { MailService } from '../../mail/mail.service';
 import { StripeWebhookStoreService } from './stripe-webhook-store.service';
 import { StripeAlertService } from './stripe-alert.service';
+import { availablePaymentMethods } from './payment-env';
 
 const MAX_RETRIES = 3;
 
@@ -29,6 +32,7 @@ export class PaymentsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => SubscriptionsService))
     private readonly subscriptions: SubscriptionsService,
     private readonly mail: MailService,
     private readonly webhookStore: StripeWebhookStoreService,
@@ -51,14 +55,66 @@ export class PaymentsService {
     return { items };
   }
 
+  async getStatus(userId: string, transactionId: string) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { transactionId },
+      include: { subscription: true },
+    });
+
+    if (!payment || payment.subscription.userId !== userId) {
+      return { status: 'not_found' as const, transactionId };
+    }
+
+    return {
+      status: payment.status,
+      paymentMethod: payment.paymentMethod,
+      transactionId,
+    };
+  }
+
+  availableMethods() {
+    return availablePaymentMethods();
+  }
+
+  /**
+   * Mark payments stuck in `pending` for longer than `maxAgeMs` as failed.
+   * Late ACCEPTED notifies still grant (completeAcceptedPayment accepts failed → completed).
+   */
+  async expireStalePending(maxAgeMs = 60 * 60 * 1000) {
+    const cutoff = new Date(Date.now() - maxAgeMs);
+    const expired = await this.prisma.payment.updateMany({
+      where: {
+        status: 'pending',
+        createdAt: { lt: cutoff },
+      },
+      data: {
+        status: 'failed',
+        failedReason: 'Payment confirmation timeout (> 60 minutes)',
+      },
+    });
+    if (expired.count > 0) {
+      this.logger.log(
+        JSON.stringify({
+          message: 'Expired pending payments',
+          count: expired.count,
+          cutoff: cutoff.toISOString(),
+        })
+      );
+    }
+    return { count: expired.count };
+  }
+
   async handleStripeWebhook(rawBody: Buffer, signature: string) {
     const secret = process.env.STRIPE_WEBHOOK_SECRET;
     if (!this.stripe || !secret || secret.includes('xxx')) {
       if (isProduction()) {
-        this.alerts.captureException(new Error('Stripe webhook received but Stripe is not configured'), {
-          level: 'fatal',
-          extra: { failClosed: true },
-        });
+        this.alerts.captureException(
+          new Error('Stripe webhook received but Stripe is not configured'),
+          {
+            level: 'fatal',
+            extra: { failClosed: true },
+          }
+        );
         throw new ServiceUnavailableException({
           code: 'STRIPE_NOT_CONFIGURED',
           message: 'Stripe webhooks are not configured (fail-closed)',
@@ -84,7 +140,8 @@ export class PaymentsService {
   }
 
   /**
-   * Idempotent webhook processing with exponential backoff (3 attempts) then DLQ + Sentry.
+   * Idempotent webhook processing with a Redis NX lock (multi-pod), then
+   * DB unique event.id, exponential backoff (3 attempts), then DLQ + Sentry.
    */
   async processEventWithRetry(event: Stripe.Event): Promise<void> {
     const idempotencyKey = event.id;
@@ -94,54 +151,73 @@ export class PaymentsService {
       return;
     }
 
-    const claimed = await this.webhookStore.markProcessing(idempotencyKey, event.type, event.data);
-    if (!claimed && (await this.webhookStore.isProcessed(idempotencyKey))) {
-      this.logger.log(`Webhook ${idempotencyKey} already processed (race)`);
+    const locked = await this.webhookStore.acquireProcessingLock(idempotencyKey);
+    if (!locked) {
+      this.logger.warn(`Webhook ${idempotencyKey} skipped — already processing on another pod`);
       return;
     }
 
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        await this.dispatchEvent(event);
-        await this.webhookStore.markProcessed(idempotencyKey);
+    try {
+      if (await this.webhookStore.isProcessed(idempotencyKey)) {
+        this.logger.log(`Webhook ${idempotencyKey} already processed (after lock)`);
         return;
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-        await this.webhookStore.incrementAttempts(idempotencyKey, lastError.message);
+      }
 
-        if (attempt < MAX_RETRIES) {
-          const delay = Math.pow(2, attempt) * 1000;
-          this.logger.warn(
-            `Webhook ${idempotencyKey} attempt ${attempt} failed, retry in ${delay}ms: ${lastError.message}`
-          );
-          await sleep(delay);
+      const claimed = await this.webhookStore.markProcessing(
+        idempotencyKey,
+        event.type,
+        event.data
+      );
+      if (!claimed) {
+        this.logger.log(`Webhook ${idempotencyKey} not claimed (processed or DLQ)`);
+        return;
+      }
+
+      let lastError: Error | null = null;
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          await this.dispatchEvent(event);
+          await this.webhookStore.markProcessed(idempotencyKey);
+          return;
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          await this.webhookStore.incrementAttempts(idempotencyKey, lastError.message);
+
+          if (attempt < MAX_RETRIES) {
+            const delay = Math.pow(2, attempt) * 1000;
+            this.logger.warn(
+              `Webhook ${idempotencyKey} attempt ${attempt} failed, retry in ${delay}ms: ${lastError.message}`
+            );
+            await sleep(delay);
+          }
         }
       }
+
+      this.logger.error(
+        `Webhook ${idempotencyKey} failed after ${MAX_RETRIES} retries: ${lastError?.message}`
+      );
+
+      await this.webhookStore.pushDlq({
+        eventId: event.id,
+        eventType: event.type,
+        data: event.data,
+        error: lastError?.message,
+        timestamp: new Date(),
+        attempts: MAX_RETRIES,
+      });
+
+      this.alerts.captureException(lastError, {
+        eventId: event.id,
+        eventType: event.type,
+        retries: MAX_RETRIES,
+        level: 'fatal',
+      });
+
+      throw lastError ?? new Error('Webhook processing failed');
+    } finally {
+      await this.webhookStore.releaseProcessingLock(idempotencyKey);
     }
-
-    this.logger.error(
-      `Webhook ${idempotencyKey} failed after ${MAX_RETRIES} retries: ${lastError?.message}`
-    );
-
-    await this.webhookStore.pushDlq({
-      eventId: event.id,
-      eventType: event.type,
-      data: event.data,
-      error: lastError?.message,
-      timestamp: new Date(),
-      attempts: MAX_RETRIES,
-    });
-
-    this.alerts.captureException(lastError, {
-      eventId: event.id,
-      eventType: event.type,
-      retries: MAX_RETRIES,
-      level: 'fatal',
-    });
-
-    throw lastError ?? new Error('Webhook processing failed');
   }
 
   /** Replay a single DLQ event (used by CronJob / webhook:retry-dlq). */
@@ -221,7 +297,6 @@ export class PaymentsService {
 
   private async onCheckoutCompleted(session: Stripe.Checkout.Session) {
     const userId = session.client_reference_id ?? session.metadata?.userId;
-    const plan = session.metadata?.plan ?? 'pro';
     if (!userId || !session.subscription) {
       throw new Error(
         `checkout.session.completed missing userId or subscription (session=${session.id})`
@@ -231,17 +306,22 @@ export class PaymentsService {
     const stripeSubId =
       typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
     const stripeSub = await this.stripe!.subscriptions.retrieve(stripeSubId);
+    const plan = resolvePaidPlan(session, stripeSub);
 
-    await this.subscriptions.applyStripeSubscription({
+    await this.subscriptions.applyPaidEntitlement({
       userId,
-      planName: plan,
-      stripeSubscriptionId: stripeSub.id,
+      plan,
+      provider: 'stripe',
       status: stripeSub.status,
-      currentPeriodStart: new Date(stripeSub.current_period_start * 1000),
-      currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
+      periodStart: new Date(stripeSub.current_period_start * 1000),
+      periodEnd: new Date(stripeSub.current_period_end * 1000),
+      stripeSubscriptionId: stripeSub.id,
+      cancelAtPeriodEnd: Boolean(stripeSub.cancel_at_period_end),
     });
 
-    this.logger.log(`Subscription synced for user ${userId} via checkout ${session.id}`);
+    this.logger.log(
+      `Subscription synced for user ${userId} via checkout ${session.id} plan=${plan}`
+    );
   }
 
   private async onSubscriptionChanged(stripeSub: Stripe.Subscription) {
@@ -256,28 +336,50 @@ export class PaymentsService {
       userId = local.userId;
     }
 
-    const planName =
-      stripeSub.status === 'canceled' || stripeSub.status === 'unpaid'
-        ? stripeSub.metadata?.plan ?? 'free'
-        : stripeSub.metadata?.plan ?? 'pro';
+    const isFullyCanceled = stripeSub.status === 'canceled' || stripeSub.status === 'unpaid';
+    const cancelAtPeriodEnd = Boolean(stripeSub.cancel_at_period_end) && !isFullyCanceled;
 
-    await this.subscriptions.applyStripeSubscription({
+    let planName: string;
+    if (isFullyCanceled) {
+      planName = 'free';
+    } else {
+      const resolved = tryResolvePaidPlanFromSubscription(stripeSub);
+      if (resolved) {
+        planName = resolved;
+      } else {
+        const user = await this.prisma.user.findFirst({
+          where: { id: userId, deletedAt: null },
+          select: { subscriptionTier: true },
+        });
+        if (!user || !isPaidPlan(user.subscriptionTier)) {
+          throw new Error(
+            `Unknown plan for subscription ${stripeSub.id}. ` +
+              `Please ensure STRIPE_PRICE_PRO_* and STRIPE_PRICE_BUSINESS_* are configured correctly.`
+          );
+        }
+        planName = user.subscriptionTier;
+      }
+    }
+
+    await this.subscriptions.applyPaidEntitlement({
       userId,
-      planName: stripeSub.status === 'canceled' ? 'free' : planName,
+      plan: planName,
+      provider: 'stripe',
+      status: isFullyCanceled ? 'canceled' : stripeSub.status,
+      periodStart: new Date(stripeSub.current_period_start * 1000),
+      periodEnd: new Date(stripeSub.current_period_end * 1000),
       stripeSubscriptionId: stripeSub.id,
-      status: stripeSub.status === 'canceled' ? 'canceled' : stripeSub.status,
-      currentPeriodStart: new Date(stripeSub.current_period_start * 1000),
-      currentPeriodEnd: new Date(stripeSub.current_period_end * 1000),
+      cancelAtPeriodEnd,
     });
 
-    this.logger.log(`Subscription ${stripeSub.id} status=${stripeSub.status} for user ${userId}`);
+    this.logger.log(
+      `Subscription ${stripeSub.id} status=${stripeSub.status} cancelAtPeriodEnd=${cancelAtPeriodEnd} for user ${userId}`
+    );
   }
 
   private async onInvoicePaid(invoice: Stripe.Invoice) {
     const stripeSubId =
-      typeof invoice.subscription === 'string'
-        ? invoice.subscription
-        : invoice.subscription?.id;
+      typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
     if (!stripeSubId) {
       throw new Error(`invoice.paid missing subscription (invoice=${invoice.id})`);
     }
@@ -336,9 +438,7 @@ export class PaymentsService {
 
   private async onInvoiceFailed(invoice: Stripe.Invoice) {
     const stripeSubId =
-      typeof invoice.subscription === 'string'
-        ? invoice.subscription
-        : invoice.subscription?.id;
+      typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
     if (!stripeSubId) {
       throw new Error(`invoice.payment_failed missing subscription (invoice=${invoice.id})`);
     }
@@ -392,4 +492,54 @@ export class PaymentsService {
 
     this.logger.warn(`Payment failed for subscription ${sub.id}`);
   }
+}
+
+export type PaidPlan = 'pro' | 'business';
+
+export function isPaidPlan(value: unknown): value is PaidPlan {
+  return value === 'pro' || value === 'business';
+}
+
+export function mapStripePriceToPlan(priceId: string | undefined | null): PaidPlan | null {
+  if (!priceId) return null;
+  const mapping: Record<string, PaidPlan> = {};
+  const add = (envKey: string, plan: PaidPlan) => {
+    const id = process.env[envKey];
+    if (id && !id.includes('xxx')) mapping[id] = plan;
+  };
+  add('STRIPE_PRICE_PRO_MONTHLY', 'pro');
+  add('STRIPE_PRICE_PRO_YEARLY', 'pro');
+  add('STRIPE_PRICE_PRO_ANNUAL', 'pro');
+  add('STRIPE_PRICE_BUSINESS_MONTHLY', 'business');
+  add('STRIPE_PRICE_BUSINESS_YEARLY', 'business');
+  add('STRIPE_PRICE_BUSINESS_ANNUAL', 'business');
+  return mapping[priceId] ?? null;
+}
+
+export function tryResolvePaidPlanFromSubscription(
+  stripeSub: Stripe.Subscription
+): PaidPlan | null {
+  const fromMeta = stripeSub.metadata?.plan;
+  if (isPaidPlan(fromMeta)) return fromMeta;
+  const price = stripeSub.items?.data?.[0]?.price;
+  const priceId = typeof price === 'string' ? price : price?.id;
+  return mapStripePriceToPlan(priceId);
+}
+
+export function resolvePaidPlan(
+  session: Pick<Stripe.Checkout.Session, 'id' | 'metadata'>,
+  stripeSub: Stripe.Subscription
+): PaidPlan {
+  const fromMeta = session.metadata?.plan ?? stripeSub.metadata?.plan;
+  if (isPaidPlan(fromMeta)) return fromMeta;
+
+  const price = stripeSub.items?.data?.[0]?.price;
+  const priceId = typeof price === 'string' ? price : price?.id;
+  const fromPrice = mapStripePriceToPlan(priceId);
+  if (fromPrice) return fromPrice;
+
+  throw new Error(
+    `Unknown plan for price ${priceId ?? 'missing'} (session ${session.id}). ` +
+      `Please ensure STRIPE_PRICE_PRO_* and STRIPE_PRICE_BUSINESS_* are configured correctly.`
+  );
 }

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { createPageMetadata } from '@/lib/seo';
+import { PricingAnalytics } from '@/components/analytics/pricing-analytics';
 
 export const metadata = createPageMetadata({
   title: 'Pricing',
@@ -32,7 +33,8 @@ const plans = [
 
 export default function PricingPage() {
   return (
-    <div className="mx-auto max-w-content px-4 py-16">
+    <div className="mx-auto max-w-content px-4 py-16" data-testid="pricing-page">
+      <PricingAnalytics />
       <h1 className="text-4xl font-semibold">Tarifs simples</h1>
       <p className="mt-2 text-content-secondary">
         Sans watermark sur le PDF Free. Annulation self-serve.
@@ -41,6 +43,7 @@ export default function PricingPage() {
         {plans.map((p) => (
           <div
             key={p.name}
+            data-testid={`pricing-plan-${p.name.toLowerCase()}`}
             className={`rounded-lg border border-border bg-surface-card p-6 shadow-1 ${
               p.highlight ? 'ring-2 ring-primary' : ''
             }`}
@@ -53,7 +56,11 @@ export default function PricingPage() {
               ))}
             </ul>
             <Link href={p.cta} className="mt-8 block">
-              <Button className="w-full" variant={p.highlight ? 'primary' : 'secondary'}>
+              <Button
+                className="w-full"
+                variant={p.highlight ? 'primary' : 'secondary'}
+                data-testid={`pricing-cta-${p.name.toLowerCase()}`}
+              >
                 Commencer
               </Button>
             </Link>

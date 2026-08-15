@@ -1,13 +1,20 @@
 name: CD Production Blue-Green
 
 on:
-  push:
-    tags: ['v*']
+  workflow_call:
+    inputs:
+      image_tag:
+        description: 'Image tag already in ECR (sha-...). Empty = build sha-<12> from this commit.'
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Image tag already in ECR (sha-...)'
-        required: true
+        description: 'Image tag already in ECR (sha-...). Empty = build from this commit.'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   id-token: write
@@ -20,6 +27,7 @@ jobs:
   deploy-prod:
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -32,23 +40,85 @@ jobs:
       - name: Resolve tag
         id: tag
         run: |
-          if [ -n "${{ inputs.image_tag }}" ]; then
-            echo "sha=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          INPUT="${{ inputs.image_tag }}"
+          if [ -n "$INPUT" ]; then
+            echo "sha=$INPUT" >> "$GITHUB_OUTPUT"
+            echo "build=false" >> "$GITHUB_OUTPUT"
           else
             echo "sha=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Login ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Check images in ECR
+        id: ecr
+        env:
+          TAG: ${{ steps.tag.outputs.sha }}
+        run: |
+          present=true
+          for repo in cvstudio/api cvstudio/web cvstudio/worker; do
+            if ! aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+              present=false
+            fi
+          done
+          echo "present=$present" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push images
+        if: steps.tag.outputs.build == 'true' && steps.ecr.outputs.present != 'true'
+        env:
+          REG: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-west-1.amazonaws.com
+          TAG: ${{ steps.tag.outputs.sha }}
+        run: |
+          docker build -t "$REG/cvstudio/api:$TAG" -f apps/api/Dockerfile apps/api
+          docker build -t "$REG/cvstudio/web:$TAG" -f apps/web/Dockerfile apps/web
+          docker build -t "$REG/cvstudio/worker:$TAG" -f apps/api/Dockerfile.worker apps/api
+          docker push "$REG/cvstudio/api:$TAG"
+          docker push "$REG/cvstudio/web:$TAG"
+          docker push "$REG/cvstudio/worker:$TAG"
+
+      - name: Verify images exist in ECR
+        env:
+          TAG: ${{ steps.tag.outputs.sha }}
+        run: |
+          for repo in cvstudio/api cvstudio/web cvstudio/worker; do
+            aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$TAG" \
+              --query 'imageDetails[0].imageTags' --output text
+          done
 
       - name: Kubeconfig
         run: aws eks update-kubeconfig --name cvstudio-prod --region $AWS_REGION
 
-      - name: Migrate (expand-safe)
+      - name: Migrate (expand-safe, release SHA)
+        env:
+          REG: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-west-1.amazonaws.com
+          TAG: ${{ steps.tag.outputs.sha }}
         run: |
-          # Job image updated to new tag then applied
           kubectl -n cvstudio delete job db-migrate --ignore-not-found
-          kubectl apply -k infrastructure/k8s/overlays/prod
-          kubectl -n cvstudio wait --for=condition=complete job/db-migrate --timeout=300s || true
+          kubectl -n cvstudio apply -f - <<EOF
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: db-migrate
+            namespace: cvstudio
+          spec:
+            ttlSecondsAfterFinished: 300
+            template:
+              spec:
+                restartPolicy: Never
+                serviceAccountName: api
+                containers:
+                  - name: migrate
+                    image: ${REG}/cvstudio/api:${TAG}
+                    command: ['pnpm', 'exec', 'prisma', 'migrate', 'deploy']
+                    envFrom:
+                      - secretRef:
+                          name: api-secrets
+          EOF
+          kubectl -n cvstudio wait --for=condition=complete job/db-migrate --timeout=300s
 
-      - name: Scale green & set image
+      - name: Scale green & set API image
         run: |
           REG="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-west-1.amazonaws.com"
           TAG="${{ steps.tag.outputs.sha }}"
@@ -56,18 +126,89 @@ jobs:
           kubectl -n cvstudio scale deploy/api-green --replicas=3
           kubectl -n cvstudio rollout status deploy/api-green --timeout=300s
 
-      - name: Smoke green (port-forward or internal)
+      - name: Smoke green (internal)
         run: |
           kubectl -n cvstudio port-forward deploy/api-green 8080:3001 &
-          sleep 3
-          curl -fsS http://127.0.0.1:8080/api/v1/health/ready
+          PF_PID=$!
+          trap 'kill $PF_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8080/api/v1/health/ready; then
+              curl -fsS http://127.0.0.1:8080/api/v1/health
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Green never became ready"
+          exit 1
 
       - name: Flip Service to green
         run: |
           kubectl -n cvstudio patch svc api -p '{"spec":{"selector":{"app":"api","version":"green"}}}'
 
-      - name: Drain blue (delay)
+      - name: Roll web + worker
         run: |
-          sleep 120
-          kubectl -n cvstudio scale deploy/api --replicas=0
-          # Optionally rename green→blue in a follow-up stabilization job
+          REG="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-west-1.amazonaws.com"
+          TAG="${{ steps.tag.outputs.sha }}"
+          kubectl -n cvstudio set image deploy/web web=$REG/cvstudio/web:$TAG
+          kubectl -n cvstudio set image deploy/worker worker=$REG/cvstudio/worker:$TAG || true
+          kubectl -n cvstudio rollout status deploy/web --timeout=300s
+          kubectl -n cvstudio rollout status deploy/worker --timeout=300s || true
+
+      - name: Post-flip public smoke
+        run: |
+          curl -fsS https://api.cvstudio.ai/api/v1/health/ready
+          BODY=$(curl -fsS https://api.cvstudio.ai/api/v1/health)
+          echo "$BODY"
+          echo "$BODY" | grep -q '"status":"ok"'
+          curl -fsS -o /dev/null -w "%{http_code}\n" https://cvstudio.ai/
+          curl -fsS -o /dev/null -w "%{http_code}\n" https://cvstudio.ai/marketplace
+          if echo "$BODY" | grep -q '"sentry":true'; then
+            echo "Sentry configured"
+          else
+            echo "::warning::Sentry not configured on /health — deploy continues"
+          fi
+          if echo "$BODY" | grep -q '"posthog":true'; then
+            echo "PostHog configured"
+          else
+            echo "::warning::PostHog not configured on /health — deploy continues"
+          fi
+
+      - name: Keep blue as rollback target
+        if: success()
+        run: |
+          kubectl -n cvstudio scale deploy/api --replicas=1
+          echo "Blue kept at 1 replica for rollback. See docs/runbooks/production-rollback.md"
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Prod deploy/smoke failed — reverting traffic to blue"
+          kubectl -n cvstudio patch svc api -p '{"spec":{"selector":{"app":"api","version":"blue"}}}' || true
+          kubectl -n cvstudio scale deploy/api --replicas=3 || true
+          kubectl -n cvstudio scale deploy/api-green --replicas=0 || true
+          kubectl -n cvstudio rollout undo deploy/web || true
+          kubectl -n cvstudio rollout undo deploy/worker || true
+          kubectl -n cvstudio rollout status deploy/api --timeout=180s || true
+          kubectl -n cvstudio rollout status deploy/web --timeout=180s || true
+          kubectl -n cvstudio rollout status deploy/worker --timeout=180s || true
+          echo "Post-rollback smoke"
+          curl -fsS https://api.cvstudio.ai/api/v1/health/ready || echo "::error::Blue health failed after rollback"
+          curl -fsS -o /dev/null -w "%{http_code}\n" https://cvstudio.ai/ || true
+
+      - name: Slack
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL not set — skip"
+            exit 0
+          fi
+          if [ "${{ job.status }}" = "success" ]; then
+            TEXT="✅ Prod deploy ${{ steps.tag.outputs.sha }} — ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          else
+            TEXT="🚨 Prod deploy failed — rollback executed — ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          fi
+          curl -sS -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            --data "{\"text\":\"$TEXT\"}"

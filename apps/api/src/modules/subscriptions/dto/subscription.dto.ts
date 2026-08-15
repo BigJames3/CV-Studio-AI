@@ -10,6 +10,11 @@ export class CheckoutDto {
   @IsIn(['month', 'year'])
   interval!: 'month' | 'year';
 
+  @ApiPropertyOptional({ enum: ['stripe', 'cinetpay'] })
+  @IsOptional()
+  @IsIn(['stripe', 'cinetpay'])
+  paymentMethod?: 'stripe' | 'cinetpay';
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

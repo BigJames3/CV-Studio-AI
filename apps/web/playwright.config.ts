@@ -72,6 +72,7 @@ export default defineConfig({
               process.env.JWT_ACCESS_SECRET ?? 'e2e-access-secret-min-32-characters!!',
             JWT_REFRESH_SECRET:
               process.env.JWT_REFRESH_SECRET ?? 'e2e-refresh-secret-min-32-characters!',
+            ENCRYPTION_KEY: process.env.ENCRYPTION_KEY ?? 'e2e-encryption-key-min-32-characters!!',
           },
         },
         {

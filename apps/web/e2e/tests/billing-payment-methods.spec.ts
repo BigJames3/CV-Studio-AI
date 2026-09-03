@@ -12,7 +12,7 @@ test.describe('Billing payment methods', () => {
     await expect(page.getByLabel(/CinetPay \(Mobile Money\)/)).toBeVisible();
   });
 
-  test('shows success banner for ?checkout=success @payment', async ({
+  test('shows activation-in-progress banner for ?checkout=success while still free @payment', async ({
     page,
     testUser,
     billingPage,
@@ -21,8 +21,52 @@ test.describe('Billing payment methods', () => {
     await page.goto('/account/billing?checkout=success');
     await expect(page.getByTestId('billing-page')).toBeVisible();
     await expect(page.getByTestId('checkout-success-banner')).toBeVisible();
-    await expect(page.getByText(/Abonnement activé/)).toBeVisible();
+    await expect(page.getByText(/Paiement reçu|Activation en cours/)).toBeVisible();
     await billingPage.expectPlan('free');
+  });
+
+  test('polls until plan updates after checkout success @payment', async ({ page, testUser }) => {
+    await loginAs(page, testUser);
+
+    let grantPro = false;
+    await page.route('**/api/v1/subscriptions/me**', async (route) => {
+      const tier = grantPro ? 'pro' : 'free';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            subscription:
+              tier === 'pro'
+                ? {
+                    status: 'active',
+                    cancelAtPeriodEnd: false,
+                    currentPeriodEnd: new Date().toISOString(),
+                    currentPeriodStart: new Date().toISOString(),
+                  }
+                : null,
+            tier,
+            entitlements: {
+              cvCreate: true,
+              aiOptimize: tier !== 'free',
+              exportDocx: false,
+            },
+          },
+        }),
+      });
+    });
+
+    await page.goto('/account/billing?checkout=success');
+    await expect(page.getByTestId('checkout-success-banner')).toBeVisible();
+    await expect(page.getByTestId('checkout-activation-status')).toContainText(
+      /Activation en cours/
+    );
+    await expect(page.getByTestId('plan-badge')).toContainText(/free/i);
+
+    grantPro = true;
+    await expect(page.getByTestId('plan-badge')).toContainText(/pro/i, { timeout: 15_000 });
+    await expect(page.getByText(/Abonnement activé/)).toBeVisible();
   });
 
   test('shows cancel and failed banners from query params @payment', async ({ page, testUser }) => {

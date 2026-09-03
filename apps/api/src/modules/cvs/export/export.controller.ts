@@ -12,9 +12,9 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { Public, CurrentUser, AuthUser } from '../../../common/decorators';
+import { CurrentUser, AuthUser } from '../../../common/decorators';
 import { PdfExportService } from './pdf-export.service';
-import { ExportPdfDto, BatchExportPdfDto } from './dto/export-pdf.dto';
+import { ExportPdfDto, BatchExportPdfDto, PDF_HTML_MAX_CHARS } from './dto/export-pdf.dto';
 
 @ApiTags('CV Export')
 @Controller('cvs')
@@ -24,12 +24,12 @@ export class CvExportController {
   constructor(private readonly exportService: PdfExportService) {}
 
   @Post('export/pdf')
-  @Public()
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Sync PDF from CV content (local drafts + guests)' })
+  @ApiBearerAuth('JWT')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Sync PDF from CV content (authenticated)' })
   async renderPdf(
     @Body() dto: ExportPdfDto,
-    @CurrentUser() user?: AuthUser
+    @CurrentUser() user: AuthUser
   ): Promise<StreamableFile> {
     if (!dto.html && !dto.content) {
       throw new HttpException(
@@ -42,11 +42,11 @@ export class CvExportController {
       );
     }
 
-    if (dto.html && dto.html.length > 10_000_000) {
+    if (dto.html && dto.html.length > PDF_HTML_MAX_CHARS) {
       throw new HttpException(
         {
           statusCode: HttpStatus.BAD_REQUEST,
-          message: 'HTML too large (>10MB)',
+          message: `HTML too large (>${PDF_HTML_MAX_CHARS} characters)`,
           suggestion: 'Reduce photo size or export without large images',
         },
         HttpStatus.BAD_REQUEST
@@ -67,7 +67,7 @@ export class CvExportController {
           quality: dto.html ? 'high' : (dto.quality ?? 'standard'),
           siteUrl: dto.siteUrl,
         },
-        user?.id
+        user.id
       );
 
       return new StreamableFile(result.buffer, {

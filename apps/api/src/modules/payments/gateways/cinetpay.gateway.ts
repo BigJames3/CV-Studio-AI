@@ -12,6 +12,7 @@ import { PrismaService } from '../../../database/prisma.module';
 import { SubscriptionsService } from '../../subscriptions/subscriptions.service';
 import { isNonPlaceholderSecret, isCinetpayFailClosed } from '../payment-env';
 import { logPayment } from '../payment-log';
+import { safeReturnUrl } from '../../../common/utils/url.utils';
 
 const CINETPAY_API_URL = 'https://api-checkout.cinetpay.com';
 const DEFAULT_USD_XOF_RATE = 656;
@@ -52,6 +53,7 @@ export class CinetpayGateway {
       plan: CinetpayPlan;
       interval: CinetpayInterval;
       subscriptionId: string;
+      returnUrl?: string;
     }
   ) {
     const { apiKey, siteId } = this.requireCredentials();
@@ -73,6 +75,7 @@ export class CinetpayGateway {
 
     const amountXof = this.amountXof(params.plan, params.interval, subscription.plan);
     const transactionId = `cv_${userId.replace(/-/g, '').slice(0, 8)}_${Date.now()}`;
+    const returnUrl = this.safeCinetpayReturnUrl(params.returnUrl, appUrl, transactionId);
     const metadata: PaymentMetadata = {
       plan: params.plan,
       interval: params.interval,
@@ -127,7 +130,7 @@ export class CinetpayGateway {
           customer_state: 'AB',
           customer_zip_code: '00225',
           notify_url: `${apiUrl}/api/v1/payments/webhook/cinetpay`,
-          return_url: `${appUrl}/account/billing?checkout=pending&provider=cinetpay&tx=${transactionId}`,
+          return_url: returnUrl,
         }),
       });
 
@@ -397,6 +400,24 @@ export class CinetpayGateway {
       this.config.get<string>('NEXT_PUBLIC_APP_URL') ??
       'http://localhost:3000'
     ).replace(/\/$/, '');
+  }
+
+  /**
+   * CinetPay must return to billing pending+tx so the UI can poll.
+   * Client-provided URLs are allowlisted, then checkout/provider/tx are forced.
+   */
+  private safeCinetpayReturnUrl(
+    input: string | undefined,
+    appUrl: string,
+    transactionId: string
+  ): string {
+    const fallback = `${appUrl}/account/billing?checkout=pending&provider=cinetpay&tx=${encodeURIComponent(transactionId)}`;
+    const safe = safeReturnUrl(input, fallback, appUrl);
+    const url = new URL(safe);
+    url.searchParams.set('checkout', 'pending');
+    url.searchParams.set('provider', 'cinetpay');
+    url.searchParams.set('tx', transactionId);
+    return url.toString();
   }
 
   private apiBaseUrl() {

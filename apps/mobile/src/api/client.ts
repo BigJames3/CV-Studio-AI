@@ -28,6 +28,7 @@ export async function apiClient<T>(path: string, opts: Options = {}): Promise<T>
   const headers: Record<string, string> = {
     Accept: 'application/json',
     'Content-Type': 'application/json',
+    'X-Client': 'mobile',
   };
   if (auth) {
     const token = useAuthStore.getState().accessToken;

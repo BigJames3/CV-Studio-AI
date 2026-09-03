@@ -93,17 +93,17 @@ Facts known · what we did · what users should do (reset password / revoke shar
 
 ---
 
-## 6. Contacts (fill before GA)
+## 6. Contacts
 
-| Role                      | Primary | Backup |
-| ------------------------- | ------- | ------ |
-| Incident Commander roster |         |        |
-| CISO                      |         |        |
-| DPO / Legal               |         |        |
-| AWS TAM / Shield          |         |        |
-| Stripe support            |         |        |
-| PR / Comms                |         |        |
-| Forensic retainer         |         |        |
+See **[IR_ROSTER.md](./IR_ROSTER.md)** for paging env vars. Checklist: [INCIDENT-RESPONSE-PLAYBOOK.md](./INCIDENT-RESPONSE-PLAYBOOK.md). Notify: [BREACH-NOTIFICATION.md](./BREACH-NOTIFICATION.md).
+
+| Role               | Primary                               | Backup            |
+| ------------------ | ------------------------------------- | ----------------- |
+| Incident commander | Engineering lead (interim)            | Founder           |
+| CISO               | Vacant — founder interim              | —                 |
+| DPO / Legal        | privacy@cvstudio.ai                   | legal@cvstudio.ai |
+| Stripe             | Dashboard (test mode until prod host) | —                 |
+| Paging             | `IR_WEBHOOK_URL` + Sentry             | —                 |
 
 ---
 

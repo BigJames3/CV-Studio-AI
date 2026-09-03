@@ -1,12 +1,12 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
+import { getEncryptionKey } from './auth-secrets';
 
 const ALGO = 'aes-256-gcm';
 const IV_LEN = 12;
 const TAG_LEN = 16;
 
 function encryptionKey(): Buffer {
-  const raw = process.env.ENCRYPTION_KEY ?? process.env.JWT_ACCESS_SECRET ?? 'dev-encryption-key';
-  return createHash('sha256').update(raw).digest();
+  return createHash('sha256').update(getEncryptionKey()).digest();
 }
 
 /** AES-256-GCM: iv (12) || tag (16) || ciphertext */
@@ -28,4 +28,21 @@ export function decryptUtf8(payload: Buffer): string {
   const decipher = createDecipheriv(ALGO, encryptionKey(), iv);
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
+}
+
+/** Encrypt OAuth provider tokens before persisting. */
+export function encryptOauthToken(token: string): Buffer {
+  return encryptUtf8(token);
+}
+
+/**
+ * Decrypt OAuth tokens. Legacy rows stored UTF-8 plaintext — accept those on read
+ * so existing accounts keep working, then re-encrypt on the next write.
+ */
+export function decryptOauthToken(payload: Buffer): string {
+  try {
+    return decryptUtf8(payload);
+  } catch {
+    return payload.toString('utf8');
+  }
 }

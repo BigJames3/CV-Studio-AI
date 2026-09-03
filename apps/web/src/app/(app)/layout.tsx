@@ -2,6 +2,7 @@
 
 import { AppTopbar } from '@/components/layout/app-topbar';
 import { PaywallModal } from '@/components/paywall/paywall-modal';
+import { GeoConsentBanner } from '@/components/geo-consent-banner';
 import { useUiStore } from '@/stores/ui-store';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -18,6 +19,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         cvCount={paywall.cvCount}
         cvLimit={paywall.cvLimit}
       />
+      <GeoConsentBanner />
     </div>
   );
 }

@@ -1,15 +1,29 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useAuthStore } from '../../stores/auth-store';
+import { authApi } from '../../api';
 import { colors, spacing, typography, radii } from '../../theme/tokens';
 
 export function AccountScreen() {
   const logout = useAuthStore((s) => s.logout);
+  const refreshToken = useAuthStore((s) => s.refreshToken);
 
   return (
     <View style={styles.root}>
       <Text style={styles.body}>Profile, billing, notification preferences.</Text>
-      <Pressable style={styles.cta} onPress={() => void logout()}>
+      <Pressable
+        style={styles.cta}
+        onPress={() => {
+          void (async () => {
+            try {
+              await authApi.logout(refreshToken);
+            } catch {
+              /* still clear local session */
+            }
+            await logout();
+          })();
+        }}
+      >
         <Text style={styles.ctaText}>Sign out</Text>
       </Pressable>
     </View>

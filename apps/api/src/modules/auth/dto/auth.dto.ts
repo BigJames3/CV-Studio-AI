@@ -7,20 +7,23 @@ import {
   IsOptional,
   Matches,
   ValidateIf,
+  IsIn,
 } from 'class-validator';
+import { PASSWORD_REGEX } from '@cvstudio/shared-utils';
+
+const PASSWORD_MESSAGE =
+  'Password must be ≥12 characters and include a letter, a number, and a special character';
 
 export class RegisterDto {
   @ApiProperty({ example: 'lea@example.com' })
   @IsEmail()
   email!: string;
 
-  @ApiProperty({ minLength: 8 })
+  @ApiProperty({ minLength: 12 })
   @IsString()
-  @MinLength(8)
+  @MinLength(12)
   @MaxLength(128)
-  @Matches(/^(?=.*[A-Za-z])(?=.*\d).+$/, {
-    message: 'Password must contain a letter and a number',
-  })
+  @Matches(PASSWORD_REGEX, { message: PASSWORD_MESSAGE })
   password!: string;
 
   @ApiProperty()
@@ -83,6 +86,39 @@ export class OAuthLinkedInDto {
   @ApiProperty()
   @IsString()
   redirectUri!: string;
+
+  @ApiPropertyOptional({ description: 'CSRF state issued by POST /auth/oauth/state' })
+  @IsOptional()
+  @IsString()
+  state?: string;
+}
+
+export class CreateOAuthStateDto {
+  @ApiProperty({ enum: ['google', 'linkedin'] })
+  @IsString()
+  @IsIn(['google', 'linkedin'])
+  provider!: 'google' | 'linkedin';
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  next?: string;
+}
+
+export class CompleteTwoFactorDto {
+  @ApiProperty()
+  @IsString()
+  tempToken!: string;
+
+  @ApiPropertyOptional({ description: 'TOTP code' })
+  @IsOptional()
+  @IsString()
+  totp?: string;
+
+  @ApiPropertyOptional({ description: 'One-time backup code' })
+  @IsOptional()
+  @IsString()
+  backupCode?: string;
 }
 
 export class OAuthAppleDto {
@@ -115,10 +151,10 @@ export class TwoFactorVerifyDto {
 }
 
 export class TwoFactorDisableDto {
-  @ApiProperty({ example: '123456', description: 'Current TOTP code to confirm disable' })
+  @ApiProperty({ example: '123456', description: 'TOTP or backup code to confirm disable' })
   @IsString()
   @MinLength(6)
-  @MaxLength(6)
+  @MaxLength(32)
   code!: string;
 }
 
@@ -135,11 +171,9 @@ export class ResetPasswordDto {
 
   @ApiProperty()
   @IsString()
-  @MinLength(8)
+  @MinLength(12)
   @MaxLength(128)
-  @Matches(/^(?=.*[A-Za-z])(?=.*\d).+$/, {
-    message: 'Password must contain a letter and a number',
-  })
+  @Matches(PASSWORD_REGEX, { message: PASSWORD_MESSAGE })
   newPassword!: string;
 }
 
@@ -155,13 +189,11 @@ export class ChangePasswordDto {
   @IsString()
   currentPassword!: string;
 
-  @ApiProperty({ minLength: 8 })
+  @ApiProperty({ minLength: 12 })
   @IsString()
-  @MinLength(8)
+  @MinLength(12)
   @MaxLength(128)
-  @Matches(/^(?=.*[A-Za-z])(?=.*\d).+$/, {
-    message: 'Password must contain a letter and a number',
-  })
+  @Matches(PASSWORD_REGEX, { message: PASSWORD_MESSAGE })
   newPassword!: string;
 }
 

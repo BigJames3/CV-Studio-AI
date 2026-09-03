@@ -1,0 +1,120 @@
+name: cvstudio
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres-1
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: cvstudio
+      POSTGRES_USER: cvstudio
+      POSTGRES_PASSWORD: cvstudio
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    command: ['postgres', '-c', 'shared_preload_libraries=pg_stat_statements']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U cvstudio -d cvstudio']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - cvstudio_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-1
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    command: ['redis-server', '--appendonly', 'yes']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - cvstudio_network
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: mailpit-1
+    ports:
+      - '8025:8025'
+      - '1025:1025'
+    networks:
+      - cvstudio_network
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: cvstudio-api
+    ports:
+      - '3001:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: '3001'
+      DATABASE_URL: postgresql://cvstudio:cvstudio@postgres:5432/cvstudio?schema=public
+      DIRECT_DATABASE_URL: postgresql://cvstudio:cvstudio@postgres:5432/cvstudio?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: dev-only-change-me-access-min-32-chars!!
+      JWT_REFRESH_SECRET: dev-only-change-me-refresh-min-32-chars!
+      ENCRYPTION_KEY: dev-only-change-me-encrypt-min-32-chars!!
+      APP_URL: http://localhost:3000
+      API_URL: http://localhost:3001
+      CORS_ORIGINS: http://localhost:3000,http://localhost:3003
+      SMTP_HOST: mailpit
+      SMTP_PORT: '1025'
+      MAIL_FROM: CV Studio AI <noreply@cvstudio.local>
+      CINETPAY_FAIL_CLOSED: 'true'
+      LOG_FORMAT: json
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://127.0.0.1:3001/api/v1/health/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 60s
+    networks:
+      - cvstudio_network
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3001/api/v1
+    container_name: cvstudio-web
+    ports:
+      - '3000:3000'
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:3001/api/v1
+      PORT: '3000'
+      HOSTNAME: 0.0.0.0
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://127.0.0.1:3000/api/health']
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    networks:
+      - cvstudio_network
+
+networks:
+  cvstudio_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

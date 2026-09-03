@@ -12,6 +12,7 @@ import { PrismaService } from '../../database/prisma.module';
 import { EntitlementsService } from './entitlements.service';
 import { CheckoutDto, UpdateSubscriptionDto, CreateSubscriptionDto } from './dto/subscription.dto';
 import { CinetpayGateway } from '../payments/gateways/cinetpay.gateway';
+import { appOriginFromEnv, safeReturnUrl } from '../../common/utils/url.utils';
 
 @Injectable()
 export class SubscriptionsService {
@@ -48,6 +49,10 @@ export class SubscriptionsService {
     };
   }
 
+  /**
+   * Internal only (Stripe fail-open / CinetPay placeholder). Paid entitlements
+   * must be granted via applyPaidEntitlement after a verified webhook.
+   */
   async create(userId: string, dto: CreateSubscriptionDto) {
     const plan = await this.prisma.plan.findUnique({ where: { name: this.planName(dto.plan) } });
     if (!plan) throw new NotFoundException({ code: 'PLAN_NOT_FOUND', message: 'Plan not found' });
@@ -92,6 +97,48 @@ export class SubscriptionsService {
     });
   }
 
+  /** Immediate Stripe cancel for account erasure (GDPR). Does not throw if Stripe is down. */
+  async cancelImmediately(userId: string): Promise<{
+    hadSubscription: boolean;
+    stripeCanceled: boolean;
+  }> {
+    const sub = await this.prisma.subscription.findUnique({ where: { userId } });
+    let stripeCanceled = false;
+
+    if (sub?.stripeSubscriptionId && this.stripe) {
+      try {
+        await this.stripe.subscriptions.cancel(sub.stripeSubscriptionId);
+        stripeCanceled = true;
+      } catch (error) {
+        this.logger.error(
+          `Immediate Stripe cancel failed for user ${userId}`,
+          error instanceof Error ? error.stack : error
+        );
+      }
+    }
+
+    if (sub) {
+      await this.prisma.subscription.update({
+        where: { userId },
+        data: {
+          status: 'canceled',
+          cancelAtPeriodEnd: false,
+          canceledAt: new Date(),
+        },
+      });
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        subscriptionTier: 'free',
+        subscriptionEndDate: new Date(),
+      },
+    });
+
+    return { hadSubscription: Boolean(sub), stripeCanceled };
+  }
+
   async checkout(userId: string, dto: CheckoutDto) {
     const paymentMethod = dto.paymentMethod ?? 'stripe';
 
@@ -109,9 +156,17 @@ export class SubscriptionsService {
     });
     if (!plan) throw new NotFoundException({ code: 'PLAN_NOT_FOUND', message: 'Plan not found' });
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
-    const successUrl = dto.successUrl ?? `${appUrl}/account/billing?checkout=success`;
-    const cancelUrl = dto.cancelUrl ?? `${appUrl}/account/billing?checkout=cancel`;
+    const appUrl = appOriginFromEnv();
+    const successUrl = safeReturnUrl(
+      dto.successUrl,
+      `${appUrl}/account/billing?checkout=success`,
+      appUrl
+    );
+    const cancelUrl = safeReturnUrl(
+      dto.cancelUrl,
+      `${appUrl}/account/billing?checkout=cancel`,
+      appUrl
+    );
 
     if (!this.stripe) {
       const failClosed =
@@ -344,6 +399,7 @@ export class SubscriptionsService {
       plan: dto.plan,
       interval: dto.interval,
       subscriptionId: subscription.id,
+      returnUrl: dto.successUrl,
     });
   }
 

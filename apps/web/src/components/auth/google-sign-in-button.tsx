@@ -5,14 +5,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { authApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api/client';
+import { sanitizeNextPath } from '@/lib/safe-next';
 
-type Props = { nextPath?: string };
+type Props = {
+  nextPath?: string;
+  onRequires2fa?: (tempToken: string) => void;
+};
 
 /**
  * Renders Google Identity Services button when NEXT_PUBLIC_GOOGLE_CLIENT_ID is set.
  * Sends the resulting id_token to POST /auth/oauth/google.
  */
-export function GoogleSignInButton({ nextPath = '/dashboard' }: Props) {
+export function GoogleSignInButton({ nextPath = '/dashboard', onRequires2fa }: Props) {
   const router = useRouter();
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
   const [error, setError] = useState<string | null>(null);
@@ -23,13 +27,22 @@ export function GoogleSignInButton({ nextPath = '/dashboard' }: Props) {
     async (credential: string) => {
       setError(null);
       try {
-        await authApi.oauthGoogle({ idToken: credential });
-        router.push(nextPath);
+        const result = await authApi.oauthGoogle({ idToken: credential });
+        if ('requires2fa' in result && result.tempToken) {
+          if (onRequires2fa) {
+            onRequires2fa(result.tempToken);
+            return;
+          }
+          sessionStorage.setItem('oauth_temp_token', result.tempToken);
+          router.push('/login');
+          return;
+        }
+        router.push(sanitizeNextPath(nextPath));
       } catch (err) {
         setError(err instanceof ApiError ? err.message : 'Connexion Google impossible');
       }
     },
-    [nextPath, router]
+    [nextPath, onRequires2fa, router]
   );
 
   useEffect(() => {

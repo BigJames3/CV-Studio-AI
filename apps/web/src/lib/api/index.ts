@@ -1,4 +1,4 @@
-import { apiClient, setAccessToken } from './client';
+import { apiClient, setAccessToken, setLogoutInProgress } from './client';
 import { useAuthStore } from '@/stores/auth-store';
 
 export const queryKeys = {
@@ -18,6 +18,7 @@ export const queryKeys = {
   sessions: ['auth', 'sessions'] as const,
   payments: ['payments', 'history'] as const,
   paymentMethods: ['payments', 'methods'] as const,
+  geoCountry: ['geo', 'country'] as const,
 };
 
 export type AuthResponse = {
@@ -33,7 +34,7 @@ export type AuthResponse = {
   };
 };
 
-export type LoginResult = AuthResponse | { requires2fa: true };
+export type LoginResult = AuthResponse | { requires2fa: true; tempToken?: string };
 
 function applyAuth(data: AuthResponse) {
   setAccessToken(data.accessToken);
@@ -65,6 +66,7 @@ export const authApi = {
     return applyAuth(data);
   },
   logout: async () => {
+    setLogoutInProgress(true);
     try {
       // Never refresh-on-401 during logout — that would re-issue session cookies.
       await apiClient('/auth/logout', { method: 'POST', body: {}, skipRefresh: true });
@@ -73,6 +75,7 @@ export const authApi = {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('cv_logout_at', String(Date.now()));
       }
+      setLogoutInProgress(false);
     }
   },
   getProfile: () => apiClient<UserProfile>('/auth/profile'),
@@ -103,18 +106,6 @@ export const authApi = {
     }),
   resendVerification: () =>
     apiClient<{ sent: boolean }>('/auth/resend-verification', { method: 'POST', body: {} }),
-  oauthGoogle: (payload: { idToken?: string; code?: string; redirectUri?: string }) =>
-    apiClient<AuthResponse>('/auth/oauth/google', {
-      method: 'POST',
-      body: payload,
-      skipRefresh: true,
-    }).then(applyAuth),
-  oauthLinkedIn: (payload: { code: string; redirectUri: string }) =>
-    apiClient<AuthResponse>('/auth/oauth/linkedin', {
-      method: 'POST',
-      body: payload,
-      skipRefresh: true,
-    }).then(applyAuth),
   enable2fa: () =>
     apiClient<{
       secret: string;
@@ -123,7 +114,7 @@ export const authApi = {
       message: string;
     }>('/auth/2fa/enable', { method: 'POST', body: {} }),
   verify2fa: (code: string) =>
-    apiClient<{ enabled: boolean }>('/auth/2fa/verify', {
+    apiClient<{ enabled: boolean; backupCodes?: string[] }>('/auth/2fa/verify', {
       method: 'POST',
       body: { code },
     }),
@@ -132,6 +123,36 @@ export const authApi = {
       method: 'POST',
       body: { code },
     }),
+  complete2fa: (tempToken: string, totp?: string, backupCode?: string) =>
+    apiClient<AuthResponse>('/auth/2fa/complete', {
+      method: 'POST',
+      body: { tempToken, ...(totp ? { totp } : {}), ...(backupCode ? { backupCode } : {}) },
+      skipRefresh: true,
+    }).then(applyAuth),
+  createOAuthState: (provider: 'google' | 'linkedin', next?: string) =>
+    apiClient<{ state: string; next: string }>('/auth/oauth/state', {
+      method: 'POST',
+      body: { provider, next },
+      skipRefresh: true,
+    }),
+  oauthGoogle: async (payload: { idToken?: string; code?: string; redirectUri?: string }) => {
+    const data = await apiClient<AuthResponse | LoginResult>('/auth/oauth/google', {
+      method: 'POST',
+      body: payload,
+      skipRefresh: true,
+    });
+    if (data && typeof data === 'object' && 'requires2fa' in data) return data;
+    return applyAuth(data as AuthResponse);
+  },
+  oauthLinkedIn: async (payload: { code: string; redirectUri: string; state?: string }) => {
+    const data = await apiClient<AuthResponse | LoginResult>('/auth/oauth/linkedin', {
+      method: 'POST',
+      body: payload,
+      skipRefresh: true,
+    });
+    if (data && typeof data === 'object' && 'requires2fa' in data) return data;
+    return applyAuth(data as AuthResponse);
+  },
   sessions: () =>
     apiClient<{
       items: Array<{
@@ -180,7 +201,15 @@ export const usersApi = {
   getMe: () => apiClient<UserProfile>('/users/me'),
   updateMe: (body: UpdateProfileInput) =>
     apiClient<UserProfile>('/users/me', { method: 'PATCH', body }),
-  deleteMe: () => apiClient<{ deleted: boolean }>('/users/me', { method: 'DELETE' }),
+  deleteMe: () =>
+    apiClient<{
+      deleted: boolean;
+      dataPurged?: boolean;
+      billingCanceled?: boolean;
+      stripeCanceled?: boolean;
+    }>('/users/me', { method: 'DELETE' }),
+  exportMe: () =>
+    apiClient<{ exportedAt: string; user: UserProfile; cvs: unknown[] }>('/users/me/export'),
 };
 
 export type CvListItem = {
@@ -324,6 +353,10 @@ export const paymentsApi = {
       paymentMethod?: string;
       transactionId: string;
     }>(`/payments/status/${encodeURIComponent(transactionId)}`),
+};
+
+export const geoApi = {
+  country: () => apiClient<{ country: string | null; source: 'ip' | 'unknown' }>('/geo/country'),
 };
 
 export const aiApi = {

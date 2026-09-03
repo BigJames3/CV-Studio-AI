@@ -1,9 +1,37 @@
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { withSentryConfig } from '@sentry/nextjs';
+
+const require = createRequire(import.meta.url);
+const dir = path.dirname(fileURLToPath(import.meta.url));
+const reactQueryEntry = path.join(
+  path.dirname(require.resolve('@tanstack/react-query/package.json')),
+  'build/modern/index.js'
+);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  output: 'standalone',
+  outputFileTracingRoot: path.join(dir, '../..'),
+  transpilePackages: [
+    '@tanstack/react-query',
+    '@tanstack/query-core',
+    '@tanstack/react-query-devtools',
+    '@cvstudio/ui',
+    '@cvstudio/shared-ui',
+    '@cvstudio/shared-utils',
+    '@cvstudio/shared-types',
+  ],
+  webpack: (config) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@tanstack/react-query': reactQueryEntry,
+    };
+    return config;
+  },
   images: {
     formats: ['image/avif', 'image/webp'],
     remotePatterns: [
@@ -16,10 +44,32 @@ const nextConfig = {
     instrumentationHook: true,
   },
   async headers() {
+    const apiOrigin = (() => {
+      try {
+        return new URL(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1').origin;
+      } catch {
+        return 'http://localhost:3001';
+      }
+    })();
+    const csp = [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+      "object-src 'none'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://js.stripe.com",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com data:",
+      "img-src 'self' data: https: blob:",
+      `connect-src 'self' ${apiOrigin} https://accounts.google.com https://oauth2.googleapis.com https://api.stripe.com https://*.sentry.io https://*.posthog.com https://us.i.posthog.com`,
+      "frame-src https://accounts.google.com https://js.stripe.com https://hooks.stripe.com",
+    ].join('; ');
+
     return [
       {
         source: '/(.*)',
         headers: [
+          { key: 'Content-Security-Policy', value: csp },
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },

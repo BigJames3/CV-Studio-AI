@@ -1,5 +1,18 @@
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, Min, MaxLength, Allow } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  MaxLength,
+  Allow,
+} from 'class-validator';
 import { Type } from 'class-transformer';
+
+/** 1 MiB — enough for inlined CSS + a photo, far below the previous 10 MB DoS ceiling. */
+export const PDF_HTML_MAX_CHARS = 1_000_000;
 
 export class ExportPdfDto {
   /** Full CV content (editor shape or legacy sections). Required for sync render. */
@@ -11,6 +24,7 @@ export class ExportPdfDto {
   @Allow()
   @IsOptional()
   @IsString()
+  @MaxLength(PDF_HTML_MAX_CHARS)
   html?: string;
 
   @IsOptional()

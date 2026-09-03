@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Get, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  Logger,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SubscriptionsService } from './subscriptions.service';
 import { CheckoutDto, UpdateSubscriptionDto, CreateSubscriptionDto } from './dto/subscription.dto';
@@ -8,12 +17,21 @@ import { CurrentUser, AuthUser } from '../../common/decorators';
 @ApiBearerAuth('JWT')
 @Controller('subscriptions')
 export class SubscriptionsController {
+  private readonly logger = new Logger(SubscriptionsController.name);
+
   constructor(private readonly subscriptions: SubscriptionsService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Create/attach subscription record (prefer checkout)' })
-  create(@CurrentUser() user: AuthUser, @Body() dto: CreateSubscriptionDto) {
-    return this.subscriptions.create(user.id, dto);
+  @ApiOperation({
+    deprecated: true,
+    summary: 'Disabled — paid plans are granted only via checkout + verified webhooks',
+  })
+  create(@CurrentUser() user: AuthUser, @Body() _dto: CreateSubscriptionDto) {
+    this.logger.warn(`Blocked direct subscription create by user ${user.id}`);
+    throw new ForbiddenException({
+      code: 'FORBIDDEN',
+      message: 'Direct subscription creation is disabled. Use POST /subscriptions/checkout.',
+    });
   }
 
   @Get('me')

@@ -11,7 +11,10 @@ export function MarketingHeader() {
         >
           CV Studio AI
         </Link>
-        <nav className="hidden items-center gap-6 text-sm md:flex" aria-label="Navigation principale">
+        <nav
+          className="hidden items-center gap-6 text-sm md:flex"
+          aria-label="Navigation principale"
+        >
           <Link href="/templates" className="text-[#A8C5BE] hover:text-white">
             Templates
           </Link>
@@ -48,6 +51,12 @@ export function MarketingFooter() {
           </Link>
           <Link href="/templates" className="hover:text-white">
             Templates
+          </Link>
+          <Link href="/privacy" className="hover:text-white">
+            Confidentialité
+          </Link>
+          <Link href="/terms" className="hover:text-white">
+            Conditions
           </Link>
           <a href="mailto:support@cvstudio.ai" className="hover:text-white">
             Support

@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsBoolean } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -41,10 +41,15 @@ export class TemplatesController {
     return this.templates.byCategory(category);
   }
 
-  @Public()
   @Post('seed')
-  @ApiOperation({ summary: 'Upsert official template seeds (dev/ops)' })
+  @ApiOperation({ summary: 'Upsert official template seeds (non-production, authenticated)' })
   seed() {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Template seed is disabled in production',
+      });
+    }
     return this.templates.ensureSeeded();
   }
 

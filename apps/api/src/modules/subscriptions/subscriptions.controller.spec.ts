@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { validate } from 'class-validator';
 import { SubscriptionsController } from './subscriptions.controller';
@@ -73,6 +74,17 @@ describe('SubscriptionsController', () => {
     expect(
       Reflect.getMetadata(IS_PUBLIC_KEY, SubscriptionsController.prototype.checkout)
     ).toBeFalsy();
+  });
+
+  it('POST /subscriptions is forbidden for regular users and does not create', () => {
+    expect(() => controller.create(user, { plan: 'pro' })).toThrow(ForbiddenException);
+    expect(subscriptions.create).not.toHaveBeenCalled();
+  });
+
+  it('POST /subscriptions is forbidden for non-admin roles', () => {
+    const nonAdmin: AuthUser = { ...user, roles: ['pro_user'] };
+    expect(() => controller.create(nonAdmin, { plan: 'business' })).toThrow(ForbiddenException);
+    expect(subscriptions.create).not.toHaveBeenCalled();
   });
 });
 

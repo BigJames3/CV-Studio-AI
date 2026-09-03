@@ -318,6 +318,7 @@ describe('SubscriptionsService.checkout', () => {
         plan: 'pro',
         interval: 'month',
         subscriptionId: 'sub-1',
+        returnUrl: undefined,
       });
       expect(createCheckoutSession).not.toHaveBeenCalled();
     });
@@ -368,6 +369,99 @@ describe('SubscriptionsService.checkout', () => {
       });
     });
   });
+
+  describe('return URL allowlist', () => {
+    const origin = 'http://localhost:3000';
+
+    it('passes a valid /account/billing success URL through to Stripe', async () => {
+      await service.checkout(userId, {
+        plan: 'pro',
+        interval: 'month',
+        successUrl: `${origin}/account/billing?checkout=success`,
+        cancelUrl: `${origin}/account/billing?checkout=cancel`,
+      });
+
+      expect(createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success_url: `${origin}/account/billing?checkout=success`,
+          cancel_url: `${origin}/account/billing?checkout=cancel`,
+        })
+      );
+    });
+
+    it('blocks a different origin and uses the billing fallback', async () => {
+      await service.checkout(userId, {
+        plan: 'pro',
+        interval: 'month',
+        successUrl: 'https://evil.example/phish',
+        cancelUrl: 'https://evil.example/cancel',
+      });
+
+      expect(createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success_url: `${origin}/account/billing?checkout=success`,
+          cancel_url: `${origin}/account/billing?checkout=cancel`,
+        })
+      );
+    });
+
+    it('blocks an invalid path on the same origin', async () => {
+      await service.checkout(userId, {
+        plan: 'pro',
+        interval: 'month',
+        successUrl: `${origin}/dashboard`,
+        cancelUrl: `${origin}/login`,
+      });
+
+      expect(createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success_url: `${origin}/account/billing?checkout=success`,
+          cancel_url: `${origin}/account/billing?checkout=cancel`,
+        })
+      );
+    });
+
+    it('uses fallback when successUrl/cancelUrl are omitted', async () => {
+      await service.checkout(userId, { plan: 'pro', interval: 'month' });
+
+      expect(createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success_url: `${origin}/account/billing?checkout=success`,
+          cancel_url: `${origin}/account/billing?checkout=cancel`,
+        })
+      );
+    });
+
+    it('uses fallback for a malformed URL', async () => {
+      await service.checkout(userId, {
+        plan: 'pro',
+        interval: 'month',
+        successUrl: 'not a url',
+        cancelUrl: 'javascript:alert(1)',
+      });
+
+      expect(createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success_url: `${origin}/account/billing?checkout=success`,
+          cancel_url: `${origin}/account/billing?checkout=cancel`,
+        })
+      );
+    });
+
+    it('forwards a client returnUrl to CinetPay (gateway allowlists it)', async () => {
+      await service.checkout(userId, {
+        plan: 'pro',
+        interval: 'month',
+        paymentMethod: 'cinetpay',
+        successUrl: 'https://evil.example/phish',
+      });
+
+      expect(cinetpayGateway.createPayment).toHaveBeenCalledWith(
+        userId,
+        expect.objectContaining({ returnUrl: 'https://evil.example/phish' })
+      );
+    });
+  });
 });
 
 describe('geo-based payment suggestion (v2)', () => {
@@ -383,5 +477,35 @@ describe('geo-based payment suggestion (v2)', () => {
     ['ZZ', 'stripe'],
   ] as const)('country %s → %s', (country, expected) => {
     expect(suggestPaymentMethod(country || undefined)).toBe(expected);
+  });
+});
+
+describe('SubscriptionsService.cancelImmediately', () => {
+  it('marks the local subscription canceled and drops the paid tier', async () => {
+    const prisma = {
+      plan: { findUnique: jest.fn() },
+      subscription: {
+        findUnique: jest.fn().mockResolvedValue({
+          userId: 'user-1',
+          stripeSubscriptionId: null,
+        }),
+        update: jest.fn().mockResolvedValue({}),
+        upsert: jest.fn(),
+      },
+      user: { findFirst: jest.fn(), update: jest.fn().mockResolvedValue({}) },
+    };
+    const service = new SubscriptionsService(prisma as never, {} as never);
+    const result = await service.cancelImmediately('user-1');
+    expect(result).toEqual({ hadSubscription: true, stripeCanceled: false });
+    expect(prisma.subscription.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'canceled' }),
+      })
+    );
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ subscriptionTier: 'free' }),
+      })
+    );
   });
 });

@@ -30,6 +30,11 @@ type RequestOptions = {
 /** Access token stays in memory only (XSS mitigation). Refresh lives in HttpOnly cookie. */
 let memoryAccessToken: string | null = null;
 let refreshPromise: Promise<boolean> | null = null;
+let logoutInProgress = false;
+
+export function setLogoutInProgress(value: boolean) {
+  logoutInProgress = value;
+}
 
 const LOGOUT_BROADCAST_KEY = 'cv_logout_at';
 
@@ -123,9 +128,15 @@ export async function apiClient<T>(path: string, options: RequestOptions = {}): 
   });
 
   if (res.status === 401 && !shouldSkipRefresh(path, options)) {
-    const refreshed = await tryRefresh();
-    if (refreshed) {
-      return apiClient<T>(path, { ...options, skipRefresh: true, token: getAccessToken() });
+    if (!logoutInProgress) {
+      const refreshed = await tryRefresh();
+      if (refreshed) {
+        return apiClient<T>(path, { ...options, skipRefresh: true, token: getAccessToken() });
+      }
+    }
+    clearClientAuth();
+    if (typeof window !== 'undefined') {
+      window.location.assign('/login');
     }
   }
 

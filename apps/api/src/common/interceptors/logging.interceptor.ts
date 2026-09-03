@@ -9,6 +9,7 @@ export class LoggingInterceptor implements NestInterceptor {
     const req = context.switchToHttp().getRequest();
     const { method, url } = req;
     const userId = req.user?.id ?? '-';
+    const requestId = (req.headers['x-request-id'] as string) || '-';
     const started = Date.now();
     const jsonLogs = process.env.LOG_FORMAT === 'json';
 
@@ -17,19 +18,29 @@ export class LoggingInterceptor implements NestInterceptor {
         next: () => {
           const ms = Date.now() - started;
           if (jsonLogs) {
-            this.logger.log(JSON.stringify({ msg: 'http', method, url, ms, userId }));
+            this.logger.log(JSON.stringify({ msg: 'http', method, url, ms, userId, requestId }));
           } else {
-            this.logger.log(`${method} ${url} ${ms}ms user=${userId}`);
+            this.logger.log(`${method} ${url} ${ms}ms user=${userId} requestId=${requestId}`);
           }
         },
         error: (err: Error) => {
           const ms = Date.now() - started;
           if (jsonLogs) {
             this.logger.warn(
-              JSON.stringify({ msg: 'http_error', method, url, ms, userId, err: err.message })
+              JSON.stringify({
+                msg: 'http_error',
+                method,
+                url,
+                ms,
+                userId,
+                requestId,
+                err: err.message,
+              })
             );
           } else {
-            this.logger.warn(`${method} ${url} ${ms}ms user=${userId} err=${err.message}`);
+            this.logger.warn(
+              `${method} ${url} ${ms}ms user=${userId} requestId=${requestId} err=${err.message}`
+            );
           }
         },
       })

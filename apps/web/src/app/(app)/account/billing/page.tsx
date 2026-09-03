@@ -9,10 +9,19 @@ import { PaymentMethodSelector } from '@/components/billing/payment-selector';
 import { queryKeys, subscriptionsApi, paymentsApi, type PaymentHistoryItem } from '@/lib/api';
 import { useMe, useSubscription, useUserPlan } from '@/hooks';
 import { cn, suggestPaymentMethod, type PaymentProvider } from '@/lib/utils';
+import {
+  detectCountry,
+  persistPaymentMethod,
+  readSavedPaymentMethod,
+  GEO_CONSENT_CHANGED_EVENT,
+  type GeoLocation,
+} from '@/lib/geo';
 import { track } from '@/lib/analytics';
 
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_SEC = 300;
+const ACTIVATION_POLL_INTERVAL_MS = 500;
+const ACTIVATION_POLL_MAX_ATTEMPTS = 60;
 
 const PLANS = [
   {
@@ -105,15 +114,16 @@ function BillingPageContent() {
   const queryClient = useQueryClient();
   const { data: user, isLoading, isError } = useMe();
   const { data: subData } = useSubscription();
-  const { tier, isFree, isPro, isBusiness } = useUserPlan();
+  const { tier } = useUserPlan();
 
   const checkoutState = parseCheckoutState(params.get('checkout'));
   const provider = params.get('provider');
   const transactionId = params.get('tx');
   const checkoutErrorParam = params.get('error');
 
-  const suggestedProvider = suggestPaymentMethod(user?.countryCode);
   const [paymentMethod, setPaymentMethod] = useState<PaymentProvider | null>(null);
+  const [polledTier, setPolledTier] = useState<'free' | 'pro' | 'business' | null>(null);
+  const [isPollingActivation, setIsPollingActivation] = useState(false);
 
   const [checkoutPending, setCheckoutPending] = useState<'pro' | 'business' | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -133,6 +143,37 @@ function BillingPageContent() {
     enabled: Boolean(user),
   });
   const cinetpayAvailable = paymentMethods?.cinetpay !== false;
+
+  const [geo, setGeo] = useState<GeoLocation>({
+    countryCode: null,
+    source: 'unknown',
+    consentGiven: false,
+  });
+  const [consentEpoch, setConsentEpoch] = useState(0);
+
+  useEffect(() => {
+    const onConsentChange = () => setConsentEpoch((n) => n + 1);
+    window.addEventListener(GEO_CONSENT_CHANGED_EVENT, onConsentChange);
+    return () => window.removeEventListener(GEO_CONSENT_CHANGED_EVENT, onConsentChange);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void detectCountry(user?.countryCode).then((location) => {
+      if (!cancelled) setGeo(location);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.countryCode, consentEpoch]);
+
+  useEffect(() => {
+    const saved = readSavedPaymentMethod();
+    if (saved) setPaymentMethod(saved);
+  }, []);
+
+  const suggestedProvider = suggestPaymentMethod(geo.countryCode ?? user?.countryCode);
+
   const selectedMethod: PaymentProvider =
     (paymentMethod ?? suggestedProvider) === 'cinetpay' && !cinetpayAvailable
       ? 'stripe'
@@ -145,7 +186,11 @@ function BillingPageContent() {
     ? new Date(subscription.currentPeriodEnd).toLocaleDateString('fr-FR')
     : null;
 
-  const showPaymentSelector = isFree || isPro;
+  const displayTier = polledTier || tier;
+  const displayIsFree = displayTier === 'free';
+  const displayIsPro = displayTier === 'pro';
+  const displayIsBusiness = displayTier === 'business';
+  const showPaymentSelector = displayIsFree || displayIsPro;
 
   useEffect(() => {
     if (checkoutState === 'success') {
@@ -163,6 +208,62 @@ function BillingPageContent() {
       track('checkout_failed', { error: checkoutErrorParam ?? 'declined' });
     }
   }, [checkoutState, checkoutErrorParam, provider, queryClient]);
+
+  useEffect(() => {
+    if (checkoutState !== 'success') {
+      setPolledTier(null);
+      setIsPollingActivation(false);
+      return;
+    }
+
+    if (tier !== 'free') {
+      setPolledTier(tier);
+      setIsPollingActivation(false);
+      return;
+    }
+
+    setIsPollingActivation(true);
+    let cancelled = false;
+    let attempts = 0;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const result = await subscriptionsApi.me();
+        if (cancelled) return;
+        if (result.tier && result.tier !== 'free') {
+          setPolledTier(result.tier);
+          setIsPollingActivation(false);
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.payments }),
+          ]);
+          return;
+        }
+      } catch (error) {
+        console.warn('Subscription activation poll failed:', error);
+      }
+
+      attempts += 1;
+      if (cancelled) return;
+      if (attempts < ACTIVATION_POLL_MAX_ATTEMPTS) {
+        timeoutId = setTimeout(() => {
+          void poll();
+        }, ACTIVATION_POLL_INTERVAL_MS);
+      } else {
+        setIsPollingActivation(false);
+      }
+    };
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [checkoutState, queryClient, tier]);
 
   useEffect(() => {
     if (checkoutState !== 'pending' || !transactionId) return;
@@ -226,6 +327,7 @@ function BillingPageContent() {
     setCheckoutPending(plan);
     setCheckoutError(null);
     track('checkout_started', { plan, interval, payment_method: selectedMethod });
+    persistPaymentMethod(selectedMethod);
     try {
       const { url } = await subscriptionsApi.checkout({
         plan,
@@ -277,6 +379,7 @@ function BillingPageContent() {
   }
 
   const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email;
+  const activationConfirmed = checkoutState === 'success' && displayTier !== 'free';
 
   return (
     <div className="mx-auto max-w-content px-4 py-8" data-testid="billing-page">
@@ -288,11 +391,15 @@ function BillingPageContent() {
 
       {checkoutState === 'success' ? (
         <CheckoutBanner
-          variant="success"
+          variant={activationConfirmed ? 'success' : 'info'}
           testId="checkout-success-banner"
-          title="Abonnement activé !"
+          title={activationConfirmed ? 'Abonnement activé !' : 'Paiement reçu'}
         >
-          <p className="mt-1 text-sm">Votre plan est maintenant actif.</p>
+          <p className="mt-1 text-sm" data-testid="checkout-activation-status">
+            {activationConfirmed
+              ? `Votre plan ${displayTier} est maintenant actif.`
+              : `Activation en cours${isPollingActivation ? '…' : ''}`}
+          </p>
         </CheckoutBanner>
       ) : null}
 
@@ -335,7 +442,7 @@ function BillingPageContent() {
         <h2 className="text-xl font-semibold">Plan actuel</h2>
         <p className="mt-2 text-sm text-content-secondary">Vous êtes actuellement sur</p>
         <p data-testid="plan-badge" className="mt-1 text-2xl font-semibold capitalize">
-          Plan {tier}
+          Plan {displayTier}
         </p>
 
         {cancelAtPeriodEnd && periodEnd ? (
@@ -347,7 +454,7 @@ function BillingPageContent() {
 
         <div className="mt-6 grid gap-4 sm:grid-cols-3">
           {PLANS.map((plan) => {
-            const active = tier === plan.id;
+            const active = displayTier === plan.id;
             return (
               <div
                 key={plan.id}
@@ -368,8 +475,12 @@ function BillingPageContent() {
           <div className="mt-6">
             <PaymentMethodSelector
               value={selectedMethod}
-              onChange={(method) => setPaymentMethod(method)}
+              onChange={(method) => {
+                setPaymentMethod(method);
+                persistPaymentMethod(method);
+              }}
               suggestedProvider={suggestedProvider}
+              geoSource={geo.source}
               disabled={checkoutPending !== null}
               cinetpayAvailable={cinetpayAvailable}
             />
@@ -389,7 +500,7 @@ function BillingPageContent() {
         ) : null}
 
         <div className="mt-6 flex flex-wrap gap-3">
-          {isFree ? (
+          {displayIsFree ? (
             <>
               <Button
                 data-testid="checkout-pro-month"
@@ -420,7 +531,7 @@ function BillingPageContent() {
             </>
           ) : null}
 
-          {isPro ? (
+          {displayIsPro ? (
             <>
               <Button
                 data-testid="checkout-business-month"
@@ -436,13 +547,13 @@ function BillingPageContent() {
             </>
           ) : null}
 
-          {isBusiness ? (
+          {displayIsBusiness ? (
             <p className="text-sm text-content-secondary">
               Contactez le support pour les modifications de votre plan Business.
             </p>
           ) : null}
 
-          {(isPro || isBusiness) && !cancelAtPeriodEnd ? (
+          {(displayIsPro || displayIsBusiness) && !cancelAtPeriodEnd ? (
             cancelConfirm ? (
               <div
                 className="flex w-full flex-wrap items-center gap-2"
@@ -515,6 +626,25 @@ function BillingPageContent() {
           <p className="mt-2 text-sm text-content-secondary">Aucune facture pour le moment</p>
         )}
       </section>
+
+      <details className="mt-6 rounded-lg border border-border bg-surface-card p-4 text-sm">
+        <summary className="cursor-pointer font-medium text-content-primary">
+          Comment nous utilisons votre localisation
+        </summary>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-content-secondary">
+          <li>Source : en-têtes géo (adresse IP) uniquement avec votre accord.</li>
+          <li>Usage : suggérer Stripe ou CinetPay. Vous pouvez changer de méthode.</li>
+          <li>Stockage : aucun stockage permanent de votre adresse IP.</li>
+          <li>Partage : jamais partagé avec des tiers.</li>
+          <li>
+            Contrôle :{' '}
+            <Link href="/account/privacy" className="text-primary underline">
+              paramètres de confidentialité
+            </Link>
+            .
+          </li>
+        </ul>
+      </details>
 
       <div className="mt-8">
         <Button type="button" variant="outline" onClick={() => router.push('/dashboard')}>

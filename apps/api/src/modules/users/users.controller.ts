@@ -16,6 +16,12 @@ export class UsersController {
     return this.users.me(user.id);
   }
 
+  @Get('me/export')
+  @ApiOperation({ summary: 'GDPR/CCPA data export (JSON)' })
+  exportMe(@CurrentUser() user: AuthUser) {
+    return this.users.exportMe(user.id);
+  }
+
   @Patch('me')
   @ApiOperation({ summary: 'Update current user profile' })
   updateMe(@CurrentUser() user: AuthUser, @Body() dto: UpdateUserDto) {
@@ -23,7 +29,7 @@ export class UsersController {
   }
 
   @Delete('me')
-  @ApiOperation({ summary: 'Soft-delete account (GDPR)' })
+  @ApiOperation({ summary: 'Erase account, CV PII, and cancel billing (GDPR Art. 17)' })
   deleteMe(@CurrentUser() user: AuthUser) {
     return this.users.deleteMe(user.id);
   }

@@ -25,6 +25,20 @@ describe('payment-env', () => {
     expect(isCinetpayConfiguredFromEnv()).toBe(true);
   });
 
+  it('should detect CinetPay configured when both keys present', () => {
+    process.env.CINETPAY_API_KEY = 'real_key';
+    process.env.CINETPAY_SITE_ID = 'site_1';
+    expect(isCinetpayConfiguredFromEnv()).toBe(true);
+    expect(availablePaymentMethods().cinetpay).toBe(true);
+  });
+
+  it('should report CinetPay unconfigured when keys missing', () => {
+    delete process.env.CINETPAY_API_KEY;
+    delete process.env.CINETPAY_SITE_ID;
+    expect(isCinetpayConfiguredFromEnv()).toBe(false);
+    expect(availablePaymentMethods().cinetpay).toBe(false);
+  });
+
   it('defaults fail-closed in production', () => {
     delete process.env.CINETPAY_FAIL_CLOSED;
     process.env.NODE_ENV = 'production';

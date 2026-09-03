@@ -1,7 +1,6 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { authApi, cvsApi, queryKeys, subscriptionsApi } from '@/lib/api';
 import { useEditorStore } from '@/stores/editor-store';
@@ -47,17 +46,20 @@ export function useChangePassword() {
 
 export function useLogout() {
   const qc = useQueryClient();
-  const router = useRouter();
   return useMutation({
     mutationFn: () => authApi.logout(),
+    retry: false,
     onMutate: () => {
+      void qc.cancelQueries();
       track('logout');
       resetAnalytics();
     },
     onSettled: () => {
       qc.clear();
       useAuthStore.getState().clearSession();
-      router.replace('/login');
+      if (typeof window !== 'undefined') {
+        window.location.assign('/login');
+      }
     },
   });
 }

@@ -15,8 +15,20 @@ import { AuthSessionService, SessionMeta } from './auth-session.service';
 import { AuthRateLimitService } from './auth-rate-limit.service';
 import { AuthAuditService } from './auth-audit.service';
 import { TotpService } from './totp.service';
-import { decryptUtf8, encryptUtf8 } from './crypto.util';
+import { decryptOauthToken, decryptUtf8, encryptOauthToken, encryptUtf8 } from './crypto.util';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { OAuthStateService } from './oauth-state.service';
+import { emitSecurityAlert } from '../../observability';
+import {
+  getAccessTtlSeconds,
+  getJwtAccessSecret,
+  getJwtRefreshSecret,
+  getLockoutAttempts,
+  getLockoutMinutes,
+  getPre2faTtlSeconds,
+  jwtExpiresIn,
+} from './auth-secrets';
+import { OAuth2Client } from 'google-auth-library';
 import {
   RegisterDto,
   LoginDto,
@@ -39,7 +51,15 @@ export type TokenBundle = {
   user: { id: string; email: string; subscriptionTier: string; isEmailVerified?: boolean };
 };
 
+export type TwoFactorChallenge = {
+  requires2fa: true;
+  tempToken?: string;
+};
+
 type RefreshPayload = { sub: string; typ?: string; jti?: string; fid?: string };
+type Pre2faPayload = { sub: string; typ?: string; email?: string };
+
+const dummyPasswordHash = bcrypt.hash('__cvstudio_timing_oracle_dummy__', 12);
 
 function isTwoFactorFeatureEnabled() {
   const raw = process.env.ENABLE_TWO_FACTOR?.trim().toLowerCase();
@@ -50,6 +70,8 @@ function isTwoFactorFeatureEnabled() {
 
 @Injectable()
 export class AuthService {
+  private googleClient: OAuth2Client | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
@@ -59,7 +81,8 @@ export class AuthService {
     private readonly rateLimit: AuthRateLimitService,
     private readonly audit: AuthAuditService,
     private readonly totp: TotpService,
-    private readonly analytics: AnalyticsService
+    private readonly analytics: AnalyticsService,
+    private readonly oauthState: OAuthStateService
   ) {}
 
   async register(dto: RegisterDto, ctx: RequestContext): Promise<TokenBundle> {
@@ -94,13 +117,14 @@ export class AuthService {
     return this.issueTokens(user.id, user.email, user.subscriptionTier, ctx, false);
   }
 
-  async login(dto: LoginDto, ctx: RequestContext): Promise<TokenBundle | { requires2fa: true }> {
+  async login(dto: LoginDto, ctx: RequestContext): Promise<TokenBundle | TwoFactorChallenge> {
     await this.rateLimit.checkLogin(ctx.ip, dto.email);
 
     const user = await this.prisma.user.findFirst({
       where: { email: dto.email.toLowerCase(), deletedAt: null },
     });
     if (!user?.passwordHash) {
+      await bcrypt.compare(dto.password, await dummyPasswordHash);
       await this.audit.log({
         action: 'auth.login.fail',
         entityId: '00000000-0000-0000-0000-000000000000',
@@ -114,8 +138,23 @@ export class AuthService {
       });
     }
 
+    if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      await this.audit.log({
+        userId: user.id,
+        action: 'auth.login.fail',
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+        meta: { reason: 'locked' },
+      });
+      throw new UnauthorizedException({
+        code: 'ACCOUNT_LOCKED',
+        message: 'Account locked due to too many failed login attempts. Try again later.',
+      });
+    }
+
     const ok = await bcrypt.compare(dto.password, user.passwordHash);
     if (!ok) {
+      await this.recordFailedLogin(user.id);
       await this.audit.log({
         userId: user.id,
         action: 'auth.login.fail',
@@ -133,14 +172,9 @@ export class AuthService {
       if (!dto.totp) {
         return { requires2fa: true };
       }
-      if (!user.twoFactorSecretEncrypted) {
-        throw new BadRequestException({
-          code: '2FA_MISCONFIGURED',
-          message: '2FA is enabled but no secret is stored. Contact support.',
-        });
-      }
-      const secret = decryptUtf8(Buffer.from(user.twoFactorSecretEncrypted));
-      if (!this.totp.verify(secret, dto.totp)) {
+      const valid = await this.verifyTotpOrBackup(user, dto.totp);
+      if (!valid) {
+        await this.recordFailedLogin(user.id);
         await this.audit.log({
           userId: user.id,
           action: 'auth.login.fail',
@@ -155,10 +189,7 @@ export class AuthService {
       }
     }
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-    });
+    await this.clearLockout(user.id);
 
     await this.audit.log({
       userId: user.id,
@@ -177,7 +208,7 @@ export class AuthService {
     let payload: RefreshPayload;
     try {
       payload = await this.jwt.verifyAsync<RefreshPayload>(refreshToken, {
-        secret: process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret-change-me',
+        secret: getJwtRefreshSecret(),
       });
     } catch {
       throw new UnauthorizedException({
@@ -211,6 +242,12 @@ export class AuthService {
         userAgent: ctx.userAgent,
         meta: { familyId: payload.fid },
       });
+      emitSecurityAlert({
+        id: 'SEC-01',
+        severity: 'P1',
+        message: 'Refresh token reuse detected',
+        extra: { userId: user.id, familyId: payload.fid },
+      });
       throw new UnauthorizedException({
         code: 'INVALID_REFRESH',
         message: 'Refresh token reuse detected',
@@ -230,11 +267,18 @@ export class AuthService {
     });
   }
 
-  async logout(userId: string, refreshToken: string | undefined, ctx: RequestContext) {
-    if (refreshToken) {
+  async logout(
+    userId: string,
+    refreshToken: string | undefined,
+    ctx: RequestContext,
+    sessionId?: string
+  ) {
+    if (sessionId) {
+      await this.sessions.revokeSessionById(userId, sessionId);
+    } else if (refreshToken) {
       try {
         const payload = await this.jwt.verifyAsync<RefreshPayload>(refreshToken, {
-          secret: process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret-change-me',
+          secret: getJwtRefreshSecret(),
         });
         if (payload.sub === userId && payload.jti) {
           await this.sessions.revokeByRefreshJti(userId, payload.jti, payload.fid);
@@ -257,7 +301,131 @@ export class AuthService {
     return { revoked: true };
   }
 
-  async oauthGoogle(dto: OAuthGoogleDto, ctx: RequestContext): Promise<TokenBundle> {
+  /** Public logout: revoke from refresh cookie/body; Bearer is optional (legacy clients / e2e). */
+  async logoutFromRefresh(
+    refreshToken: string | undefined,
+    ctx: RequestContext,
+    accessToken?: string
+  ) {
+    if (refreshToken) {
+      try {
+        const payload = await this.jwt.verifyAsync<RefreshPayload>(refreshToken, {
+          secret: getJwtRefreshSecret(),
+        });
+        if (payload.sub && payload.jti) {
+          await this.sessions.revokeByRefreshJti(payload.sub, payload.jti, payload.fid);
+          await this.audit.log({
+            userId: payload.sub,
+            action: 'auth.logout',
+            ip: ctx.ip,
+            userAgent: ctx.userAgent,
+          });
+          return { revoked: true };
+        }
+      } catch {
+        // Invalid/expired refresh — try access token, then still return success
+      }
+    }
+
+    if (accessToken) {
+      try {
+        const payload = await this.jwt.verifyAsync<{
+          sub?: string;
+          sid?: string;
+          typ?: string;
+        }>(accessToken, { secret: getJwtAccessSecret() });
+        if (payload.sub && payload.typ !== 'pre_2fa') {
+          return this.logout(payload.sub, refreshToken, ctx, payload.sid);
+        }
+      } catch {
+        // Invalid/expired access — cookies are still cleared by the controller
+      }
+    }
+
+    return { revoked: true };
+  }
+
+  async createOAuthState(provider: 'google' | 'linkedin', next?: string) {
+    return this.oauthState.create(provider, next);
+  }
+
+  async completeTwoFactor(
+    tempToken: string,
+    totp: string | undefined,
+    backupCode: string | undefined,
+    ctx: RequestContext
+  ): Promise<TokenBundle> {
+    await this.rateLimit.checkLogin(ctx.ip, 'pre2fa');
+
+    let payload: Pre2faPayload;
+    try {
+      payload = await this.jwt.verifyAsync<Pre2faPayload>(tempToken, {
+        secret: getJwtAccessSecret(),
+      });
+    } catch {
+      throw new UnauthorizedException({
+        code: 'INVALID_2FA',
+        message: 'Invalid or expired 2FA session',
+      });
+    }
+
+    if (payload.typ !== 'pre_2fa' || !payload.sub) {
+      throw new UnauthorizedException({
+        code: 'INVALID_2FA',
+        message: 'Invalid or expired 2FA session',
+      });
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: payload.sub, deletedAt: null },
+    });
+    if (!user?.is2faEnabled) {
+      throw new UnauthorizedException({
+        code: 'INVALID_2FA',
+        message: 'Invalid or expired 2FA session',
+      });
+    }
+
+    const code = totp || backupCode;
+    if (!code) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'TOTP or backup code is required',
+      });
+    }
+
+    const valid = await this.verifyTotpOrBackup(user, code);
+    if (!valid) {
+      await this.audit.log({
+        userId: user.id,
+        action: 'auth.login.fail',
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+        meta: { reason: 'bad_totp' },
+      });
+      throw new UnauthorizedException({
+        code: 'INVALID_2FA',
+        message: 'Invalid authentication code',
+      });
+    }
+
+    await this.clearLockout(user.id);
+    await this.audit.log({
+      userId: user.id,
+      action: 'auth.login.success',
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      meta: { method: 'oauth_2fa' },
+    });
+    this.safeTrack(user.id, 'login_succeeded');
+
+    return this.issueTokens(user.id, user.email, user.subscriptionTier, ctx, user.isEmailVerified);
+  }
+
+  async oauthGoogle(
+    dto: OAuthGoogleDto,
+    ctx: RequestContext
+  ): Promise<TokenBundle | TwoFactorChallenge> {
     const profile = await this.resolveGoogleProfile(dto);
     const email = profile.email.toLowerCase();
 
@@ -287,9 +455,9 @@ export class AuthService {
             userId: user.id,
             provider: 'google',
             providerId: profile.sub,
-            accessTokenEncrypted: Buffer.from(profile.accessToken ?? 'oauth', 'utf8'),
+            accessTokenEncrypted: this.encryptProviderToken(profile.accessToken),
             refreshTokenEncrypted: profile.refreshToken
-              ? Buffer.from(profile.refreshToken, 'utf8')
+              ? Uint8Array.from(encryptOauthToken(profile.refreshToken))
               : undefined,
             tokenExpiresAt: profile.expiresAt,
           },
@@ -307,9 +475,9 @@ export class AuthService {
               create: {
                 provider: 'google',
                 providerId: profile.sub,
-                accessTokenEncrypted: Buffer.from(profile.accessToken ?? 'oauth', 'utf8'),
+                accessTokenEncrypted: this.encryptProviderToken(profile.accessToken),
                 refreshTokenEncrypted: profile.refreshToken
-                  ? Buffer.from(profile.refreshToken, 'utf8')
+                  ? Uint8Array.from(encryptOauthToken(profile.refreshToken))
                   : undefined,
                 tokenExpiresAt: profile.expiresAt,
               },
@@ -323,22 +491,14 @@ export class AuthService {
       throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'User not found' });
     }
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-    });
-
-    await this.audit.log({
-      userId: user.id,
-      action: 'auth.oauth.google',
-      ip: ctx.ip,
-      userAgent: ctx.userAgent,
-    });
-
-    return this.issueTokens(user.id, user.email, user.subscriptionTier, ctx, user.isEmailVerified);
+    return this.finishOauthLogin(user, ctx, 'google');
   }
 
-  async oauthLinkedIn(dto: OAuthLinkedInDto, ctx: RequestContext): Promise<TokenBundle> {
+  async oauthLinkedIn(
+    dto: OAuthLinkedInDto,
+    ctx: RequestContext
+  ): Promise<TokenBundle | TwoFactorChallenge> {
+    const { next: _next } = await this.oauthState.consume(dto.state, 'linkedin');
     const profile = await this.resolveLinkedInProfile(dto);
     const email = profile.email.toLowerCase();
 
@@ -368,7 +528,7 @@ export class AuthService {
             userId: user.id,
             provider: 'linkedin',
             providerId: profile.sub,
-            accessTokenEncrypted: Buffer.from(profile.accessToken ?? 'oauth', 'utf8'),
+            accessTokenEncrypted: this.encryptProviderToken(profile.accessToken),
           },
         });
       } else {
@@ -384,7 +544,7 @@ export class AuthService {
               create: {
                 provider: 'linkedin',
                 providerId: profile.sub,
-                accessTokenEncrypted: Buffer.from(profile.accessToken ?? 'oauth', 'utf8'),
+                accessTokenEncrypted: this.encryptProviderToken(profile.accessToken),
               },
             },
           },
@@ -396,19 +556,7 @@ export class AuthService {
       throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'User not found' });
     }
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-    });
-
-    await this.audit.log({
-      userId: user.id,
-      action: 'auth.oauth.linkedin',
-      ip: ctx.ip,
-      userAgent: ctx.userAgent,
-    });
-
-    return this.issueTokens(user.id, user.email, user.subscriptionTier, ctx, user.isEmailVerified);
+    return this.finishOauthLogin(user, ctx, 'linkedin');
   }
 
   async oauthApple(_dto: OAuthAppleDto) {
@@ -471,13 +619,16 @@ export class AuthService {
       });
     }
 
+    const codes = this.generateBackupCodes();
+    const hashed = await Promise.all(codes.map((c) => bcrypt.hash(c, 12)));
+
     await this.prisma.user.update({
       where: { id: userId },
-      data: { is2faEnabled: true },
+      data: { is2faEnabled: true, twoFactorBackupCodes: hashed },
     });
     await this.audit.log({ userId, action: 'auth.2fa.enabled' });
 
-    return { enabled: true };
+    return { enabled: true, backupCodes: codes };
   }
 
   async disable2fa(userId: string, dto: TwoFactorDisableDto) {
@@ -494,7 +645,11 @@ export class AuthService {
     }
 
     const secret = decryptUtf8(Buffer.from(user.twoFactorSecretEncrypted));
-    if (!this.totp.verify(secret, dto.code)) {
+    const totpOk = this.totp.verify(secret, dto.code);
+    const backupOk = totpOk
+      ? false
+      : await this.consumeBackupCode(user.id, user.twoFactorBackupCodes, dto.code);
+    if (!totpOk && !backupOk) {
       throw new UnauthorizedException({
         code: 'INVALID_2FA',
         message: 'Invalid authentication code',
@@ -503,7 +658,7 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: userId },
-      data: { is2faEnabled: false, twoFactorSecretEncrypted: null },
+      data: { is2faEnabled: false, twoFactorSecretEncrypted: null, twoFactorBackupCodes: [] },
     });
     await this.audit.log({ userId, action: 'auth.2fa.disabled' });
 
@@ -763,6 +918,127 @@ export class AuthService {
     void this.analytics.track(userId, { event, platform: 'web' }).catch(() => undefined);
   }
 
+  private encryptProviderToken(token?: string) {
+    return Uint8Array.from(encryptOauthToken(token || 'oauth'));
+  }
+
+  private async finishOauthLogin(
+    user: {
+      id: string;
+      email: string;
+      subscriptionTier: string;
+      isEmailVerified: boolean;
+      is2faEnabled: boolean;
+    },
+    ctx: RequestContext,
+    provider: 'google' | 'linkedin'
+  ): Promise<TokenBundle | TwoFactorChallenge> {
+    if (user.is2faEnabled) {
+      const tempToken = await this.jwt.signAsync(
+        { sub: user.id, email: user.email, typ: 'pre_2fa' },
+        {
+          secret: getJwtAccessSecret(),
+          expiresIn: jwtExpiresIn(getPre2faTtlSeconds()),
+        }
+      );
+      await this.audit.log({
+        userId: user.id,
+        action: 'auth.oauth.2fa',
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+        meta: { provider },
+      });
+      return { requires2fa: true, tempToken };
+    }
+
+    await this.clearLockout(user.id);
+    await this.audit.log({
+      userId: user.id,
+      action: `auth.oauth.${provider}`.slice(0, 32),
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+    });
+
+    return this.issueTokens(user.id, user.email, user.subscriptionTier, ctx, user.isEmailVerified);
+  }
+
+  private generateBackupCodes(count = 10): string[] {
+    return Array.from({ length: count }, () => randomBytes(5).toString('hex'));
+  }
+
+  private async verifyTotpOrBackup(
+    user: {
+      id: string;
+      twoFactorSecretEncrypted: Uint8Array | Buffer | null;
+      twoFactorBackupCodes: string[];
+    },
+    code: string
+  ): Promise<boolean> {
+    const trimmed = code.replace(/\s/g, '');
+    if (user.twoFactorSecretEncrypted && /^\d{6}$/.test(trimmed)) {
+      const secret = decryptUtf8(Buffer.from(user.twoFactorSecretEncrypted));
+      if (this.totp.verify(secret, trimmed)) return true;
+    }
+    return this.consumeBackupCode(user.id, user.twoFactorBackupCodes, trimmed);
+  }
+
+  private async consumeBackupCode(
+    userId: string,
+    hashes: string[] | null | undefined,
+    code: string
+  ): Promise<boolean> {
+    if (!hashes?.length) return false;
+    const normalized = code.replace(/\s/g, '').toLowerCase();
+    for (let i = 0; i < hashes.length; i++) {
+      const match = await bcrypt.compare(normalized, hashes[i]);
+      if (match) {
+        const remaining = hashes.filter((_, idx) => idx !== i);
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { twoFactorBackupCodes: remaining },
+        });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private async recordFailedLogin(userId: string) {
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { failedLoginAttempts: { increment: 1 } },
+      select: { failedLoginAttempts: true },
+    });
+    if (updated.failedLoginAttempts >= getLockoutAttempts()) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          lockedUntil: new Date(Date.now() + getLockoutMinutes() * 60_000),
+        },
+      });
+    }
+  }
+
+  private async clearLockout(userId: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
+    });
+  }
+
+  async getOAuthTokens(userId: string, provider: 'google' | 'linkedin') {
+    const record = await this.prisma.userOauthAccount.findFirst({
+      where: { userId, provider },
+    });
+    if (!record) return null;
+    return {
+      access_token: decryptOauthToken(Buffer.from(record.accessTokenEncrypted)),
+      refresh_token: record.refreshTokenEncrypted
+        ? decryptOauthToken(Buffer.from(record.refreshTokenEncrypted))
+        : null,
+    };
+  }
+
   private async issueTokens(
     userId: string,
     email: string,
@@ -773,34 +1049,59 @@ export class AuthService {
   ): Promise<TokenBundle> {
     const roles = [`${subscriptionTier}_user`];
     const ids = opts ?? this.sessions.newIds();
+    const accessTtl = getAccessTtlSeconds();
+
+    let sessionId: string | undefined;
+    let tokenVersion = 0;
+
+    if (!opts?.skipSessionCreate) {
+      const created = await this.sessions.createSession(userId, ids.jti, ids.familyId, {
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+      });
+      sessionId = created.id;
+      tokenVersion = created.tokenVersion;
+    } else {
+      const existing = await this.sessions.getActiveByFamily(userId, ids.familyId);
+      if (!existing) {
+        throw new UnauthorizedException({
+          code: 'INVALID_REFRESH',
+          message: 'Invalid refresh token',
+        });
+      }
+      sessionId = existing.id;
+      tokenVersion = existing.tokenVersion;
+    }
 
     const accessToken = await this.jwt.signAsync(
-      { sub: userId, email, subscriptionTier, roles },
       {
-        secret: process.env.JWT_ACCESS_SECRET ?? 'dev-access-secret-change-me',
-        expiresIn: '15m',
+        sub: userId,
+        email,
+        subscriptionTier,
+        roles,
+        sid: sessionId,
+        fid: ids.familyId,
+        tv: tokenVersion,
+        typ: 'access',
+      },
+      {
+        secret: getJwtAccessSecret(),
+        expiresIn: jwtExpiresIn(accessTtl),
       }
     );
 
     const refreshToken = await this.jwt.signAsync(
       { sub: userId, typ: 'refresh', jti: ids.jti, fid: ids.familyId },
       {
-        secret: process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret-change-me',
-        expiresIn: '7d',
+        secret: getJwtRefreshSecret(),
+        expiresIn: jwtExpiresIn(this.sessions.refreshTtlSeconds),
       }
     );
-
-    if (!opts?.skipSessionCreate) {
-      await this.sessions.createSession(userId, ids.jti, ids.familyId, {
-        ip: ctx.ip,
-        userAgent: ctx.userAgent,
-      });
-    }
 
     return {
       accessToken,
       refreshToken,
-      expiresIn: 900,
+      expiresIn: accessTtl,
       tokenType: 'Bearer',
       user: { id: userId, email, subscriptionTier, isEmailVerified },
     };
@@ -967,46 +1268,41 @@ export class AuthService {
   }
 
   private async verifyGoogleIdToken(idToken: string, clientId: string) {
-    const res = await fetch(
-      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`
-    );
-    if (!res.ok) {
+    try {
+      if (!this.googleClient) {
+        this.googleClient = new OAuth2Client(clientId);
+      }
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken,
+        audience: clientId,
+      });
+      const payload = ticket.getPayload();
+      if (!payload?.sub || !payload.email) {
+        throw new UnauthorizedException({
+          code: 'OAUTH_FAILED',
+          message: 'Google account has no email',
+        });
+      }
+      if (payload.aud !== clientId) {
+        throw new UnauthorizedException({
+          code: 'OAUTH_FAILED',
+          message: 'Google token audience mismatch',
+        });
+      }
+      return {
+        sub: payload.sub,
+        email: payload.email,
+        emailVerified: payload.email_verified === true,
+        givenName: payload.given_name,
+        familyName: payload.family_name,
+        picture: payload.picture,
+      };
+    } catch (err) {
+      if (err instanceof UnauthorizedException) throw err;
       throw new UnauthorizedException({
         code: 'OAUTH_FAILED',
         message: 'Invalid Google id token',
       });
     }
-
-    const payload = (await res.json()) as {
-      sub: string;
-      email?: string;
-      email_verified?: string | boolean;
-      given_name?: string;
-      family_name?: string;
-      picture?: string;
-      aud?: string;
-    };
-
-    if (payload.aud !== clientId) {
-      throw new UnauthorizedException({
-        code: 'OAUTH_FAILED',
-        message: 'Google token audience mismatch',
-      });
-    }
-    if (!payload.email) {
-      throw new UnauthorizedException({
-        code: 'OAUTH_FAILED',
-        message: 'Google account has no email',
-      });
-    }
-
-    return {
-      sub: payload.sub,
-      email: payload.email,
-      emailVerified: payload.email_verified === true || payload.email_verified === 'true',
-      givenName: payload.given_name,
-      familyName: payload.family_name,
-      picture: payload.picture,
-    };
   }
 }

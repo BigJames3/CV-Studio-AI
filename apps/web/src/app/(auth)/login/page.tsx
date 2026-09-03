@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
@@ -12,9 +12,11 @@ import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 import { LinkedInSignInButton } from '@/components/auth/linkedin-sign-in-button';
+import { sanitizeNextPath } from '@/lib/safe-next';
+import { authApi } from '@/lib/api';
 
 const totpSchema = z.object({
-  totp: z.string().regex(/^\d{6}$/, 'Code à 6 chiffres'),
+  totp: z.string().min(6, 'Code requis').max(16),
 });
 
 export default function LoginPage() {
@@ -30,7 +32,17 @@ export default function LoginPage() {
     password: string;
   } | null>(null);
 
-  const nextPath = search.get('next') || '/dashboard';
+  const [oauthTempToken, setOauthTempToken] = useState<string | null>(null);
+
+  const nextPath = sanitizeNextPath(search.get('next'));
+
+  useEffect(() => {
+    const pending = sessionStorage.getItem('oauth_temp_token');
+    if (pending) {
+      sessionStorage.removeItem('oauth_temp_token');
+      setOauthTempToken(pending);
+    }
+  }, []);
 
   return (
     <div
@@ -45,10 +57,16 @@ export default function LoginPage() {
         </Link>
       </p>
 
-      {pendingCredentials ? (
+      {pendingCredentials || oauthTempToken ? (
         <form
           className="mt-8 space-y-4"
           onSubmit={totpForm.handleSubmit(async (values) => {
+            if (oauthTempToken) {
+              await authApi.complete2fa(oauthTempToken, values.totp);
+              router.push(nextPath);
+              return;
+            }
+            if (!pendingCredentials) return;
             const result = await login.mutateAsync({
               ...pendingCredentials,
               totp: values.totp,
@@ -80,7 +98,10 @@ export default function LoginPage() {
           <button
             type="button"
             className="text-sm text-primary"
-            onClick={() => setPendingCredentials(null)}
+            onClick={() => {
+              setPendingCredentials(null);
+              setOauthTempToken(null);
+            }}
           >
             Retour
           </button>
@@ -142,7 +163,10 @@ export default function LoginPage() {
             <div className="h-px flex-1 bg-border" />
           </div>
           <div className="space-y-3">
-            <GoogleSignInButton nextPath={nextPath} />
+            <GoogleSignInButton
+              nextPath={nextPath}
+              onRequires2fa={(tempToken) => setOauthTempToken(tempToken)}
+            />
             <LinkedInSignInButton nextPath={nextPath} />
           </div>
           <Link href="/forgot-password" className="mt-4 text-sm text-primary">

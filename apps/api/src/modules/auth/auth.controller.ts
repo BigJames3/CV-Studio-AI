@@ -14,7 +14,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
-import { AuthService, RequestContext } from './auth.service';
+import { AuthService, RequestContext, TokenBundle, TwoFactorChallenge } from './auth.service';
 import {
   RegisterDto,
   LoginDto,
@@ -29,9 +29,12 @@ import {
   VerifyEmailDto,
   ChangePasswordDto,
   UpdateProfileDto,
+  CreateOAuthStateDto,
+  CompleteTwoFactorDto,
 } from './dto/auth.dto';
 import { CurrentUser, Public, AuthUser } from '../../common/decorators';
 import { clearAuthCookies, REFRESH_COOKIE, setAuthCookies } from './auth-cookies';
+import { clientIp, isMobileClient } from '../../common/utils/client-ip';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -39,20 +42,27 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   private ctx(req: Request): RequestContext {
-    const forwarded = req.headers['x-forwarded-for'];
-    const ip =
-      (typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : undefined) ||
-      req.ip ||
-      req.socket?.remoteAddress ||
-      'unknown';
     return {
-      ip,
+      ip: clientIp(req),
       userAgent: req.headers['user-agent'],
     };
   }
 
   private attachCookies(res: Response, refreshToken: string) {
     setAuthCookies(res, refreshToken);
+  }
+
+  /** Web: refresh stays in httpOnly cookie. Mobile: include refreshToken in JSON. */
+  private toClientAuth(req: Request, tokens: TokenBundle) {
+    if (isMobileClient(req)) return tokens;
+    const { refreshToken: _refreshToken, ...rest } = tokens;
+    return rest;
+  }
+
+  private respondAuth(req: Request, res: Response, result: TokenBundle | TwoFactorChallenge) {
+    if ('requires2fa' in result) return result;
+    this.attachCookies(res, result.refreshToken);
+    return this.toClientAuth(req, result);
   }
 
   @Public()
@@ -66,7 +76,7 @@ export class AuthController {
   ) {
     const tokens = await this.auth.register(dto, this.ctx(req));
     this.attachCookies(res, tokens.refreshToken);
-    return tokens;
+    return this.toClientAuth(req, tokens);
   }
 
   @Public()
@@ -80,25 +90,30 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response
   ) {
     const result = await this.auth.login(dto, this.ctx(req));
-    if ('requires2fa' in result) return result;
-    this.attachCookies(res, result.refreshToken);
-    return result;
+    return this.respondAuth(req, res, result);
   }
 
-  @ApiBearerAuth('JWT')
+  @Public()
   @Post('logout')
   @HttpCode(200)
   async logout(
-    @CurrentUser() user: AuthUser,
     @Body() body: RefreshDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response
   ) {
-    const cookieToken =
-      (req.cookies?.[REFRESH_COOKIE] as string | undefined) ?? body.refreshToken;
-    const result = await this.auth.logout(user.id, cookieToken, this.ctx(req));
+    const cookieToken = (req.cookies?.[REFRESH_COOKIE] as string | undefined) ?? body?.refreshToken;
+    const authHeader = req.headers.authorization;
+    const accessToken =
+      typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7)
+        : undefined;
+    try {
+      await this.auth.logoutFromRefresh(cookieToken, this.ctx(req), accessToken);
+    } catch {
+      // Expired/invalid tokens must not block cookie clearing
+    }
     clearAuthCookies(res);
-    return result;
+    return { revoked: true };
   }
 
   @Public()
@@ -110,11 +125,19 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response
   ) {
-    const token =
-      (req.cookies?.[REFRESH_COOKIE] as string | undefined) ?? dto.refreshToken ?? '';
+    const token = (req.cookies?.[REFRESH_COOKIE] as string | undefined) ?? dto.refreshToken ?? '';
     const tokens = await this.auth.refresh(token, this.ctx(req));
     this.attachCookies(res, tokens.refreshToken);
-    return tokens;
+    return this.toClientAuth(req, tokens);
+  }
+
+  @Public()
+  @Post('oauth/state')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Issue CSRF state + sanitized next path for OAuth' })
+  createOAuthState(@Body() dto: CreateOAuthStateDto) {
+    return this.auth.createOAuthState(dto.provider, dto.next);
   }
 
   @Public()
@@ -125,9 +148,8 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response
   ) {
-    const tokens = await this.auth.oauthGoogle(dto, this.ctx(req));
-    this.attachCookies(res, tokens.refreshToken);
-    return tokens;
+    const result = await this.auth.oauthGoogle(dto, this.ctx(req));
+    return this.respondAuth(req, res, result);
   }
 
   @Public()
@@ -138,9 +160,8 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response
   ) {
-    const tokens = await this.auth.oauthLinkedIn(dto, this.ctx(req));
-    this.attachCookies(res, tokens.refreshToken);
-    return tokens;
+    const result = await this.auth.oauthLinkedIn(dto, this.ctx(req));
+    return this.respondAuth(req, res, result);
   }
 
   @Public()
@@ -148,6 +169,26 @@ export class AuthController {
   @HttpCode(200)
   oauthApple(@Body() dto: OAuthAppleDto) {
     return this.auth.oauthApple(dto);
+  }
+
+  @Public()
+  @Post('2fa/complete')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Complete OAuth login after TOTP / backup code' })
+  async completeTwoFactor(
+    @Body() dto: CompleteTwoFactorDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
+  ) {
+    const tokens = await this.auth.completeTwoFactor(
+      dto.tempToken,
+      dto.totp,
+      dto.backupCode,
+      this.ctx(req)
+    );
+    this.attachCookies(res, tokens.refreshToken);
+    return this.toClientAuth(req, tokens);
   }
 
   @ApiBearerAuth('JWT')
@@ -233,10 +274,7 @@ export class AuthController {
 
   @ApiBearerAuth('JWT')
   @Delete('sessions/:id')
-  revokeSession(
-    @CurrentUser() user: AuthUser,
-    @Param('id', ParseUUIDPipe) id: string
-  ) {
+  revokeSession(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.auth.revokeSession(user.id, id);
   }
 }

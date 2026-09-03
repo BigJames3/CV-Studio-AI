@@ -14,6 +14,7 @@ import { MailService } from '../../mail/mail.service';
 import { StripeWebhookStoreService } from './stripe-webhook-store.service';
 import { StripeAlertService } from './stripe-alert.service';
 import { availablePaymentMethods } from './payment-env';
+import { emitSecurityAlert } from '../../observability';
 
 const MAX_RETRIES = 3;
 
@@ -129,6 +130,12 @@ export class PaymentsService {
       event = this.stripe.webhooks.constructEvent(rawBody, signature, secret);
     } catch (err) {
       this.logger.error(`Webhook signature verification failed: ${(err as Error).message}`);
+      emitSecurityAlert({
+        id: 'SEC-05',
+        severity: 'P2',
+        message: 'Stripe webhook signature verification failed',
+        extra: { error: (err as Error).message },
+      });
       throw new BadRequestException({
         code: 'INVALID_WEBHOOK',
         message: 'Invalid Stripe signature',

@@ -19,6 +19,7 @@ export function TwoFactorSetup({ enabled }: { enabled?: boolean }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
 
   async function startEnable() {
     setBusy(true);
@@ -38,10 +39,11 @@ export function TwoFactorSetup({ enabled }: { enabled?: boolean }) {
     setBusy(true);
     setError(null);
     try {
-      await authApi.verify2fa(code);
+      const res = await authApi.verify2fa(code);
       setSetup(null);
       setCode('');
-      setMessage('2FA activée');
+      setBackupCodes(res.backupCodes ?? null);
+      setMessage('2FA activée. Enregistrez vos codes de secours.');
       await qc.invalidateQueries({ queryKey: queryKeys.user.me() });
     } catch {
       setError('Code invalide');
@@ -120,6 +122,17 @@ export function TwoFactorSetup({ enabled }: { enabled?: boolean }) {
         <Button type="button" disabled={busy} onClick={startEnable}>
           Activer la 2FA
         </Button>
+      )}
+
+      {backupCodes && backupCodes.length > 0 && (
+        <div className="rounded-md border border-border p-3">
+          <p className="text-sm font-medium">Codes de secours (à conserver hors-ligne)</p>
+          <ul className="mt-2 font-mono text-xs">
+            {backupCodes.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {message && <p className="text-sm text-success">{message}</p>}

@@ -1,4 +1,5 @@
 import type { Response, CookieOptions } from 'express';
+import { getRefreshTtlSeconds } from './auth-secrets';
 
 export const REFRESH_COOKIE = 'refresh_token';
 /** Non-sensitive presence flag so Next middleware can gate routes (HttpOnly refresh is also readable by Next on same host). */
@@ -11,7 +12,7 @@ export function refreshCookieOptions(): CookieOptions {
     secure: isProd,
     sameSite: 'lax',
     path: '/',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: getRefreshTtlSeconds() * 1000,
   };
 }
 
@@ -22,7 +23,7 @@ export function sessionFlagCookieOptions(): CookieOptions {
     secure: isProd,
     sameSite: 'lax',
     path: '/',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: getRefreshTtlSeconds() * 1000,
   };
 }
 
@@ -55,7 +56,6 @@ export function clearAuthCookies(res: Response) {
   res.clearCookie(REFRESH_COOKIE, refreshClear);
   res.clearCookie(SESSION_FLAG_COOKIE, flagClear);
 
-  // Explicit expiry (belt-and-suspenders for stubborn browsers)
   res.cookie(REFRESH_COOKIE, '', { ...refreshClear, maxAge: 0 });
   res.cookie(SESSION_FLAG_COOKIE, '', { ...flagClear, maxAge: 0 });
 }

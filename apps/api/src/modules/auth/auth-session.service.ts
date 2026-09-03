@@ -1,13 +1,20 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { RedisService } from '../../redis/redis.module';
 import { PrismaService } from '../../database/prisma.module';
-
-const REFRESH_TTL_SECONDS = 7 * 24 * 60 * 60;
+import { getIdleTimeoutSeconds, getRefreshTtlSeconds } from './auth-secrets';
 
 export type SessionMeta = {
   userAgent?: string;
   ip?: string;
+};
+
+type AccessSessionCache = {
+  userId: string;
+  familyId: string;
+  tokenVersion: number;
+  lastActivityAt: number;
+  revoked?: boolean;
 };
 
 @Injectable()
@@ -29,35 +36,57 @@ export class AuthSessionService {
     return `refresh:user:${userId}`;
   }
 
+  private accessKey(sessionId: string) {
+    return `session:access:${sessionId}`;
+  }
+
+  get refreshTtlSeconds() {
+    return getRefreshTtlSeconds();
+  }
+
   /** Create a new refresh family and register current jti */
   async createSession(
     userId: string,
     jti: string,
     familyId: string,
     meta: SessionMeta = {}
-  ): Promise<void> {
+  ): Promise<{ id: string; tokenVersion: number }> {
     await this.redis.connect();
-    const expiresAt = new Date(Date.now() + REFRESH_TTL_SECONDS * 1000);
+    const expiresAt = new Date(Date.now() + this.refreshTtlSeconds * 1000);
+    const id = randomUUID();
+    const now = Date.now();
 
     await this.redis.set(
       this.jtiKey(jti),
-      JSON.stringify({ userId, familyId }),
-      REFRESH_TTL_SECONDS
+      JSON.stringify({ userId, familyId, sessionId: id }),
+      this.refreshTtlSeconds
     );
-    await this.redis.set(this.familyKey(familyId), jti, REFRESH_TTL_SECONDS);
+    await this.redis.set(this.familyKey(familyId), jti, this.refreshTtlSeconds);
     await this.redis.client.sadd(this.userFamiliesKey(userId), familyId);
-    await this.redis.client.expire(this.userFamiliesKey(userId), REFRESH_TTL_SECONDS);
+    await this.redis.client.expire(this.userFamiliesKey(userId), this.refreshTtlSeconds);
+
+    await this.cacheAccessSession(id, {
+      userId,
+      familyId,
+      tokenVersion: 0,
+      lastActivityAt: now,
+    });
 
     await this.prisma.authSession.create({
       data: {
+        id,
         userId,
         familyId,
         refreshJti: jti,
+        tokenVersion: 0,
+        lastActivityAt: new Date(now),
         userAgent: meta.userAgent?.slice(0, 512),
         ipAddress: meta.ip?.slice(0, 64),
         expiresAt,
       },
     });
+
+    return { id, tokenVersion: 0 };
   }
 
   /**
@@ -74,12 +103,10 @@ export class AuthSessionService {
 
     const currentJti = await this.redis.get(this.familyKey(familyId));
     if (!currentJti) {
-      // Family revoked or expired
       return 'invalid';
     }
 
     if (currentJti !== presentedJti) {
-      // Reuse of an old refresh token → revoke whole family
       await this.revokeFamily(userId, familyId);
       return 'reuse';
     }
@@ -90,20 +117,85 @@ export class AuthSessionService {
       return 'reuse';
     }
 
+    const parsed = JSON.parse(jtiRecord) as { sessionId?: string };
     await this.redis.del(this.jtiKey(presentedJti));
     await this.redis.set(
       this.jtiKey(newJti),
-      JSON.stringify({ userId, familyId }),
-      REFRESH_TTL_SECONDS
+      JSON.stringify({ userId, familyId, sessionId: parsed.sessionId }),
+      this.refreshTtlSeconds
     );
-    await this.redis.set(this.familyKey(familyId), newJti, REFRESH_TTL_SECONDS);
+    await this.redis.set(this.familyKey(familyId), newJti, this.refreshTtlSeconds);
 
     await this.prisma.authSession.updateMany({
       where: { familyId, revokedAt: null },
-      data: { refreshJti: newJti, updatedAt: new Date() },
+      data: { refreshJti: newJti, updatedAt: new Date(), lastActivityAt: new Date() },
     });
 
     return 'ok';
+  }
+
+  async getActiveByFamily(userId: string, familyId: string) {
+    return this.prisma.authSession.findFirst({
+      where: { userId, familyId, revokedAt: null, expiresAt: { gt: new Date() } },
+    });
+  }
+
+  async assertAccessToken(sessionId: string, tokenVersion: number, userId: string): Promise<void> {
+    await this.redis.connect();
+    const key = this.accessKey(sessionId);
+    let record: AccessSessionCache | null = null;
+    const cached = await this.redis.get(key);
+    if (cached) {
+      record = JSON.parse(cached) as AccessSessionCache;
+    } else {
+      const session = await this.prisma.authSession.findFirst({
+        where: { id: sessionId, userId, revokedAt: null, expiresAt: { gt: new Date() } },
+      });
+      if (!session) {
+        throw new UnauthorizedException({
+          code: 'UNAUTHORIZED',
+          message: 'Session not found',
+        });
+      }
+      record = {
+        userId: session.userId,
+        familyId: session.familyId,
+        tokenVersion: session.tokenVersion,
+        lastActivityAt: session.lastActivityAt.getTime(),
+      };
+      await this.cacheAccessSession(sessionId, record);
+    }
+
+    if (!record || record.revoked || record.userId !== userId) {
+      throw new UnauthorizedException({
+        code: 'UNAUTHORIZED',
+        message: 'Session revoked',
+      });
+    }
+    if (record.tokenVersion !== tokenVersion) {
+      throw new UnauthorizedException({
+        code: 'UNAUTHORIZED',
+        message: 'Token version mismatch (logged out)',
+      });
+    }
+
+    const idleMs = getIdleTimeoutSeconds() * 1000;
+    if (Date.now() - record.lastActivityAt > idleMs) {
+      await this.revokeSessionById(userId, sessionId);
+      throw new UnauthorizedException({
+        code: 'SESSION_IDLE_TIMEOUT',
+        message: 'Session expired due to inactivity',
+      });
+    }
+
+    if (Date.now() - record.lastActivityAt > 60_000) {
+      record.lastActivityAt = Date.now();
+      await this.cacheAccessSession(sessionId, record);
+      await this.prisma.authSession.updateMany({
+        where: { id: sessionId, revokedAt: null },
+        data: { lastActivityAt: new Date() },
+      });
+    }
   }
 
   async revokeFamily(userId: string, familyId: string): Promise<void> {
@@ -113,9 +205,15 @@ export class AuthSessionService {
     await this.redis.del(this.familyKey(familyId));
     await this.redis.client.srem(this.userFamiliesKey(userId), familyId);
 
+    const session = await this.prisma.authSession.findFirst({
+      where: { familyId },
+      select: { id: true },
+    });
+    if (session) await this.redis.del(this.accessKey(session.id));
+
     await this.prisma.authSession.updateMany({
       where: { familyId, revokedAt: null },
-      data: { revokedAt: new Date() },
+      data: { revokedAt: new Date(), tokenVersion: { increment: 1 } },
     });
   }
 
@@ -139,9 +237,18 @@ export class AuthSessionService {
       await this.revokeFamily(userId, familyId);
     }
     await this.redis.del(this.userFamiliesKey(userId));
+
+    const remaining = await this.prisma.authSession.findMany({
+      where: { userId, revokedAt: null },
+      select: { id: true },
+    });
+    for (const row of remaining) {
+      await this.redis.del(this.accessKey(row.id));
+    }
+
     await this.prisma.authSession.updateMany({
       where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
+      data: { revokedAt: new Date(), tokenVersion: { increment: 1 } },
     });
   }
 
@@ -157,6 +264,7 @@ export class AuthSessionService {
         createdAt: true,
         updatedAt: true,
         expiresAt: true,
+        lastActivityAt: true,
       },
     });
   }
@@ -174,7 +282,7 @@ export class AuthSessionService {
     return { jti: randomUUID(), familyId: randomUUID() };
   }
 
-  get refreshTtlSeconds() {
-    return REFRESH_TTL_SECONDS;
+  private async cacheAccessSession(sessionId: string, record: AccessSessionCache) {
+    await this.redis.set(this.accessKey(sessionId), JSON.stringify(record), this.refreshTtlSeconds);
   }
 }

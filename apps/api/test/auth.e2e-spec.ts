@@ -3,13 +3,14 @@ import request from 'supertest';
 import { createTestApp } from './create-test-app';
 import { PrismaService } from '../src/database/prisma.module';
 import { RedisService } from '../src/redis/redis.module';
+import { refreshFromCookie } from './auth-helpers';
 
 describe('Auth (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let redis: RedisService;
 
-  const password = 'Str0ngpass1';
+  const password = 'Str0ngpass1!x';
   const uniqueEmail = () => `e2e+${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
 
   beforeAll(async () => {
@@ -36,12 +37,12 @@ describe('Auth (e2e)', () => {
 
     expect(reg.body.success).toBe(true);
     expect(reg.body.data.accessToken).toBeDefined();
-    expect(reg.body.data.refreshToken).toBeDefined();
+    expect(reg.body.data.refreshToken).toBeUndefined();
     const cookies = reg.headers['set-cookie'];
     expect(cookies).toBeDefined();
 
     const access = reg.body.data.accessToken as string;
-    const refresh = reg.body.data.refreshToken as string;
+    const refresh = refreshFromCookie(reg);
 
     const me = await request(app.getHttpServer())
       .get('/api/v1/users/me')
@@ -54,17 +55,18 @@ describe('Auth (e2e)', () => {
       .send({ refreshToken: refresh })
       .expect(200);
     expect(refreshed.body.data.accessToken).toBeDefined();
-    expect(refreshed.body.data.refreshToken).not.toBe(refresh);
+    const rotated = refreshFromCookie(refreshed);
+    expect(rotated).not.toBe(refresh);
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/logout')
       .set('Authorization', `Bearer ${refreshed.body.data.accessToken}`)
-      .send({ refreshToken: refreshed.body.data.refreshToken })
+      .send({ refreshToken: rotated })
       .expect(200);
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/refresh')
-      .send({ refreshToken: refreshed.body.data.refreshToken })
+      .send({ refreshToken: rotated })
       .expect(401);
   });
 
@@ -83,13 +85,13 @@ describe('Auth (e2e)', () => {
       .send({ email, password, firstName: 'Reuse', lastName: 'Test' })
       .expect(201);
 
-    const oldRefresh = reg.body.data.refreshToken as string;
+    const oldRefresh = refreshFromCookie(reg);
 
     const first = await request(app.getHttpServer())
       .post('/api/v1/auth/refresh')
       .send({ refreshToken: oldRefresh })
       .expect(200);
-    const newRefresh = first.body.data.refreshToken as string;
+    const newRefresh = refreshFromCookie(first);
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/refresh')
@@ -108,7 +110,7 @@ describe('Auth (e2e)', () => {
       .post('/api/v1/auth/register')
       .send({ email, password, firstName: 'Reset', lastName: 'User' })
       .expect(201);
-    const refresh = reg.body.data.refreshToken as string;
+    const refresh = refreshFromCookie(reg);
     const userId = reg.body.data.user.id as string;
 
     await request(app.getHttpServer())
@@ -129,12 +131,12 @@ describe('Auth (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/reset-password')
-      .send({ token: raw, newPassword: 'NewStr0ng9' })
+      .send({ token: raw, newPassword: 'NewStr0ng9!aa' })
       .expect(200);
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/login')
-      .send({ email, password: 'NewStr0ng9' })
+      .send({ email, password: 'NewStr0ng9!aa' })
       .expect(200);
 
     await request(app.getHttpServer())
@@ -286,24 +288,24 @@ describe('Auth (e2e)', () => {
       .send({ email, password, firstName: 'Pwd', lastName: 'Change' })
       .expect(201);
     const access = reg.body.data.accessToken as string;
-    const refresh = reg.body.data.refreshToken as string;
+    const refresh = refreshFromCookie(reg);
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/change-password')
       .set('Authorization', `Bearer ${access}`)
-      .send({ currentPassword: 'WrongPass1', newPassword: 'NewStr0ng9' })
+      .send({ currentPassword: 'WrongPass1', newPassword: 'NewStr0ng9!aa' })
       .expect(401);
 
     const ok = await request(app.getHttpServer())
       .post('/api/v1/auth/change-password')
       .set('Authorization', `Bearer ${access}`)
-      .send({ currentPassword: password, newPassword: 'NewStr0ng9' })
+      .send({ currentPassword: password, newPassword: 'NewStr0ng9!aa' })
       .expect(200);
     expect(ok.body.data.changed).toBe(true);
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/login')
-      .send({ email, password: 'NewStr0ng9' })
+      .send({ email, password: 'NewStr0ng9!aa' })
       .expect(200);
 
     await request(app.getHttpServer())

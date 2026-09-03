@@ -19,6 +19,17 @@ export const authApi = {
       body: { email, password, name },
       auth: false,
     }),
+  logout: (refreshToken?: string | null) =>
+    apiClient<{ revoked: boolean }>('/auth/logout', {
+      method: 'POST',
+      body: { refreshToken },
+    }),
+  refresh: (refreshToken: string) =>
+    apiClient<LoginResponse>('/auth/refresh', {
+      method: 'POST',
+      body: { refreshToken },
+      auth: false,
+    }),
 };
 
 export const cvsApi = {

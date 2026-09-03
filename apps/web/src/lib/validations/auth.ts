@@ -9,8 +9,11 @@ export const registerSchema = z.object({
   email: z.string().email(),
   password: z
     .string()
-    .min(8)
-    .regex(/^(?=.*[A-Za-z])(?=.*\d).+$/, 'Lettre et chiffre requis'),
+    .min(12, '12 caractères minimum')
+    .regex(
+      /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/,
+      'Lettre, chiffre et caractère spécial requis'
+    ),
   firstName: z.string().min(1).max(120),
   lastName: z.string().min(1).max(120),
 });
@@ -29,8 +32,11 @@ export const changePasswordSchema = z
     currentPassword: z.string().min(1, 'Mot de passe actuel requis'),
     newPassword: z
       .string()
-      .min(8, '8 caractères minimum')
-      .regex(/^(?=.*[A-Za-z])(?=.*\d).+$/, 'Lettre et chiffre requis'),
+      .min(12, '12 caractères minimum')
+      .regex(
+        /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/,
+        'Lettre, chiffre et caractère spécial requis'
+      ),
     confirmPassword: z.string().min(1, 'Confirmation requise'),
   })
   .refine((v) => v.newPassword === v.confirmPassword, {

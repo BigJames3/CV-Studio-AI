@@ -39,5 +39,6 @@
       "statements": 65
     }
   },
-  "testEnvironment": "node"
+  "testEnvironment": "node",
+  "setupFiles": ["<rootDir>/../test/jest.unit-setup.ts"]
 }

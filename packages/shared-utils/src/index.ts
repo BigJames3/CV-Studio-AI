@@ -12,8 +12,7 @@ export const DATETIME_FORMAT = 'yyyy-MM-dd HH:mm:ss';
 
 // Regex Patterns
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-export const PASSWORD_REGEX =
-  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+export const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,128}$/;
 export const URL_REGEX = /^https?:\/\/.+/;
 
 export function sleep(ms: number) {
@@ -61,36 +60,63 @@ export function slugify(input: string) {
 
 export type PaymentProvider = 'stripe' | 'cinetpay';
 
-/** WAEMU + CEMAC + other CinetPay-supported countries (ISO 3166-1 alpha-2). */
-const CINETPAY_COUNTRIES = new Set([
-  'SN',
-  'CI',
-  'BF',
-  'ML',
-  'BJ',
-  'TG',
-  'NE',
-  'GW',
-  'CM',
-  'CF',
-  'CG',
-  'GQ',
-  'GA',
-  'TD',
-  'CD',
-  'GN',
+export type GeoLocationSource = 'user-profile' | 'browser-ip' | 'unknown';
+
+export type GeoDetectPlan =
+  { action: 'profile'; countryCode: string } | { action: 'skip' } | { action: 'fetch-ip' };
+
+/** WAEMU: Benin, Burkina Faso, Côte d'Ivoire, Guinea-Bissau, Mali, Niger, Senegal, Togo */
+export const WAEMU_COUNTRIES = ['BJ', 'BF', 'CI', 'GW', 'ML', 'NE', 'SN', 'TG'] as const;
+
+/** CEMAC: Cameroon, Central African Republic, Chad, Congo, Equatorial Guinea, Gabon */
+export const CEMAC_COUNTRIES = ['CM', 'CF', 'TD', 'CG', 'GQ', 'GA'] as const;
+
+/** Extra CinetPay-supported countries beyond WAEMU/CEMAC. */
+export const CINETPAY_EXTRA_COUNTRIES = ['CD', 'GN'] as const;
+
+export const AFRICAN_MOBILE_PAYMENT_ZONES = [...WAEMU_COUNTRIES, ...CEMAC_COUNTRIES] as const;
+
+const CINETPAY_COUNTRIES = new Set<string>([
+  ...AFRICAN_MOBILE_PAYMENT_ZONES,
+  ...CINETPAY_EXTRA_COUNTRIES,
 ]);
 
+export function isCinetpayCountry(countryCode?: string | null): boolean {
+  if (!countryCode) return false;
+  return CINETPAY_COUNTRIES.has(countryCode.trim().toUpperCase());
+}
+
 export function suggestPaymentMethod(countryCode?: string | null): PaymentProvider {
-  if (!countryCode) return 'stripe';
-  return CINETPAY_COUNTRIES.has(countryCode.toUpperCase()) ? 'cinetpay' : 'stripe';
+  return isCinetpayCountry(countryCode) ? 'cinetpay' : 'stripe';
+}
+
+/**
+ * Decide how to resolve country for payment suggestions.
+ * Profile always wins. DNT / declined / undecided consent skip IP lookup.
+ */
+export function planCountryDetection(input: {
+  userCountryCode?: string | null;
+  doNotTrack: boolean;
+  consent: boolean | null;
+}): GeoDetectPlan {
+  const code = input.userCountryCode?.trim().toUpperCase();
+  if (code && /^[A-Z]{2}$/.test(code)) {
+    return { action: 'profile', countryCode: code };
+  }
+  if (input.doNotTrack || input.consent !== true) {
+    return { action: 'skip' };
+  }
+  return { action: 'fetch-ip' };
 }
 
 export const emailSchema = z.string().email();
 export const passwordSchema = z
   .string()
-  .min(8)
-  .regex(PASSWORD_REGEX, 'Password must include upper, lower, digit, and special char');
+  .min(12)
+  .regex(
+    PASSWORD_REGEX,
+    'Password must be ≥12 chars and include upper, lower, digit, and special char'
+  );
 
 export const registerSchema = z.object({
   email: emailSchema,

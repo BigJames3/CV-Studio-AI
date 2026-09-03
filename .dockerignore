@@ -1,0 +1,48 @@
+# Dependencies & caches
+node_modules
+**/node_modules
+.pnpm-store
+.turbo
+**/.turbo
+
+# Git / IDE
+.git
+.gitignore
+.cursor
+.vscode
+.idea
+**/.DS_Store
+
+# Env & secrets (keep examples)
+.env
+.env.*
+!.env.example
+!**/.env.example
+apps/api/.env
+apps/web/.env
+apps/mobile/.env
+
+# Build outputs
+dist
+**/dist
+build
+**/build
+coverage
+**/coverage
+.next
+**/.next
+out
+storybook-static
+**/*.tsbuildinfo
+
+# Tests / local tooling
+apps/web/e2e
+apps/web/playwright-report
+apps/web/test-results
+apps/api/coverage
+**/*.log
+
+# Docs & misc (not needed to build images)
+agent-transcripts
+infrastructure/k8s
+infrastructure/terraform

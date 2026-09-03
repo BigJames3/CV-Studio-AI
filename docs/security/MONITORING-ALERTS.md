@@ -20,4 +20,12 @@ Wire these into CloudWatch/Datadog/SIEM before GA.
 
 Log fields required: `request_id`, `actor_id`, `ip`, `route`, `action`, `result`.
 
+**Wired in API (16 Aug 2026):**
+
+- SEC-01 → `emitSecurityAlert` on refresh reuse (Sentry fatal + `IR_WEBHOOK_URL`)
+- SEC-05 → `emitSecurityAlert` on Stripe signature failure
+- HTTP logs include `requestId` from `RequestIdMiddleware`
+
+Remaining rows still need CloudWatch/Datadog once production exists.
+
 Payment JSON lines (`LOG_PAYMENTS`, default on): `message`, `userId`, `transactionId`, `paymentMethod`, `amount`, `currency`. Wire PAY-* from API logs / Sentry, not a fictional DataDog dashboard.

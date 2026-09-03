@@ -23,14 +23,15 @@ export class PdfBrowserPool implements OnModuleDestroy {
 
   private async launch(): Promise<Browser> {
     const executablePath =
-      process.env.PUPPETEER_EXECUTABLE_PATH ||
-      process.env.CHROMIUM_PATH ||
-      undefined;
+      process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROMIUM_PATH || undefined;
 
     const args = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-extensions',
+      '--disable-background-networking',
       '--font-render-hinting=medium',
     ];
 
@@ -51,9 +52,7 @@ export class PdfBrowserPool implements OnModuleDestroy {
       }
     }
 
-    this.logger.log(
-      `Launching Chromium${executablePath ? ` at ${executablePath}` : ' (bundled)'}`
-    );
+    this.logger.log(`Launching Chromium${executablePath ? ` at ${executablePath}` : ' (bundled)'}`);
 
     const browser = await launch({
       headless: true,
@@ -87,6 +86,16 @@ export class PdfGeneratorService {
     const page = await browser.newPage();
 
     try {
+      page.setDefaultTimeout(15_000);
+      await page.setRequestInterception(true);
+      page.on('request', (request) => {
+        if (shouldAllowPdfNetworkRequest(request.url())) {
+          void request.continue();
+          return;
+        }
+        void request.abort();
+      });
+
       const pageSize = options.pageSize ?? 'A4';
       const viewport =
         pageSize === 'Letter'
@@ -96,10 +105,9 @@ export class PdfGeneratorService {
 
       // WYSIWYG HTML already has inlined styles/images; still wait for fonts
       await page.setContent(html, {
-        waitUntil: options.wysiwyg ? 'domcontentloaded' : 'load',
-        timeout: 45_000,
+        waitUntil: 'domcontentloaded',
+        timeout: 15_000,
       });
-      await page.waitForNetworkIdle({ idleTime: 500, timeout: 15_000 }).catch(() => undefined);
       await page.evaluateHandle('document.fonts.ready').catch(() => undefined);
 
       const pdfOpts = this.toPdfOptions(options);
@@ -131,12 +139,8 @@ export class PdfGeneratorService {
       preferCSSPageSize: true,
       scale,
       margin: {
-        top: wysiwyg
-          ? '0'
-          : `${marginMm + (options.includeHeader !== false ? 8 : 0)}mm`,
-        bottom: wysiwyg
-          ? '0'
-          : `${marginMm + (options.includeFooter !== false ? 12 : 0)}mm`,
+        top: wysiwyg ? '0' : `${marginMm + (options.includeHeader !== false ? 8 : 0)}mm`,
+        bottom: wysiwyg ? '0' : `${marginMm + (options.includeFooter !== false ? 12 : 0)}mm`,
         left: `${marginMm}mm`,
         right: `${marginMm}mm`,
       },
@@ -168,6 +172,11 @@ function qualityScale(quality: PdfQuality): number {
     default:
       return 0.95;
   }
+}
+
+/** Block SSRF: Chromium may only load in-document / data URLs. */
+export function shouldAllowPdfNetworkRequest(url: string): boolean {
+  return url.startsWith('data:') || url.startsWith('about:') || url.startsWith('blob:');
 }
 
 function escapeFooter(value: string): string {

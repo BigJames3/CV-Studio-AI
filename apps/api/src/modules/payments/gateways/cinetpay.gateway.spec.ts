@@ -181,6 +181,73 @@ describe('CinetpayGateway', () => {
 
       expect(callOrder).toEqual(['create', 'fetch']);
     });
+
+    function postedPaymentBody() {
+      return JSON.parse(String(fetchMock.mock.calls[0][1].body)) as { return_url?: string };
+    }
+
+    it('keeps return_url on /account/billing pending+tx', async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse({
+          code: '201',
+          data: { payment_url: 'https://checkout.cinetpay.com/payment/tok_test' },
+        })
+      );
+
+      await gateway.createPayment(USER_ID, {
+        plan: 'pro',
+        interval: 'month',
+        subscriptionId: SUB_ID,
+      });
+
+      const { return_url: returnUrl } = postedPaymentBody();
+      expect(returnUrl).toMatch(/^http:\/\/localhost:3000\/account\/billing\?/);
+      expect(returnUrl).toContain('checkout=pending');
+      expect(returnUrl).toContain('provider=cinetpay');
+      expect(returnUrl).toContain('tx=');
+    });
+
+    it('blocks an off-origin returnUrl', async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse({
+          code: '201',
+          data: { payment_url: 'https://checkout.cinetpay.com/payment/tok_test' },
+        })
+      );
+
+      await gateway.createPayment(USER_ID, {
+        plan: 'pro',
+        interval: 'month',
+        subscriptionId: SUB_ID,
+        returnUrl: 'https://evil.example/phish',
+      });
+
+      const { return_url: returnUrl } = postedPaymentBody();
+      expect(returnUrl).not.toContain('evil.example');
+      expect(returnUrl).toContain('http://localhost:3000/account/billing');
+      expect(returnUrl).toContain('checkout=pending');
+    });
+
+    it('forces pending+tx even when the client sends a valid billing success URL', async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse({
+          code: '201',
+          data: { payment_url: 'https://checkout.cinetpay.com/payment/tok_test' },
+        })
+      );
+
+      await gateway.createPayment(USER_ID, {
+        plan: 'pro',
+        interval: 'month',
+        subscriptionId: SUB_ID,
+        returnUrl: 'http://localhost:3000/account/billing?checkout=success',
+      });
+
+      const { return_url: returnUrl } = postedPaymentBody();
+      expect(returnUrl).toContain('checkout=pending');
+      expect(returnUrl).toContain('tx=');
+      expect(returnUrl).not.toContain('checkout=success');
+    });
   });
 
   describe('handleCinetpayNotify', () => {

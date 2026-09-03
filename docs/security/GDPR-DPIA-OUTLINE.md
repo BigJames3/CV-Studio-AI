@@ -1,7 +1,7 @@
 # CV Studio AI — DPIA Outline (GDPR Art. 35)
 
-**Status:** Draft skeleton — Legal/DPO to complete before EU GA  
-**Related:** [SECURITY-CV-STUDIO-AI.md](../SECURITY-CV-STUDIO-AI.md)
+**Status:** Draft completed in [DPIA-SIGNED.md](./DPIA-SIGNED.md) — Legal/DPO signature still required before EU GA  
+**Related:** [SECURITY-CV-STUDIO-AI.md](../SECURITY-CV-STUDIO-AI.md) · [DPO.md](./DPO.md)
 
 ---
 

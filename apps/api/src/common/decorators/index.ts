@@ -14,6 +14,7 @@ export type AuthUser = {
   email: string;
   subscriptionTier: 'free' | 'pro' | 'business';
   roles: string[];
+  sessionId?: string;
 };
 
 export const CurrentUser = createParamDecorator(

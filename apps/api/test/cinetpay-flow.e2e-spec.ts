@@ -22,7 +22,7 @@ describe('CinetPay payment flow (e2e)', () => {
   let originalFetch: typeof fetch;
   const checkByTx: Record<string, 'ACCEPTED' | 'REFUSED' | 'WAITING'> = {};
 
-  const password = 'Str0ngpass1';
+  const password = 'Str0ngpass1!x';
   const uniqueEmail = () =>
     `cinetpay+${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
 
@@ -93,6 +93,24 @@ describe('CinetPay payment flow (e2e)', () => {
       .post('/api/v1/subscriptions/checkout')
       .send({ plan: 'pro', interval: 'month', paymentMethod: 'cinetpay' })
       .expect(401);
+  });
+
+  it('POST /subscriptions cannot self-upgrade to pro without payment', async () => {
+    const user = await register();
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/subscriptions')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ plan: 'pro' })
+      .expect(403);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error?.code).toBe('FORBIDDEN');
+
+    const dbUser = await prisma.user.findUnique({ where: { id: user.id } });
+    expect(dbUser?.subscriptionTier).toBe('free');
+
+    const sub = await prisma.subscription.findUnique({ where: { userId: user.id } });
+    expect(sub).toBeNull();
   });
 
   it('POST /subscriptions/checkout validates plan enum', async () => {

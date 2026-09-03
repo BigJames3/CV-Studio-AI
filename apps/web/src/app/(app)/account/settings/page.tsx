@@ -38,12 +38,17 @@ export default function SettingsPage() {
         <div>
           <h1 className="text-3xl font-semibold">Paramètres</h1>
           <p className="mt-2 text-sm text-content-secondary">
-            Gérez votre profil, la sécurité et les sessions.
+            Gérez votre profil, la sécurité, les sessions et la confidentialité.
           </p>
         </div>
-        <Link href="/account/profile" className="text-sm text-primary">
-          Vue profil
-        </Link>
+        <div className="flex gap-4 text-sm">
+          <Link href="/account/privacy" className="text-primary">
+            Confidentialité
+          </Link>
+          <Link href="/account/profile" className="text-primary">
+            Vue profil
+          </Link>
+        </div>
       </div>
 
       <div className="mt-6 flex gap-1 border-b border-border" role="tablist">

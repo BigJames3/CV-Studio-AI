@@ -202,6 +202,9 @@ model User {
   isEmailVerified            Boolean          @default(false) @map("is_email_verified")
   is2faEnabled               Boolean          @default(false) @map("is_2fa_enabled")
   twoFactorSecretEncrypted   Bytes?           @map("two_factor_secret_encrypted") // AES-GCM ciphertext
+  twoFactorBackupCodes       String[]         @default([]) @map("two_factor_backup_codes")
+  failedLoginAttempts        Int              @default(0) @map("failed_login_attempts")
+  lockedUntil                DateTime?        @map("locked_until") @db.Timestamptz(6)
   lastLoginAt                 DateTime?        @map("last_login_at") @db.Timestamptz(6)
   emailVerificationSentAt     DateTime?        @map("email_verification_sent_at") @db.Timestamptz(6)
   createdAt                   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -235,16 +238,18 @@ model User {
 }
 
 model AuthSession {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId     String    @map("user_id") @db.Uuid
-  familyId   String    @unique @map("family_id") @db.Uuid
-  refreshJti String    @map("refresh_jti") @db.VarChar(64)
-  userAgent  String?   @map("user_agent") @db.VarChar(512)
-  ipAddress  String?   @map("ip_address") @db.VarChar(64)
-  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
-  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  familyId       String    @unique @map("family_id") @db.Uuid
+  refreshJti     String    @map("refresh_jti") @db.VarChar(64)
+  tokenVersion   Int       @default(0) @map("token_version")
+  lastActivityAt DateTime  @default(now()) @map("last_activity_at") @db.Timestamptz(6)
+  userAgent      String?   @map("user_agent") @db.VarChar(512)
+  ipAddress      String?   @map("ip_address") @db.VarChar(64)
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 

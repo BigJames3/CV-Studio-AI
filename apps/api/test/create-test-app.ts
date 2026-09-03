@@ -1,9 +1,10 @@
 import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test, TestingModule } from '@nestjs/testing';
-import cookieParser from 'cookie-parser';
 import { AppModule } from '../src/app.module';
 import { GlobalExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
+import { applyHttpSecurity } from '../src/common/http-security';
 
 const CINETPAY_HOST = 'api-checkout.cinetpay.com';
 
@@ -42,22 +43,26 @@ function stubCinetpayFetch() {
   }) as typeof fetch;
 }
 
-export async function createTestApp(): Promise<INestApplication> {
+export async function createTestApp(opts?: {
+  enableTwoFactor?: boolean;
+}): Promise<INestApplication> {
   process.env.NODE_ENV = 'test';
   process.env.AUTH_RATE_LIMIT_DISABLED = 'true';
-  process.env.ENABLE_TWO_FACTOR = 'false';
+  process.env.ENABLE_TWO_FACTOR = opts?.enableTwoFactor ? 'true' : 'false';
   process.env.JWT_ACCESS_SECRET =
     process.env.JWT_ACCESS_SECRET ?? 'test-access-secret-min-32-characters!!';
   process.env.JWT_REFRESH_SECRET =
     process.env.JWT_REFRESH_SECRET ?? 'test-refresh-secret-min-32-characters!';
+  process.env.ENCRYPTION_KEY =
+    process.env.ENCRYPTION_KEY ?? 'test-encryption-key-min-32-characters!!';
   stubCinetpayFetch();
 
   const moduleFixture: TestingModule = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
 
-  const app = moduleFixture.createNestApplication({ rawBody: true });
-  app.use(cookieParser());
+  const app = moduleFixture.createNestApplication<NestExpressApplication>({ rawBody: true });
+  applyHttpSecurity(app);
   app.enableCors({ origin: true, credentials: true });
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });

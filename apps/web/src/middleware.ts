@@ -26,7 +26,9 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (hasSession && AUTH_PAGES.some((p) => pathname.startsWith(p))) {
+  // Do not bounce /login → /dashboard: leftover HttpOnly refresh_token after
+  // a 401 logout would trap the user on a blank dashboard.
+  if (hasSession && AUTH_PAGES.some((p) => pathname.startsWith(p) && p !== '/login')) {
     const url = request.nextUrl.clone();
     url.pathname = '/dashboard';
     return NextResponse.redirect(url);

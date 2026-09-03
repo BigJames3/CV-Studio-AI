@@ -23,3 +23,4 @@ export function bootstrapObservability(): void {
 }
 
 export { captureServerException };
+export { emitSecurityAlert } from './security-alert';

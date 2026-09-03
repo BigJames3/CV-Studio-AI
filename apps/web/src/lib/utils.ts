@@ -10,4 +10,9 @@ export function absoluteUrl(path = '') {
   return `${base.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
-export { suggestPaymentMethod, type PaymentProvider } from '@cvstudio/shared-utils';
+export {
+  isCinetpayCountry,
+  suggestPaymentMethod,
+  type GeoLocationSource,
+  type PaymentProvider,
+} from '@cvstudio/shared-utils';

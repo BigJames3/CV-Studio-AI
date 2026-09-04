@@ -3,21 +3,24 @@
 #   docker build -f apps/web/Dockerfile .
 
 FROM node:20-alpine AS base
-RUN apk add --no-cache libc6-compat dumb-init curl
+RUN apk add --no-cache libc6-compat dumb-init curl ca-certificates
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
+ENV HUSKY=0
+ENV CI=true
 
 FROM base AS builder
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json .npmrc ./
 COPY apps ./apps
 COPY packages ./packages
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --filter @cvstudio/web...
 
 ARG NEXT_PUBLIC_API_URL=http://localhost:3001/api/v1
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV TURBO_TELEMETRY_DISABLED=1
 
+# next/font/google fetches at compile time (needs outbound HTTPS)
 RUN pnpm run build:web
 
 FROM base AS runner

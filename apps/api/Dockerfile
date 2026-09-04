@@ -6,12 +6,15 @@ FROM node:20-alpine AS base
 RUN apk add --no-cache libc6-compat openssl dumb-init curl
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
+ENV HUSKY=0
+ENV CI=true
 
 FROM base AS builder
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json .npmrc ./
 COPY apps ./apps
 COPY packages ./packages
-RUN pnpm install --frozen-lockfile
+# Workspace glob still sees apps/mobile/package.json; do not install Expo/native deps.
+RUN pnpm install --frozen-lockfile --filter @cvstudio/api...
 
 # prisma generate reads these; it does not connect to Postgres
 ENV DATABASE_URL="postgresql://cvstudio:cvstudio@localhost:5432/cvstudio?schema=public"
@@ -24,8 +27,9 @@ RUN pnpm run build:api
 # Workspace packages export TypeScript sources; Node needs compiled JS at runtime.
 RUN node -e "\
 const fs=require('fs'); const path=require('path');\
-for (const dir of ['packages/shared-types','packages/shared-utils']) {\
+for (const dir of ['packages/shared-types','packages/shared-utils','packages/ai-service']) {\
   const p=path.join(dir,'package.json');\
+  if (!fs.existsSync(p)) continue;\
   const j=JSON.parse(fs.readFileSync(p,'utf8'));\
   j.main='./dist/index.js'; j.types='./dist/index.d.ts';\
   j.exports={'.':{types:'./dist/index.d.ts',require:'./dist/index.js',default:'./dist/index.js'}};\
@@ -47,6 +51,7 @@ RUN addgroup -g 10001 -S app \
     'else' \
     '  PRISMA="npx prisma"' \
     'fi' \
+    'echo "Running prisma migrate deploy..."' \
     '$PRISMA migrate deploy --schema=/app/apps/api/prisma/schema.prisma' \
     'exec "$@"' \
     > /usr/local/bin/docker-entrypoint.sh \

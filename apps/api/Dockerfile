@@ -3,7 +3,13 @@
 #   docker build -f apps/api/Dockerfile .
 
 FROM node:20-alpine AS base
-RUN apk add --no-cache libc6-compat openssl dumb-init curl
+RUN apk add --no-cache libc6-compat openssl dumb-init curl chromium \
+  && if [ -x /usr/bin/chromium-browser ]; then ln -sf /usr/bin/chromium-browser /usr/local/bin/cv-chrome; \
+     elif [ -x /usr/bin/chromium ]; then ln -sf /usr/bin/chromium /usr/local/bin/cv-chrome; \
+     fi
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/cv-chrome
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 ENV HUSKY=0

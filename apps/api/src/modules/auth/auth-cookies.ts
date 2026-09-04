@@ -5,11 +5,20 @@ export const REFRESH_COOKIE = 'refresh_token';
 /** Non-sensitive presence flag so Next middleware can gate routes (HttpOnly refresh is also readable by Next on same host). */
 export const SESSION_FLAG_COOKIE = 'cv_session';
 
+/** Secure cookies are dropped on http:// (Docker NODE_ENV=production). Honor COOKIE_SECURE, else HTTPS APP_URL. */
+export function useSecureCookies(): boolean {
+  const flag = process.env.COOKIE_SECURE?.toLowerCase();
+  if (flag === 'true' || flag === '1') return true;
+  if (flag === 'false' || flag === '0') return false;
+  const publicUrl = process.env.APP_URL || process.env.API_URL || '';
+  if (publicUrl.startsWith('http://')) return false;
+  return process.env.NODE_ENV === 'production';
+}
+
 export function refreshCookieOptions(): CookieOptions {
-  const isProd = process.env.NODE_ENV === 'production';
   return {
     httpOnly: true,
-    secure: isProd,
+    secure: useSecureCookies(),
     sameSite: 'lax',
     path: '/',
     maxAge: getRefreshTtlSeconds() * 1000,
@@ -17,10 +26,9 @@ export function refreshCookieOptions(): CookieOptions {
 }
 
 export function sessionFlagCookieOptions(): CookieOptions {
-  const isProd = process.env.NODE_ENV === 'production';
   return {
     httpOnly: false,
-    secure: isProd,
+    secure: useSecureCookies(),
     sameSite: 'lax',
     path: '/',
     maxAge: getRefreshTtlSeconds() * 1000,

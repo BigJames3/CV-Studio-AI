@@ -117,11 +117,11 @@ export function useLogin() {
     mutationFn: ({ email, password, totp }: { email: string; password: string; totp?: string }) =>
       authApi.login(email, password, totp),
     onSuccess: (data) => {
-      if (!('requires2fa' in data)) {
-        identify(data.user.id, { plan: data.user.subscriptionTier });
-        track('login_succeeded');
-        qc.invalidateQueries({ queryKey: queryKeys.user.me() });
-      }
+      if ('requires2fa' in data) return; // Early return for 2FA
+      useAuthStore.getState().setSession(data.accessToken, data.user);
+      identify(data.user.id, { plan: data.user.subscriptionTier });
+      track('login_succeeded');
+      qc.invalidateQueries({ queryKey: queryKeys.user.me() });
     },
     onError: () => {
       track('login_failed');

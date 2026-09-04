@@ -1,4 +1,4 @@
-import { apiClient, setAccessToken, setLogoutInProgress } from './client';
+import { apiClient, setLogoutInProgress } from './client';
 import { useAuthStore } from '@/stores/auth-store';
 
 export const queryKeys = {
@@ -37,8 +37,7 @@ export type AuthResponse = {
 export type LoginResult = AuthResponse | { requires2fa: true; tempToken?: string };
 
 function applyAuth(data: AuthResponse) {
-  setAccessToken(data.accessToken);
-  useAuthStore.getState().setUser(data.user);
+  useAuthStore.getState().setSession(data.accessToken, data.user);
   return data;
 }
 
@@ -49,8 +48,8 @@ export const authApi = {
       body: { email, password, ...(totp ? { totp } : {}) },
       skipRefresh: true,
     });
-    if ('requires2fa' in data) return data;
-    return applyAuth(data);
+    if ('requires2fa' in data && data.requires2fa) return data;
+    return applyAuth(data as AuthResponse);
   },
   register: async (payload: {
     email: string;

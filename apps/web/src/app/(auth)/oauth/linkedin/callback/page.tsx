@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { authApi } from '@/lib/api';
 import { sanitizeNextPath } from '@/lib/safe-next';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
 
-export default function LinkedInOAuthCallbackPage() {
+function LinkedInOAuthCallbackPageInner() {
   const router = useRouter();
   const search = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -81,5 +81,19 @@ export default function LinkedInOAuthCallbackPage() {
     <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 text-sm">
       Connexion LinkedIn…
     </div>
+  );
+}
+
+export default function LinkedInOAuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 text-sm">
+          Connexion LinkedIn…
+        </div>
+      }
+    >
+      <LinkedInOAuthCallbackPageInner />
+    </Suspense>
   );
 }

@@ -35,14 +35,22 @@ out
 storybook-static
 **/*.tsbuildinfo
 
-# Tests / local tooling
+# Tests / local tooling (e2e is dockerignored — Next must not typecheck playwright.config)
 apps/web/e2e
+apps/web/playwright.config.ts
 apps/web/playwright-report
 apps/web/test-results
 apps/api/coverage
+apps/api/test
 **/*.log
 
+# Mobile is not part of api/web images; keep package.json so the pnpm workspace is valid
+apps/mobile/**
+!apps/mobile/package.json
+
 # Docs & misc (not needed to build images)
+docs
+.github
 agent-transcripts
 infrastructure/k8s
 infrastructure/terraform

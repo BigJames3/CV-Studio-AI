@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { authApi } from '@/lib/api';
 import { ApiError } from '@/lib/api/client';
 
-export default function VerifyEmailPage() {
+function VerifyEmailPageInner() {
   const search = useSearchParams();
   const token = search.get('token') ?? '';
   const [status, setStatus] = useState<'idle' | 'ok' | 'error'>('idle');
@@ -46,5 +46,19 @@ export default function VerifyEmailPage() {
         Aller à la connexion
       </Link>
     </div>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 text-sm">
+          Chargement…
+        </div>
+      }
+    >
+      <VerifyEmailPageInner />
+    </Suspense>
   );
 }

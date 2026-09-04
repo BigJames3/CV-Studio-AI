@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -5,10 +6,20 @@ import { withSentryConfig } from '@sentry/nextjs';
 
 const require = createRequire(import.meta.url);
 const dir = path.dirname(fileURLToPath(import.meta.url));
-const reactQueryEntry = path.join(
-  path.dirname(require.resolve('@tanstack/react-query/package.json')),
-  'build/modern/index.js'
-);
+
+function resolveReactQueryEntry() {
+  try {
+    const candidate = path.join(
+      path.dirname(require.resolve('@tanstack/react-query/package.json')),
+      'build/modern/index.js'
+    );
+    return existsSync(candidate) ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+const reactQueryEntry = resolveReactQueryEntry();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -16,6 +27,9 @@ const nextConfig = {
   poweredByHeader: false,
   output: 'standalone',
   outputFileTracingRoot: path.join(dir, '../..'),
+  eslint: {
+    dirs: ['src'],
+  },
   transpilePackages: [
     '@tanstack/react-query',
     '@tanstack/query-core',
@@ -26,10 +40,12 @@ const nextConfig = {
     '@cvstudio/shared-types',
   ],
   webpack: (config) => {
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      '@tanstack/react-query': reactQueryEntry,
-    };
+    if (reactQueryEntry) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        '@tanstack/react-query': reactQueryEntry,
+      };
+    }
     return config;
   },
   images: {

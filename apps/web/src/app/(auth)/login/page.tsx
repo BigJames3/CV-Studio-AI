@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
@@ -19,7 +19,7 @@ const totpSchema = z.object({
   totp: z.string().min(6, 'Code requis').max(16),
 });
 
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter();
   const search = useSearchParams();
   const login = useLogin();
@@ -175,5 +175,19 @@ export default function LoginPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 text-sm">
+          Chargement…
+        </div>
+      }
+    >
+      <LoginPageInner />
+    </Suspense>
   );
 }

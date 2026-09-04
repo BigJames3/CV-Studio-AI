@@ -6,6 +6,7 @@ loadTestEnv();
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
 const repoRoot = path.resolve(__dirname, '../..');
+const e2eDir = path.join(__dirname, 'e2e');
 const stripe = process.env.E2E_STRIPE === '1';
 const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEBSERVER === '1';
 const isCi = process.env.CI === 'true' || process.env.CI === '1';
@@ -18,10 +19,10 @@ const webCommand = isCi
   : 'pnpm --filter @cvstudio/web dev';
 
 export default defineConfig({
-  testDir: './e2e',
+  testDir: e2eDir,
   testMatch: '**/*.spec.ts',
-  globalSetup: './e2e/global-setup.ts',
-  globalTeardown: './e2e/global-teardown.ts',
+  globalSetup: path.join(e2eDir, 'global-setup.ts'),
+  globalTeardown: path.join(e2eDir, 'global-teardown.ts'),
   fullyParallel: false,
   forbidOnly: isCi,
   retries: isCi ? 1 : 0,

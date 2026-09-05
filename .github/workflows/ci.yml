@@ -62,7 +62,7 @@ jobs:
       API_URL: http://localhost:3001
       PORT: '3001'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
 
@@ -163,7 +163,7 @@ jobs:
       STRIPE_SECRET_KEY: sk_test_xxx
       STRIPE_WEBHOOK_SECRET: whsec_xxx
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
         with:
@@ -223,7 +223,7 @@ jobs:
     needs: [quality]
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
         with:

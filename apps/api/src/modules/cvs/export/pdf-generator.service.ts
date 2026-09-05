@@ -127,6 +127,8 @@ export class PdfGeneratorService {
     const quality = options.quality ?? 'standard';
     const footerName = options.filename?.replace(/\.pdf$/i, '') || 'CV';
     const site = options.siteUrl ?? '';
+    // ✅ NOUVEAU: Utiliser '0' pour tous les côtés si wysiwyg
+    const sideMarginsString = wysiwyg ? '0' : `${marginMm}mm`;
 
     // WYSIWYG must stay at 100% to avoid gaps/shifts vs the editor preview
     const scale = wysiwyg ? 1 : qualityScale(quality);
@@ -141,8 +143,8 @@ export class PdfGeneratorService {
       margin: {
         top: wysiwyg ? '0' : `${marginMm + (options.includeHeader !== false ? 8 : 0)}mm`,
         bottom: wysiwyg ? '0' : `${marginMm + (options.includeFooter !== false ? 12 : 0)}mm`,
-        left: `${marginMm}mm`,
-        right: `${marginMm}mm`,
+        left: sideMarginsString, // ✅ FIX
+        right: sideMarginsString, // ✅ FIX
       },
       displayHeaderFooter: showChrome,
       headerTemplate:

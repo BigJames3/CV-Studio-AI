@@ -1,18 +1,18 @@
 # syntax=docker/dockerfile:1.7
 # PDF worker — Chromium dependencies for server-side render
 
-FROM node:20-bookworm-slim AS deps
+FROM node:26-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json pnpm-lock.yaml* ./
 RUN corepack enable && pnpm fetch || npm install --omit=dev
 
-FROM node:20-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN corepack enable && pnpm run build || npm run build
 
-FROM node:20-bookworm-slim AS runner
+FROM node:26-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 RUN apt-get update && apt-get install -y --no-install-recommends \

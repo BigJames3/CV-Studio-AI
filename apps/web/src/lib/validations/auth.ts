@@ -1,22 +1,32 @@
 import { z } from 'zod';
+import { PASSWORD_REGEX } from '@cvstudio/shared-utils';
 
 export const loginSchema = z.object({
   email: z.string().email('Email invalide'),
   password: z.string().min(8, '8 caractères minimum'),
 });
 
-export const registerSchema = z.object({
-  email: z.string().email(),
-  password: z
-    .string()
-    .min(12, '12 caractères minimum')
-    .regex(
-      /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/,
-      'Lettre, chiffre et caractère spécial requis'
-    ),
-  firstName: z.string().min(1).max(120),
-  lastName: z.string().min(1).max(120),
-});
+export const registerPasswordSchema = z
+  .string()
+  .min(12, '12 caractères minimum')
+  .max(128, '128 caractères maximum')
+  .regex(PASSWORD_REGEX, 'Majuscule, minuscule, chiffre et caractère spécial requis');
+
+export const registerSchema = z
+  .object({
+    email: z.string().email('Email invalide'),
+    password: registerPasswordSchema,
+    confirmPassword: z.string().min(1, 'Confirmez le mot de passe'),
+    firstName: z.string().min(1, 'Prénom requis').max(120, '120 caractères maximum'),
+    lastName: z.string().min(1, 'Nom requis').max(120, '120 caractères maximum'),
+    acceptedTerms: z.boolean().refine((v) => v, {
+      message: 'Acceptez les conditions pour créer un compte',
+    }),
+  })
+  .refine((v) => v.password === v.confirmPassword, {
+    message: 'Les mots de passe ne correspondent pas',
+    path: ['confirmPassword'],
+  });
 
 export const updateProfileSchema = z.object({
   firstName: z.string().min(1, 'Prénom requis').max(120),

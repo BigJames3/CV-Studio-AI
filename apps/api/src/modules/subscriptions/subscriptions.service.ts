@@ -12,6 +12,8 @@ import { PrismaService } from '../../database/prisma.module';
 import { EntitlementsService } from './entitlements.service';
 import { CheckoutDto, UpdateSubscriptionDto, CreateSubscriptionDto } from './dto/subscription.dto';
 import { CinetpayGateway } from '../payments/gateways/cinetpay.gateway';
+import { isStripeFailClosed } from '../payments/payment-env';
+import { TRIAL_PERIOD_DAYS } from '../plans/plans.service';
 import { appOriginFromEnv, safeReturnUrl } from '../../common/utils/url.utils';
 
 @Injectable()
@@ -37,15 +39,11 @@ export class SubscriptionsService {
       where: { userId },
       include: { plan: true },
     });
-    const tier = await this.entitlements.getTier(userId);
+    const snap = await this.entitlements.snapshot(userId);
     return {
       subscription: sub,
-      tier,
-      entitlements: {
-        cvCreate: await this.entitlements.can(userId, 'cv:create'),
-        aiOptimize: await this.entitlements.can(userId, 'ai:optimize'),
-        exportDocx: await this.entitlements.can(userId, 'cv:export:docx'),
-      },
+      tier: snap.tier,
+      entitlements: snap.entitlements,
     };
   }
 
@@ -169,9 +167,7 @@ export class SubscriptionsService {
     );
 
     if (!this.stripe) {
-      const failClosed =
-        process.env.NODE_ENV === 'production' || process.env.STRIPE_FAIL_CLOSED === '1';
-      if (failClosed) {
+      if (isStripeFailClosed()) {
         throw new BadRequestException({
           code: 'STRIPE_NOT_CONFIGURED',
           message: 'Stripe is not configured (fail-closed). Checkout unavailable.',
@@ -193,6 +189,10 @@ export class SubscriptionsService {
       };
     }
 
+    const existingSub = await this.prisma.subscription.findUnique({ where: { userId } });
+    const grantTrial =
+      (user.subscriptionTier ?? 'free') === 'free' && !existingSub?.stripeSubscriptionId;
+
     const priceId = this.resolvePriceId(dto.plan, dto.interval);
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: 'subscription',
@@ -202,7 +202,12 @@ export class SubscriptionsService {
       customer_email: user.email,
       metadata: { userId, plan: dto.plan, interval: dto.interval },
       subscription_data: {
-        metadata: { userId, plan: dto.plan },
+        metadata: {
+          userId,
+          plan: dto.plan,
+          ...(grantTrial ? { trial_days: String(TRIAL_PERIOD_DAYS) } : {}),
+        },
+        ...(grantTrial ? { trial_period_days: TRIAL_PERIOD_DAYS } : {}),
       },
     };
 

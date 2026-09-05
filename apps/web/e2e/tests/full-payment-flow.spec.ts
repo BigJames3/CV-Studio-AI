@@ -22,11 +22,9 @@ test.describe('Full payment flow (Free → Pro)', () => {
     await loginPage.login(testUser.email, testUser.password);
     await dashboardPage.expectLoaded(testUser.firstName);
 
-    await mockPdfExport(page);
     await dashboardPage.createCv();
     await editorPage.expectLoaded();
     await editorPage.fillIdentity('Ada Lovelace', testUser.email);
-    await editorPage.exportPdf();
 
     await page.goto('/dashboard');
     await dashboardPage.expectCvListed('Nouveau CV');
@@ -44,6 +42,13 @@ test.describe('Full payment flow (Free → Pro)', () => {
     await expect(page.getByTestId('plan-badge').first()).toContainText(/pro/i);
 
     await expectSubscriptionTier(request, testUser.accessToken, 'pro');
+
+    await mockPdfExport(page);
+    await page.goto('/dashboard');
+    await dashboardPage.expectCvListed('Nouveau CV');
+    await page.getByRole('link', { name: 'Éditer' }).first().click();
+    await editorPage.expectLoaded();
+    await editorPage.exportPdf();
   });
 
   test('login with wrong password stays on login @auth', async ({ page, loginPage, testUser }) => {

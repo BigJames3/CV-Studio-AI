@@ -7,19 +7,27 @@ export function TemplateCard({
   template,
   selected,
   onSelect,
+  locked = false,
+  lockLabel = 'Business only',
 }: {
   template: TemplateListItem;
   selected?: boolean;
   onSelect: () => void;
+  locked?: boolean;
+  lockLabel?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
+      aria-disabled={locked}
       className={cn(
         'group w-full rounded-xl border bg-surface-card p-3 text-left shadow-1 transition',
-        selected ? 'border-primary ring-2 ring-primary/30' : 'border-border hover:border-primary/50'
+        selected
+          ? 'border-primary ring-2 ring-primary/30'
+          : 'border-border hover:border-primary/50',
+        locked && 'cursor-not-allowed opacity-50'
       )}
     >
       <div
@@ -38,7 +46,11 @@ export function TemplateCard({
       <p className="line-clamp-2 text-xs text-content-secondary">{template.description}</p>
       <div className="mt-2 flex items-center justify-between text-xs text-content-secondary">
         <span>★ {template.rating.toFixed(1)}</span>
-        {template.isPremium ? (
+        {locked ? (
+          <span className="rounded-full bg-secondary/10 px-2 py-0.5 font-semibold text-secondary">
+            🔒 {lockLabel}
+          </span>
+        ) : template.isPremium ? (
           <span className="rounded-full bg-secondary/10 px-2 py-0.5 font-semibold text-secondary">
             Pro
           </span>

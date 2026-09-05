@@ -63,14 +63,8 @@ export class CvsService {
   }
 
   async create(userId: string, dto: CreateCvDto) {
-    const can = await this.entitlements.can(userId, 'cv:create');
-    if (!can) {
-      throw new ForbiddenException({
-        code: 'ENTITLEMENT_REQUIRED',
-        message: 'CV limit reached — upgrade to Pro',
-        details: { feature: 'cv:create' },
-      });
-    }
+    await this.entitlements.assertCan(userId, 'cv:create', 'Free plan: 1 CV max');
+    await this.assertTemplateAccess(userId, dto.templateId);
 
     return this.prisma.cv.create({
       data: {
@@ -97,6 +91,7 @@ export class CvsService {
 
   async update(userId: string, id: string, dto: UpdateCvDto) {
     await this.get(userId, id);
+    await this.assertTemplateAccess(userId, dto.templateId);
     const content =
       dto.content !== undefined
         ? (normalizeCvContent(dto.content) as Prisma.InputJsonValue)
@@ -125,6 +120,9 @@ export class CvsService {
 
   async publish(userId: string, id: string, dto: PublishCvDto) {
     await this.get(userId, id);
+    if (dto.isPublic) {
+      await this.entitlements.assertCan(userId, 'cv:share', 'Sharing requires Pro');
+    }
     const slug = dto.publicUrl ?? `cv-${randomBytes(6).toString('hex')}`;
     try {
       return await this.prisma.cv.update({
@@ -168,14 +166,7 @@ export class CvsService {
 
   async duplicate(userId: string, id: string) {
     const source = await this.get(userId, id);
-    const can = await this.entitlements.can(userId, 'cv:create');
-    if (!can) {
-      throw new ForbiddenException({
-        code: 'ENTITLEMENT_REQUIRED',
-        message: 'CV limit reached — upgrade to Pro',
-        details: { feature: 'cv:create' },
-      });
-    }
+    await this.entitlements.assertCan(userId, 'cv:create', 'Free plan: 1 CV max');
 
     return this.prisma.cv.create({
       data: {
@@ -190,6 +181,7 @@ export class CvsService {
   }
 
   async shareMeta(userId: string, id: string) {
+    await this.entitlements.assertCan(userId, 'cv:share', 'Sharing requires Pro');
     const cv = await this.get(userId, id);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
     if (!cv.isPublic || !cv.publicUrl) {
@@ -279,5 +271,19 @@ export class CvsService {
     ]);
 
     return this.get(userId, cvId);
+  }
+
+  private async assertTemplateAccess(userId: string, templateId?: string) {
+    if (!templateId) return;
+    const template = await this.prisma.template.findFirst({
+      where: { id: templateId },
+      select: { isPremium: true },
+    });
+    if (!template?.isPremium) return;
+    await this.entitlements.assertCan(
+      userId,
+      'templates:pro',
+      'This template requires a Business plan'
+    );
   }
 }

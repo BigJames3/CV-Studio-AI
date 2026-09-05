@@ -134,6 +134,10 @@ export function useCvMutations() {
       }
     },
     onError: (err) => {
+      if (isEntitlementRequired(err)) {
+        openPaywall('cv:share', 'cv:share');
+        return;
+      }
       toast.error('❌ Erreur lors de la publication', {
         description: getErrorMessage(err, 'Impossible de modifier la publication'),
       });

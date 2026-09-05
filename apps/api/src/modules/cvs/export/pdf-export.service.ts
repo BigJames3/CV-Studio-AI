@@ -48,13 +48,11 @@ export class PdfExportService {
     userId?: string
   ): Promise<{ buffer: Buffer; filename: string; warnings: string[] }> {
     if (userId) {
-      const allowed = await this.entitlements.can(userId, 'cv:export:pdf');
-      if (!allowed) {
-        throw new BadRequestException({
-          code: 'ENTITLEMENT_REQUIRED',
-          message: 'PDF export is not available on your plan',
-        });
-      }
+      await this.entitlements.assertCan(
+        userId,
+        'cv:export:pdf',
+        'PDF export is not available on your plan'
+      );
     }
 
     // WYSIWYG path: client-serialized TemplateWrapper HTML
@@ -139,13 +137,11 @@ export class PdfExportService {
     cvId: string,
     options: ExportPdfOptions = {}
   ): Promise<{ status: string; jobId: string; pollUrl: string }> {
-    const allowed = await this.entitlements.can(userId, 'cv:export:pdf');
-    if (!allowed) {
-      throw new BadRequestException({
-        code: 'ENTITLEMENT_REQUIRED',
-        message: 'PDF export is not available on your plan',
-      });
-    }
+    await this.entitlements.assertCan(
+      userId,
+      'cv:export:pdf',
+      'PDF export is not available on your plan'
+    );
 
     const cv = await this.prisma.cv.findFirst({ where: { id: cvId, deletedAt: null } });
     if (!cv) throw new NotFoundException({ code: 'NOT_FOUND', message: 'CV not found' });
@@ -221,7 +217,7 @@ export class PdfExportService {
     if (job.status !== 'completed' || !(job as { buffer?: Buffer }).buffer) {
       throw new BadRequestException({
         code: 'NOT_READY',
-        message: job.status === 'failed' ? job.error ?? 'Export failed' : 'PDF is not ready yet',
+        message: job.status === 'failed' ? (job.error ?? 'Export failed') : 'PDF is not ready yet',
       });
     }
     return {

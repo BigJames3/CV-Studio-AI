@@ -92,7 +92,10 @@ export class AuthService {
       where: { email: dto.email.toLowerCase() },
     });
     if (existing) {
-      throw new ConflictException({ code: 'EMAIL_TAKEN', message: 'Email already registered' });
+      throw new ConflictException({
+        code: 'EMAIL_TAKEN',
+        message: 'Cet email est déjà utilisé',
+      });
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);

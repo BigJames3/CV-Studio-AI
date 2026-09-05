@@ -62,11 +62,19 @@ describe('MarketplaceService security fixes', () => {
       findUnique: jest.fn(),
       create: jest.fn(),
     },
-    sellerProfile: { findUnique: jest.fn(), upsert: jest.fn() },
+    sellerProfile: {
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+      findMany: jest.fn(),
+    },
     marketplacePurchase: { findUnique: jest.fn(), create: jest.fn() },
-    marketplaceLedgerEntry: { createMany: jest.fn() },
+    marketplaceLedgerEntry: { createMany: jest.fn(), create: jest.fn(), aggregate: jest.fn() },
     templateReview: { create: jest.fn(), aggregate: jest.fn() },
     marketplaceDispute: { create: jest.fn() },
+    user: { findUnique: jest.fn() },
+    sellerPayout: { findMany: jest.fn(), create: jest.fn() },
     $transaction: jest.fn(),
   };
 
@@ -75,6 +83,16 @@ describe('MarketplaceService security fixes', () => {
       create: jest.fn(),
       retrieve: jest.fn(),
     },
+    checkout: {
+      sessions: { create: jest.fn() },
+    },
+    accounts: {
+      create: jest.fn(),
+      retrieve: jest.fn(),
+      createLoginLink: jest.fn(),
+    },
+    accountLinks: { create: jest.fn() },
+    transfers: { create: jest.fn() },
   };
 
   let service: MarketplaceService;
@@ -310,6 +328,51 @@ describe('MarketplaceService security fixes', () => {
           }),
         })
       );
+      expect(stripe.paymentIntents.create.mock.calls[0][0].transfer_data).toBeUndefined();
+    });
+
+    it('createPaymentIntent uses a destination charge when the seller can receive payouts', async () => {
+      prisma.marketplaceTemplate.findUnique.mockResolvedValue(
+        publishedListing({
+          sellerProfile: {
+            stripeAccountId: 'acct_seller',
+            payoutsEnabled: true,
+          },
+        })
+      );
+      stripe.paymentIntents.create.mockResolvedValue({
+        id: 'pi_dest',
+        client_secret: 'secret',
+      });
+
+      await service.createPaymentIntent('buyer-1', 'listing-1');
+      expect(stripe.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 1299,
+          transfer_data: { destination: 'acct_seller' },
+          application_fee_amount: 437,
+        })
+      );
+    });
+
+    it('createListingCheckout returns a hosted Checkout URL', async () => {
+      stripe.checkout.sessions.create.mockResolvedValue({
+        id: 'cs_1',
+        url: 'https://checkout.stripe.com/c/pay/cs_1',
+      });
+
+      const result = await service.createListingCheckout('buyer-1', 'listing-1');
+      expect(result).toEqual({
+        url: 'https://checkout.stripe.com/c/pay/cs_1',
+        sessionId: 'cs_1',
+      });
+      expect(stripe.checkout.sessions.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'payment',
+          client_reference_id: 'buyer-1',
+          metadata: expect.objectContaining({ type: 'marketplace', listingId: 'listing-1' }),
+        })
+      );
     });
 
     it('creates the purchase after a matching succeeded PaymentIntent', async () => {
@@ -448,6 +511,179 @@ describe('MarketplaceService security fixes', () => {
       expect(analytics.impressions).toBe(10);
       expect(analytics.purchases).toBe(1);
       expect(analytics.conversionRate).toBeCloseTo(0.1);
+    });
+  });
+
+  describe('catalog query', () => {
+    it('filters by template category and price sort', async () => {
+      prisma.marketplaceTemplate.findMany.mockResolvedValue([]);
+      await service.listPublished({ q: 'pro', category: 'modern', sort: 'price_low' });
+      expect(prisma.marketplaceTemplate.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            template: { category: 'modern' },
+          }),
+          orderBy: { priceCents: 'asc' },
+        })
+      );
+    });
+
+    it('ignores unknown categories', async () => {
+      prisma.marketplaceTemplate.findMany.mockResolvedValue([]);
+      await service.listPublished({ category: 'not-a-category' });
+      const arg = prisma.marketplaceTemplate.findMany.mock.calls[0][0] as {
+        where: Record<string, unknown>;
+      };
+      expect(arg.where.template).toBeUndefined();
+    });
+  });
+
+  describe('Connect Express onboarding', () => {
+    const pendingProfile = {
+      id: 'profile-1',
+      userId: 'seller-1',
+      country: 'fr',
+      status: 'pending_kyc',
+      stripeAccountId: null as string | null,
+      payoutsEnabled: false,
+    };
+
+    it('creates an Express account and Account Link', async () => {
+      prisma.sellerProfile.findUnique.mockResolvedValue(pendingProfile);
+      prisma.user.findUnique.mockResolvedValue({ email: 'ada@example.com' });
+      stripe.accounts.create.mockResolvedValue({ id: 'acct_new' });
+      prisma.sellerProfile.update.mockResolvedValue({
+        ...pendingProfile,
+        stripeAccountId: 'acct_new',
+      });
+      stripe.accountLinks.create.mockResolvedValue({
+        url: 'https://connect.stripe.com/setup/s/xxx',
+      });
+
+      const result = await service.startConnectOnboarding('seller-1');
+      expect(result).toEqual({ url: 'https://connect.stripe.com/setup/s/xxx' });
+      expect(stripe.accounts.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'express',
+          country: 'FR',
+          email: 'ada@example.com',
+          capabilities: { transfers: { requested: true } },
+        })
+      );
+    });
+
+    it('reuses an existing connected account id', async () => {
+      prisma.sellerProfile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        stripeAccountId: 'acct_existing',
+      });
+      stripe.accountLinks.create.mockResolvedValue({
+        url: 'https://connect.stripe.com/setup/s/yyy',
+      });
+
+      await service.startConnectOnboarding('seller-1');
+      expect(stripe.accounts.create).not.toHaveBeenCalled();
+      expect(stripe.accountLinks.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          account: 'acct_existing',
+          type: 'account_onboarding',
+        })
+      );
+    });
+
+    it('activates the seller when Stripe reports payouts ready', async () => {
+      prisma.sellerProfile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        stripeAccountId: 'acct_1',
+      });
+      stripe.accounts.retrieve.mockResolvedValue({
+        id: 'acct_1',
+        payouts_enabled: true,
+        details_submitted: true,
+      });
+      prisma.sellerProfile.update.mockResolvedValue({ status: 'active', payoutsEnabled: true });
+
+      await service.refreshConnectAccount('seller-1');
+      expect(prisma.sellerProfile.update).toHaveBeenCalledWith({
+        where: { id: 'profile-1' },
+        data: { payoutsEnabled: true, status: 'active' },
+      });
+    });
+  });
+
+  describe('weekly payouts', () => {
+    it('records an immediate payout ledger row for destination charges', async () => {
+      prisma.marketplaceTemplate.findUnique.mockResolvedValue(publishedListing());
+      stripe.paymentIntents.retrieve.mockResolvedValue({
+        id: 'pi_dest',
+        status: 'succeeded',
+        amount: 1299,
+        amount_received: 1299,
+        metadata: { listingId: 'listing-1', buyerId: 'buyer-1' },
+        transfer_data: { destination: 'acct_seller' },
+      });
+      prisma.marketplacePurchase.create.mockResolvedValue({
+        id: 'pur-1',
+        stripePaymentIntentId: 'pi_dest',
+      });
+      prisma.marketplaceLedgerEntry.createMany.mockResolvedValue({ count: 5 });
+      prisma.marketplaceTemplate.update.mockResolvedValue({});
+
+      await service.purchase('buyer-1', 'listing-1', 'pi_dest');
+      const rows = prisma.marketplaceLedgerEntry.createMany.mock.calls[0][0].data as Array<{
+        entryType: string;
+      }>;
+      expect(rows.some((r) => r.entryType === 'payout')).toBe(true);
+    });
+
+    it('transfers platform-held earnings when the balance is at least $25', async () => {
+      prisma.sellerProfile.findMany.mockResolvedValue([
+        {
+          id: 'profile-1',
+          userId: 'seller-1',
+          stripeAccountId: 'acct_seller',
+          payoutsEnabled: true,
+          status: 'active',
+          tier: 'trusted',
+          user: { email: 'ada@example.com' },
+        },
+      ]);
+      prisma.marketplaceLedgerEntry.aggregate
+        .mockResolvedValueOnce({ _sum: { amountCents: 4000 } })
+        .mockResolvedValueOnce({ _sum: { amountCents: 0 } });
+      stripe.transfers.create.mockResolvedValue({ id: 'tr_1' });
+      prisma.sellerPayout.create.mockResolvedValue({ id: 'po-1' });
+      prisma.marketplaceLedgerEntry.create.mockResolvedValue({});
+
+      const result = await service.processWeeklyPayouts(new Date('2026-09-09T12:00:00Z'));
+      expect(result.paidCount).toBe(1);
+      expect(stripe.transfers.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 4000,
+          destination: 'acct_seller',
+        })
+      );
+    });
+
+    it('skips sellers below the $25 minimum', async () => {
+      prisma.sellerProfile.findMany.mockResolvedValue([
+        {
+          id: 'profile-1',
+          userId: 'seller-1',
+          stripeAccountId: 'acct_seller',
+          payoutsEnabled: true,
+          status: 'active',
+          tier: 'new',
+          user: { email: 'ada@example.com' },
+        },
+      ]);
+      prisma.marketplaceLedgerEntry.aggregate
+        .mockResolvedValueOnce({ _sum: { amountCents: 1000 } })
+        .mockResolvedValueOnce({ _sum: { amountCents: 0 } });
+
+      const result = await service.processWeeklyPayouts();
+      expect(result.paidCount).toBe(0);
+      expect(stripe.transfers.create).not.toHaveBeenCalled();
     });
   });
 });

@@ -6,9 +6,12 @@ import { TEMPLATE_CATALOG, categoryToKey, getTemplateById } from '@/lib/template
 import type { TemplateCustomization, TemplateKey, TemplateListItem } from '@/lib/templates/types';
 import { cvsApi } from '@/lib/api';
 import { SAMPLE_CV } from '@/lib/templates/sample-cv';
+import { templateAccessType } from '@cvstudio/shared-utils';
+import { useFeatureGate } from '@/hooks/useFeatureGate';
 
 export function useTemplateSelection(initialId?: string) {
   const router = useRouter();
+  const { canCreateMoreCVs, canUseTemplateType, showUpgrade } = useFeatureGate();
   const templates = TEMPLATE_CATALOG;
 
   const initial = initialId ? getTemplateById(initialId) : templates[0];
@@ -46,6 +49,15 @@ export function useTemplateSelection(initialId?: string) {
   );
 
   const createWithTemplate = useCallback(async () => {
+    const accessTier = selected.accessTier ?? templateAccessType(selected.isPremium);
+    if (!canUseTemplateType(accessTier)) {
+      showUpgrade('templates:pro');
+      return;
+    }
+    if (!canCreateMoreCVs) {
+      showUpgrade('cv:create');
+      return;
+    }
     setCreating(true);
     setError(null);
     try {
@@ -84,7 +96,15 @@ export function useTemplateSelection(initialId?: string) {
     } finally {
       setCreating(false);
     }
-  }, [customization, router, selected, templateKey]);
+  }, [
+    canCreateMoreCVs,
+    canUseTemplateType,
+    customization,
+    router,
+    selected,
+    showUpgrade,
+    templateKey,
+  ]);
 
   return {
     templates,

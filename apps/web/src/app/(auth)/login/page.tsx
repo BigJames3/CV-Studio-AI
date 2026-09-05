@@ -157,18 +157,23 @@ function LoginPageInner() {
               </p>
             )}
           </form>
-          <div className="my-6 flex items-center gap-3 text-xs text-content-secondary">
-            <div className="h-px flex-1 bg-border" />
-            ou
-            <div className="h-px flex-1 bg-border" />
-          </div>
-          <div className="space-y-3">
-            <GoogleSignInButton
-              nextPath={nextPath}
-              onRequires2fa={(tempToken) => setOauthTempToken(tempToken)}
-            />
-            <LinkedInSignInButton nextPath={nextPath} />
-          </div>
+          {process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
+          process.env.NEXT_PUBLIC_LINKEDIN_CLIENT_ID ? (
+            <>
+              <div className="my-6 flex items-center gap-3 text-xs text-content-secondary">
+                <div className="h-px flex-1 bg-border" />
+                ou
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              <div className="space-y-3">
+                <GoogleSignInButton
+                  nextPath={nextPath}
+                  onRequires2fa={(tempToken) => setOauthTempToken(tempToken)}
+                />
+                <LinkedInSignInButton nextPath={nextPath} />
+              </div>
+            </>
+          ) : null}
           <Link href="/forgot-password" className="mt-4 text-sm text-primary">
             Mot de passe oublié
           </Link>

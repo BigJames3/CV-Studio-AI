@@ -12,7 +12,7 @@ import {
 import { PASSWORD_REGEX } from '@cvstudio/shared-utils';
 
 const PASSWORD_MESSAGE =
-  'Password must be ≥12 characters and include a letter, a number, and a special character';
+  'Le mot de passe doit contenir au moins 12 caractères, une majuscule, une minuscule, un chiffre et un caractère spécial';
 
 export class RegisterDto {
   @ApiProperty({ example: 'lea@example.com' })
@@ -21,7 +21,7 @@ export class RegisterDto {
 
   @ApiProperty({ minLength: 12 })
   @IsString()
-  @MinLength(12)
+  @MinLength(12, { message: 'Le mot de passe doit contenir au moins 12 caractères' })
   @MaxLength(128)
   @Matches(PASSWORD_REGEX, { message: PASSWORD_MESSAGE })
   password!: string;

@@ -14,6 +14,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CvsService } from './cvs.service';
 import { CreateCvDto, UpdateCvDto, PublishCvDto, ListCvsQueryDto } from './dto/cv.dto';
 import { CurrentUser, AuthUser } from '../../common/decorators';
+import { FeatureGate } from '../../common/guards/feature-gate.guard';
 
 @ApiTags('CVs')
 @ApiBearerAuth('JWT')
@@ -70,12 +71,14 @@ export class CvsController {
   }
 
   @Get(':id/share')
+  @FeatureGate('share')
   @ApiOperation({ summary: 'Public share URL + QR for a CV' })
   share(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.cvs.shareMeta(user.id, id);
   }
 
   @Get(':id/export/pdf')
+  @FeatureGate('downloadPDF')
   @ApiOperation({ summary: 'Enqueue PDF export (async job)' })
   exportPdf(
     @CurrentUser() user: AuthUser,

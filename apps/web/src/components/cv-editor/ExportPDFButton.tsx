@@ -10,6 +10,7 @@ import { TemplateWrapper } from '@/components/templates/TemplateWrapper';
 import { serializeCvPreviewHtml } from '@/lib/pdf/serialize-cv-preview';
 import type { CvContent, TemplateKey } from '@/lib/templates/types';
 import { cn } from '@/lib/utils';
+import { useFeatureGate } from '@/hooks/useFeatureGate';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
 
@@ -38,6 +39,10 @@ function defaultFilename(cvName?: string, fullName?: string): string {
 export function ExportPDFButton({ cvId, content, templateKey, cvName, className }: Props) {
   const dialogId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const { canDownloadPDF, canPrint, showUpgrade } = useFeatureGate();
+  const isLocalDraft = cvId.startsWith('local-');
+  const allowPdf = canDownloadPDF || isLocalDraft;
+  const allowPrint = canPrint || isLocalDraft;
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -196,11 +201,16 @@ export function ExportPDFButton({ cvId, content, templateKey, cvName, className 
           size="sm"
           disabled={isLoading}
           onClick={() => {
+            if (!allowPdf && !allowPrint) {
+              showUpgrade('cv:export:pdf');
+              return;
+            }
             setError(null);
             setShowPanel((v) => !v);
           }}
           className="gap-2"
           data-testid="export-pdf-open"
+          title={allowPdf || allowPrint ? undefined : 'Pro feature'}
           aria-expanded={showPanel}
           aria-haspopup="dialog"
         >
@@ -209,11 +219,13 @@ export function ExportPDFButton({ cvId, content, templateKey, cvName, className 
               <Loader2 className="h-4 w-4 animate-spin" />
               {progress ?? 'Generating PDF…'}
             </>
-          ) : (
+          ) : allowPdf || allowPrint ? (
             <>
               <Download className="h-4 w-4" />
               Exporter PDF
             </>
+          ) : (
+            <>🔒 Upgrade to Pro</>
           )}
         </Button>
       </div>
@@ -292,10 +304,17 @@ export function ExportPDFButton({ cvId, content, templateKey, cvName, className 
             <Button
               type="button"
               size="sm"
-              disabled={isLoading}
-              onClick={() => void handleExportPDF()}
+              disabled={isLoading || !allowPdf}
+              onClick={() => {
+                if (!allowPdf) {
+                  showUpgrade('cv:export:pdf');
+                  return;
+                }
+                void handleExportPDF();
+              }}
               className="gap-2"
               data-testid="export-pdf-confirm"
+              title={allowPdf ? undefined : 'Pro feature'}
             >
               {isLoading ? (
                 <>
@@ -348,8 +367,16 @@ export function ExportPDFButton({ cvId, content, templateKey, cvName, className 
                     size="sm"
                     variant="ghost"
                     className="gap-2"
-                    onClick={handleBrowserPrint}
+                    onClick={() => {
+                      if (!allowPrint) {
+                        showUpgrade('cv:print');
+                        return;
+                      }
+                      handleBrowserPrint();
+                    }}
                     data-testid="export-browser-print"
+                    disabled={!allowPrint}
+                    title={allowPrint ? undefined : 'Pro feature'}
                   >
                     <Printer className="h-4 w-4" />
                     Browser print

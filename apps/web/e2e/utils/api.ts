@@ -109,7 +109,17 @@ export async function getSubscription(request: APIRequestContext, token: string)
       plan?: { name: string };
     } | null;
     tier: 'free' | 'pro' | 'business';
-    entitlements: { cvCreate: boolean; aiOptimize: boolean; exportDocx: boolean };
+    entitlements: {
+      cvCreate: boolean;
+      exportPdf?: boolean;
+      print?: boolean;
+      share?: boolean;
+      proTemplates?: boolean;
+      businessTemplates?: boolean;
+      advancedFeatures?: boolean;
+      aiOptimize: boolean;
+      exportDocx: boolean;
+    };
   }>(res);
 }
 

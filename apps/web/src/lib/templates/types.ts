@@ -99,6 +99,7 @@ export type TemplateListItem = {
   category: TemplateKey | string;
   previewImageUrl: string;
   isPremium: boolean;
+  accessTier?: 'free' | 'pro' | 'business';
   price?: number | null;
   rating: number;
   downloadCount: number;

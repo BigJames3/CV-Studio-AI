@@ -35,7 +35,11 @@ export default function SellerHomePage() {
       <h1 className="text-3xl font-semibold">Seller hub</h1>
       <p className="mt-2 text-sm text-content-secondary">
         Keep 70% after processing fees · weekly payouts via Stripe Connect · quality review before
-        publish.
+        publish. Complete{' '}
+        <Link href="/seller/payouts" className="text-primary">
+          payouts verification
+        </Link>{' '}
+        before listing.
       </p>
       <ul className="mt-8 grid gap-3 sm:grid-cols-3">
         {[

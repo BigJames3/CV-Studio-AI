@@ -5,13 +5,14 @@ import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useCreateCv, useMe, useUserPlan } from '@/hooks';
+import { useCreateCv, useMe, useUserPlan, useFeatureGate } from '@/hooks';
 import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 import { useCvMutations } from '@/hooks/useCvMutations';
 
 export default function DashboardPage() {
   const { data: user } = useMe();
   const { isFree, tier } = useUserPlan();
+  const { canCreateMoreCVs, canShare, showUpgrade } = useFeatureGate();
   const { data, isLoading, isError, isFetchingNextPage, hasNextPage, fetchNextPage } =
     useCvsInfinite();
   const createCv = useCreateCv();
@@ -66,12 +67,17 @@ export default function DashboardPage() {
               </Button>
             </Link>
           ) : null}
+
           <Link href="/dashboard/templates">
             <Button variant="secondary">Nouveau depuis template</Button>
           </Link>
           <Button
             data-testid="create-cv"
-            onClick={() =>
+            onClick={() => {
+              if (!canCreateMoreCVs) {
+                showUpgrade('cv:create');
+                return;
+              }
               createCv.mutate(
                 { title: 'Nouveau CV' },
                 {
@@ -80,11 +86,11 @@ export default function DashboardPage() {
                     if (id) window.location.href = `/editor/${id}`;
                   },
                 }
-              )
-            }
+              );
+            }}
             disabled={createCv.isPending}
           >
-            Nouveau CV
+            {canCreateMoreCVs ? 'Nouveau CV' : 'Nouveau (Upgrade)'}
           </Button>
         </div>
       </div>
@@ -200,7 +206,12 @@ export default function DashboardPage() {
                     size="sm"
                     variant="outline"
                     disabled={publish.isPending}
-                    onClick={() =>
+                    title={canShare ? undefined : 'Pro feature'}
+                    onClick={() => {
+                      if (!cv.isPublic && !canShare) {
+                        showUpgrade('cv:share');
+                        return;
+                      }
                       publish.mutate(
                         { id: cv.id, isPublic: !cv.isPublic },
                         {
@@ -215,10 +226,16 @@ export default function DashboardPage() {
                             }
                           },
                         }
-                      )
-                    }
+                      );
+                    }}
                   >
-                    {publish.isPending ? '⏳' : cv.isPublic ? 'Dépublier' : 'Partager'}
+                    {publish.isPending
+                      ? '⏳'
+                      : cv.isPublic
+                        ? 'Dépublier'
+                        : canShare
+                          ? 'Partager'
+                          : '🔒 Partager (Pro)'}
                   </Button>
                   <Button
                     size="sm"

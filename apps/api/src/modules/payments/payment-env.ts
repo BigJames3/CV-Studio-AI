@@ -18,6 +18,13 @@ export function isStripeConfiguredFromEnv() {
   return isNonPlaceholderSecret(process.env.STRIPE_SECRET_KEY);
 }
 
+/** Production always fail-closed. Explicit `1`/`true` enables it in non-prod. */
+export function isStripeFailClosed() {
+  const raw = process.env.STRIPE_FAIL_CLOSED?.trim().toLowerCase();
+  if (raw === '1' || raw === 'true' || raw === 'on') return true;
+  return process.env.NODE_ENV === 'production';
+}
+
 /** Default true in production. Explicit false/0/off disables fail-closed. */
 export function isCinetpayFailClosed() {
   const raw = process.env.CINETPAY_FAIL_CLOSED?.trim().toLowerCase();

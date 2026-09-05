@@ -18,7 +18,9 @@ describe('TemplatesService catalog isolation (issue 4)', () => {
   });
 
   it('list only queries official catalog templates (createdBy null)', async () => {
-    prisma.template.findMany.mockResolvedValue([{ id: 'official', designData: { ok: true } }]);
+    prisma.template.findMany.mockResolvedValue([
+      { id: 'official', isPremium: false, designData: { ok: true } },
+    ]);
 
     await service.list({});
 
@@ -40,8 +42,21 @@ describe('TemplatesService catalog isolation (issue 4)', () => {
     });
   });
 
+  it('filters seeds to free templates when allowedTypes is free-only', async () => {
+    prisma.template.findMany.mockRejectedValue(new Error('db down'));
+    const result = await service.list({ allowedTypes: ['free'] });
+    expect(result.items.every((t) => t.isPremium === false)).toBe(true);
+    expect(result.items.some((t) => t.accessTier === 'free')).toBe(true);
+  });
+
+  it('includes premium templates for business allowedTypes', async () => {
+    prisma.template.findMany.mockRejectedValue(new Error('db down'));
+    const result = await service.findByTypes(['free', 'pro', 'business']);
+    expect(result.items.some((t) => t.isPremium)).toBe(true);
+  });
+
   it('byCategory excludes seller-owned templates', async () => {
-    prisma.template.findMany.mockResolvedValue([{ id: 'official' }]);
+    prisma.template.findMany.mockResolvedValue([{ id: 'official', isPremium: false }]);
 
     await service.byCategory('modern');
 

@@ -1,6 +1,76 @@
 import type { DensityPreset, TemplateCustomization } from '@cvstudio/shared-types';
 import { z } from 'zod';
 
+export type SubscriptionTierName = 'free' | 'pro' | 'business';
+export type TemplateAccessType = 'free' | 'pro' | 'business';
+export type FeatureGateUser = {
+  subscriptionTier?: string | null;
+};
+
+export function normalizeTier(tier?: string | null): SubscriptionTierName {
+  if (tier === 'pro' || tier === 'business') return tier;
+  return 'free';
+}
+
+export function templateAccessType(isPremium: boolean): TemplateAccessType {
+  return isPremium ? 'pro' : 'free';
+}
+
+export function canCreateCV(user: FeatureGateUser, currentCvCount = 0): boolean {
+  if (normalizeTier(user.subscriptionTier) === 'free') {
+    return currentCvCount < 1;
+  }
+  return true;
+}
+
+export function canDownloadPDF(user: FeatureGateUser): boolean {
+  return normalizeTier(user.subscriptionTier) !== 'free';
+}
+
+export function canPrint(user: FeatureGateUser): boolean {
+  return canDownloadPDF(user);
+}
+
+export function canShare(user: FeatureGateUser): boolean {
+  return canDownloadPDF(user);
+}
+
+export function canAccessProTemplates(user: FeatureGateUser): boolean {
+  return normalizeTier(user.subscriptionTier) === 'business';
+}
+
+export function canAccessBusinessTemplates(user: FeatureGateUser): boolean {
+  return normalizeTier(user.subscriptionTier) === 'business';
+}
+
+export function canAccessAdvancedFeatures(user: FeatureGateUser): boolean {
+  return normalizeTier(user.subscriptionTier) !== 'free';
+}
+
+export function getAvailableTemplateTypes(user: FeatureGateUser): TemplateAccessType[] {
+  if (normalizeTier(user.subscriptionTier) === 'business') {
+    return ['free', 'pro', 'business'];
+  }
+  return ['free'];
+}
+
+export function canUseTemplateType(user: FeatureGateUser, type: TemplateAccessType): boolean {
+  return getAvailableTemplateTypes(user).includes(type);
+}
+
+export function featureGatesFor(user: FeatureGateUser, currentCvCount = 0) {
+  return {
+    canCreateCV: canCreateCV(user, currentCvCount),
+    canDownloadPDF: canDownloadPDF(user),
+    canPrint: canPrint(user),
+    canShare: canShare(user),
+    canAccessProTemplates: canAccessProTemplates(user),
+    canAccessBusinessTemplates: canAccessBusinessTemplates(user),
+    canAccessAdvancedFeatures: canAccessAdvancedFeatures(user),
+    availableTemplateTypes: getAvailableTemplateTypes(user),
+  };
+}
+
 // Constants
 export const APP_NAME = 'CV Studio AI';
 export const API_VERSION = 'v1';

@@ -237,7 +237,7 @@ describe('SubscriptionsService.checkout', () => {
   const userId = 'user-1';
   const prisma = {
     plan: { findUnique: jest.fn() },
-    subscription: { upsert: jest.fn() },
+    subscription: { upsert: jest.fn(), findUnique: jest.fn() },
     user: { findFirst: jest.fn(), update: jest.fn() },
   };
   const entitlements = {};
@@ -252,8 +252,10 @@ describe('SubscriptionsService.checkout', () => {
     prisma.user.findFirst.mockResolvedValue({
       id: userId,
       email: 'user@example.com',
+      subscriptionTier: 'free',
       deletedAt: null,
     });
+    prisma.subscription.findUnique.mockResolvedValue(null);
     prisma.plan.findUnique.mockResolvedValue({
       id: 'plan-pro',
       name: 'Pro',
@@ -367,6 +369,76 @@ describe('SubscriptionsService.checkout', () => {
       ).rejects.toMatchObject({
         response: expect.objectContaining({ code: 'CINETPAY_NOT_CONFIGURED' }),
       });
+    });
+  });
+
+  describe('14-day trial', () => {
+    it('sets a 14-day trial for first-time Stripe checkout', async () => {
+      await service.checkout(userId, { plan: 'pro', interval: 'month' });
+
+      expect(createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subscription_data: expect.objectContaining({
+            trial_period_days: 14,
+            metadata: expect.objectContaining({
+              userId,
+              plan: 'pro',
+              trial_days: '14',
+            }),
+          }),
+        })
+      );
+    });
+
+    it('does not grant another trial to an existing Stripe subscriber', async () => {
+      prisma.user.findFirst.mockResolvedValue({
+        id: userId,
+        email: 'user@example.com',
+        subscriptionTier: 'pro',
+        deletedAt: null,
+      });
+      prisma.subscription.findUnique.mockResolvedValue({
+        stripeSubscriptionId: 'sub_existing',
+      });
+
+      await service.checkout(userId, { plan: 'business', interval: 'month' });
+
+      const params = createCheckoutSession.mock.calls[0][0] as {
+        subscription_data?: { trial_period_days?: number };
+      };
+      expect(params.subscription_data?.trial_period_days).toBeUndefined();
+    });
+  });
+
+  describe('fail-closed checkout', () => {
+    const prevFailClosed = process.env.STRIPE_FAIL_CLOSED;
+    const prevNodeEnv = process.env.NODE_ENV;
+
+    afterEach(() => {
+      process.env.STRIPE_FAIL_CLOSED = prevFailClosed;
+      process.env.NODE_ENV = prevNodeEnv;
+    });
+
+    it('rejects checkout when Stripe is missing and fail-closed is on', async () => {
+      process.env.STRIPE_FAIL_CLOSED = '1';
+      process.env.NODE_ENV = 'development';
+      (service as unknown as { stripe: unknown }).stripe = null;
+
+      await expect(
+        service.checkout(userId, { plan: 'pro', interval: 'month' })
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'STRIPE_NOT_CONFIGURED' }),
+      });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('does not grant entitlements when Stripe Checkout throws', async () => {
+      createCheckoutSession.mockRejectedValue(new Error('Stripe API unavailable'));
+
+      await expect(service.checkout(userId, { plan: 'pro', interval: 'month' })).rejects.toThrow(
+        /Stripe API unavailable/
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
     });
   });
 

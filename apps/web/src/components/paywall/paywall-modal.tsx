@@ -23,22 +23,39 @@ const featureNames: Record<string, { title: string; description: string }> = {
     title: '🔒 Fonctionnalité Premium',
     description: 'La duplication de CV est réservée aux utilisateurs Premium.',
   },
-  'cv:export:docx': {
-    title: '📄 Export DOCX',
-    description: "L'export en DOCX est réservé aux utilisateurs Premium.",
+  'cv:export:pdf': {
+    title: '📥 Export PDF',
+    description: "L'export PDF est réservé aux plans Pro et Business.",
+  },
+  'cv:print': {
+    title: '🖨️ Impression',
+    description: "L'impression est réservée aux plans Pro et Business.",
+  },
+  'cv:share': {
+    title: '🔗 Partage de CV',
+    description: 'Le partage public est réservé aux plans Pro et Business.',
+  },
+  'templates:pro': {
+    title: '🎨 Templates premium',
+    description: 'Les templates Pro et Business sont réservés au plan Business.',
   },
   'ai:generate': {
     title: '✨ Génération IA',
     description: 'La génération de contenu IA est réservée aux utilisateurs Premium.',
   },
+  'marketplace:buy': {
+    title: 'Marketplace Pro',
+    description: 'L’achat de templates créateurs est réservé aux plans Pro et Business.',
+  },
 };
 
 const PREMIUM_BENEFITS = [
   'CV illimités',
-  'Export PDF & DOCX haute qualité',
+  'Export PDF haute qualité',
   'Optimisation IA du contenu',
   'Templates premium exclusifs',
   'Partage public & analytics',
+  '14 jours gratuits',
 ] as const;
 
 export type PaywallModalProps = {

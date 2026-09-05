@@ -173,6 +173,58 @@ describe('PaymentsService webhook fail-closed', () => {
     expect(webhookStore.releaseProcessingLock).toHaveBeenCalledWith('evt_checkout');
   });
 
+  it('fulfills marketplace checkout without applying a subscription', async () => {
+    const marketplace = { fulfillCheckoutSession: jest.fn().mockResolvedValue(null) };
+    service = new PaymentsService(
+      prisma as never,
+      subscriptions as never,
+      mail as never,
+      webhookStore as never,
+      alerts as never,
+      marketplace as never
+    );
+
+    await service.processEventWithRetry({
+      id: 'evt_mp_checkout',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: 'cs_mp',
+          metadata: { type: 'marketplace', listingId: 'listing-1', buyerId: 'buyer-1' },
+          payment_intent: 'pi_1',
+        },
+      },
+    } as never);
+
+    expect(marketplace.fulfillCheckoutSession).toHaveBeenCalled();
+    expect(subscriptions.applyPaidEntitlement).not.toHaveBeenCalled();
+    expect(webhookStore.markProcessed).toHaveBeenCalledWith('evt_mp_checkout');
+  });
+
+  it('syncs Connect account.updated without touching subscriptions', async () => {
+    const marketplace = { syncConnectedAccountFromWebhook: jest.fn().mockResolvedValue(null) };
+    service = new PaymentsService(
+      prisma as never,
+      subscriptions as never,
+      mail as never,
+      webhookStore as never,
+      alerts as never,
+      marketplace as never
+    );
+
+    await service.processEventWithRetry({
+      id: 'evt_acct',
+      type: 'account.updated',
+      data: {
+        object: { id: 'acct_1', payouts_enabled: true, details_submitted: true },
+      },
+    } as never);
+
+    expect(marketplace.syncConnectedAccountFromWebhook).toHaveBeenCalled();
+    expect(subscriptions.applyPaidEntitlement).not.toHaveBeenCalled();
+    expect(webhookStore.markProcessed).toHaveBeenCalledWith('evt_acct');
+  });
+
   it('retries on transient error then succeeds', async () => {
     let attempts = 0;
     subscriptions.applyPaidEntitlement.mockImplementation(async () => {

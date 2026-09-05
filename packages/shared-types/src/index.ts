@@ -117,6 +117,8 @@ export type PlanEntitlement =
   | 'ai:ats'
   | 'marketplace:buy';
 
+export type { BillingCatalogEntitlement, BillingPlanSlug, PublicBillingPlan } from './billing';
+
 // ─── Prompt-compatible CV entity model ───
 export interface CV {
   id: string;

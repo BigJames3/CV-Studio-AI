@@ -3,6 +3,7 @@ import {
   isCinetpayConfiguredFromEnv,
   isCinetpayFailClosed,
   isStripeConfiguredFromEnv,
+  isStripeFailClosed,
 } from './payment-env';
 
 describe('payment-env', () => {
@@ -37,6 +38,16 @@ describe('payment-env', () => {
     delete process.env.CINETPAY_SITE_ID;
     expect(isCinetpayConfiguredFromEnv()).toBe(false);
     expect(availablePaymentMethods().cinetpay).toBe(false);
+  });
+
+  it('enables Stripe fail-closed in production or when STRIPE_FAIL_CLOSED=1', () => {
+    delete process.env.STRIPE_FAIL_CLOSED;
+    process.env.NODE_ENV = 'production';
+    expect(isStripeFailClosed()).toBe(true);
+    process.env.NODE_ENV = 'development';
+    expect(isStripeFailClosed()).toBe(false);
+    process.env.STRIPE_FAIL_CLOSED = '1';
+    expect(isStripeFailClosed()).toBe(true);
   });
 
   it('defaults fail-closed in production', () => {

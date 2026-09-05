@@ -6,7 +6,10 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { PaymentMethodSelector } from '@/components/billing/payment-selector';
-import { queryKeys, subscriptionsApi, paymentsApi, type PaymentHistoryItem } from '@/lib/api';
+import { InvoiceHistory } from '@/components/billing/invoice-history';
+import { BillingPlansSkeleton, PlanGrid } from '@/components/billing/plan-grid';
+import { queryKeys, subscriptionsApi, paymentsApi, plansApi, invoicesApi } from '@/lib/api';
+import { FALLBACK_PLANS } from '@/lib/billing/plans-catalog';
 import { useMe, useSubscription, useUserPlan } from '@/hooks';
 import { cn, suggestPaymentMethod, type PaymentProvider } from '@/lib/utils';
 import {
@@ -23,46 +26,11 @@ const POLL_TIMEOUT_SEC = 300;
 const ACTIVATION_POLL_INTERVAL_MS = 500;
 const ACTIVATION_POLL_MAX_ATTEMPTS = 60;
 
-const PLANS = [
-  {
-    id: 'free' as const,
-    name: 'Gratuit',
-    description: '1 CV max',
-  },
-  {
-    id: 'pro' as const,
-    name: 'Pro',
-    description: 'CV illimités',
-  },
-  {
-    id: 'business' as const,
-    name: 'Business',
-    description: 'Tout illimité',
-  },
-] as const;
-
-const STATUS_LABEL: Record<string, string> = {
-  pending: 'En attente',
-  completed: 'Payé',
-  failed: 'Échoué',
-  refunded: 'Remboursé',
-};
-
 function parseCheckoutState(value: string | null) {
   if (value === 'success' || value === 'pending' || value === 'cancel' || value === 'failed') {
     return value;
   }
   return null;
-}
-
-function formatPaymentAmount(amount: string | number, currency: string) {
-  const n = typeof amount === 'string' ? Number(amount) : amount;
-  const code = (currency || 'USD').toUpperCase();
-  if (Number.isNaN(n)) return `— ${code}`;
-  if (code === 'XOF' || code === 'XAF') {
-    return `${Math.round(n).toLocaleString('fr-FR')} ${code}`;
-  }
-  return `${n.toFixed(2)} ${code}`;
 }
 
 function CheckoutBanner({
@@ -131,7 +99,22 @@ function BillingPageContent() {
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [pollingTimeLeft, setPollingTimeLeft] = useState(POLL_TIMEOUT_SEC);
+  const [billingPeriod, setBillingPeriod] = useState<'month' | 'year'>('month');
 
+  const {
+    data: plans,
+    isLoading: plansLoading,
+    isError: plansError,
+  } = useQuery({
+    queryKey: queryKeys.plans,
+    queryFn: () => plansApi.list(),
+    staleTime: 1000 * 60 * 60,
+  });
+  const { data: invoicesData, isLoading: invoicesLoading } = useQuery({
+    queryKey: queryKeys.invoices,
+    queryFn: () => invoicesApi.list(),
+    enabled: Boolean(user),
+  });
   const { data: paymentsData } = useQuery({
     queryKey: queryKeys.payments,
     queryFn: () => paymentsApi.history(),
@@ -179,6 +162,7 @@ function BillingPageContent() {
       ? 'stripe'
       : (paymentMethod ?? suggestedProvider);
   const payments = paymentsData?.items ?? [];
+  const invoices = invoicesData?.items ?? [];
 
   const subscription = subData?.subscription ?? null;
   const cancelAtPeriodEnd = Boolean(subscription?.cancelAtPeriodEnd);
@@ -199,6 +183,7 @@ function BillingPageContent() {
         queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
         queryClient.invalidateQueries({ queryKey: queryKeys.payments }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.invoices }),
       ]);
     }
     if (checkoutState === 'cancel') {
@@ -239,6 +224,7 @@ function BillingPageContent() {
             queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
             queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
             queryClient.invalidateQueries({ queryKey: queryKeys.payments }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.invoices }),
           ]);
           return;
         }
@@ -283,6 +269,7 @@ function BillingPageContent() {
             queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
             queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
             queryClient.invalidateQueries({ queryKey: queryKeys.payments }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.invoices }),
           ]);
           window.location.replace(`${window.location.pathname}?checkout=success`);
           return;
@@ -359,9 +346,12 @@ function BillingPageContent() {
     }
   }
 
-  if (isLoading) {
+  if (isLoading || (plansLoading && !plans && !plansError)) {
     return (
-      <div className="mx-auto max-w-content px-4 py-8 text-sm">Chargement de la facturation…</div>
+      <div className="mx-auto max-w-content px-4 py-8">
+        <div className="mb-8 h-10 w-48 animate-pulse rounded bg-surface-app" />
+        <BillingPlansSkeleton />
+      </div>
     );
   }
 
@@ -378,6 +368,7 @@ function BillingPageContent() {
     );
   }
 
+  const catalog = plans && plans.length > 0 ? plans : FALLBACK_PLANS;
   const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email;
   const activationConfirmed = checkoutState === 'success' && displayTier !== 'free';
 
@@ -444,6 +435,13 @@ function BillingPageContent() {
         <p data-testid="plan-badge" className="mt-1 text-2xl font-semibold capitalize">
           Plan {displayTier}
         </p>
+        <p className="mt-2 text-sm text-content-secondary">
+          {displayIsFree
+            ? 'Créez jusqu’à 1 CV. Passez à un plan supérieur pour débloquer plus de fonctionnalités.'
+            : periodEnd
+              ? `Renouvellement le ${periodEnd}`
+              : null}
+        </p>
 
         {cancelAtPeriodEnd && periodEnd ? (
           <p className="mt-3 text-sm text-warning" data-testid="cancel-pending">
@@ -451,28 +449,29 @@ function BillingPageContent() {
             cette date.
           </p>
         ) : null}
+      </section>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
-          {PLANS.map((plan) => {
-            const active = displayTier === plan.id;
-            return (
-              <div
-                key={plan.id}
-                className={cn(
-                  'rounded-lg border p-4',
-                  active ? 'border-primary bg-primary-subtle' : 'border-border bg-surface-app'
-                )}
-              >
-                <p className="font-semibold">{plan.name}</p>
-                <p className="mt-1 text-sm text-content-secondary">{plan.description}</p>
-                {active ? <p className="mt-2 text-xs font-medium text-primary">Actuel</p> : null}
-              </div>
-            );
-          })}
-        </div>
+      <section className="mb-6">
+        {plansError ? (
+          <p className="mb-4 text-sm text-error" role="alert">
+            Impossible de charger le détail des plans. Affichage du catalogue par défaut.
+          </p>
+        ) : null}
+        {plansLoading && !plans && !plansError ? (
+          <BillingPlansSkeleton />
+        ) : (
+          <PlanGrid
+            plans={catalog}
+            currentTier={displayTier}
+            billingPeriod={billingPeriod}
+            checkoutPending={checkoutPending}
+            onPeriodChange={setBillingPeriod}
+            onCheckout={(plan, interval) => void checkout(plan, interval)}
+          />
+        )}
 
         {showPaymentSelector ? (
-          <div className="mt-6">
+          <div className="mt-6 rounded-lg border border-border bg-surface-card p-6">
             <PaymentMethodSelector
               value={selectedMethod}
               onChange={(method) => {
@@ -499,62 +498,9 @@ function BillingPageContent() {
           </p>
         ) : null}
 
-        <div className="mt-6 flex flex-wrap gap-3">
-          {displayIsFree ? (
-            <>
-              <Button
-                data-testid="checkout-pro-month"
-                data-plan="pro"
-                disabled={checkoutPending !== null}
-                onClick={() => void checkout('pro', 'month')}
-              >
-                {checkoutPending === 'pro' ? 'Redirection…' : 'Passer à Pro'}
-              </Button>
-              <Button
-                variant="secondary"
-                data-testid="checkout-pro-year"
-                data-plan="pro"
-                disabled={checkoutPending !== null}
-                onClick={() => void checkout('pro', 'year')}
-              >
-                Pro annuel
-              </Button>
-              <Button
-                variant="outline"
-                data-testid="checkout-business-month"
-                data-plan="business"
-                disabled={checkoutPending !== null}
-                onClick={() => void checkout('business', 'month')}
-              >
-                Upgrade to Business
-              </Button>
-            </>
-          ) : null}
-
-          {displayIsPro ? (
-            <>
-              <Button
-                data-testid="checkout-business-month"
-                data-plan="business"
-                disabled={checkoutPending !== null}
-                onClick={() => void checkout('business', 'month')}
-              >
-                {checkoutPending === 'business' ? 'Redirection…' : 'Passer à Business'}
-              </Button>
-              <Link href="/pricing">
-                <Button variant="outline">Comparer les plans</Button>
-              </Link>
-            </>
-          ) : null}
-
-          {displayIsBusiness ? (
-            <p className="text-sm text-content-secondary">
-              Contactez le support pour les modifications de votre plan Business.
-            </p>
-          ) : null}
-
-          {(displayIsPro || displayIsBusiness) && !cancelAtPeriodEnd ? (
-            cancelConfirm ? (
+        {(displayIsPro || displayIsBusiness) && !cancelAtPeriodEnd ? (
+          <div className="mt-6 flex flex-wrap gap-3">
+            {cancelConfirm ? (
               <div
                 className="flex w-full flex-wrap items-center gap-2"
                 data-testid="cancel-confirm-modal"
@@ -588,44 +534,28 @@ function BillingPageContent() {
               >
                 Annuler l&apos;abonnement
               </Button>
-            )
-          ) : null}
-        </div>
+            )}
+          </div>
+        ) : null}
+
+        {displayIsBusiness ? (
+          <div className="mt-6 rounded-lg border border-border bg-surface-app p-6">
+            <h2 className="text-lg font-semibold">Support Business</h2>
+            <p className="mt-2 text-sm text-content-secondary">
+              Besoin d’intégrations personnalisées ou d’aide sur votre compte ? Contactez notre
+              équipe.
+            </p>
+            <a
+              href="mailto:support@cvstudio.ai?subject=Support%20Business%20-%20CV%20Studio"
+              className="mt-4 inline-flex min-h-10 items-center rounded-md bg-content-primary px-4 text-sm font-medium text-white hover:opacity-90"
+            >
+              Contactez le support
+            </a>
+          </div>
+        ) : null}
       </section>
 
-      <section className="rounded-lg border border-border bg-surface-card p-6">
-        <h2 className="text-xl font-semibold">Historique de facturation</h2>
-        {payments.length > 0 ? (
-          <div className="mt-4 overflow-x-auto" data-testid="payment-history">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-content-secondary">
-                  <th className="py-2 pr-3 font-medium">Date</th>
-                  <th className="py-2 pr-3 font-medium">Montant</th>
-                  <th className="py-2 pr-3 font-medium">Méthode</th>
-                  <th className="py-2 font-medium">Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payments.map((payment: PaymentHistoryItem) => (
-                  <tr key={payment.id} className="border-b border-border">
-                    <td className="py-2 pr-3">
-                      {new Date(payment.createdAt).toLocaleDateString('fr-FR')}
-                    </td>
-                    <td className="py-2 pr-3">
-                      {formatPaymentAmount(payment.amount, payment.currency)}
-                    </td>
-                    <td className="py-2 pr-3 capitalize">{payment.paymentMethod}</td>
-                    <td className="py-2">{STATUS_LABEL[payment.status] ?? payment.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="mt-2 text-sm text-content-secondary">Aucune facture pour le moment</p>
-        )}
-      </section>
+      <InvoiceHistory invoices={invoices} payments={payments} invoicesLoading={invoicesLoading} />
 
       <details className="mt-6 rounded-lg border border-border bg-surface-card p-4 text-sm">
         <summary className="cursor-pointer font-medium text-content-primary">

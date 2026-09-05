@@ -9,10 +9,20 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { Prisma, SellerStatus, TemplateCategory } from '@prisma/client';
+import { Prisma, SellerStatus, SellerTier, TemplateCategory } from '@prisma/client';
 import Stripe from 'stripe';
 import { PrismaService } from '../../database/prisma.module';
-import { PRICE_MAX_CENTS, PRICE_MIN_CENTS, splitSale } from './commission';
+import { appOriginFromEnv } from '../../common/utils/url.utils';
+import {
+  PAYOUT_MIN_CENTS,
+  PRICE_MAX_CENTS,
+  PRICE_MIN_CENTS,
+  destinationApplicationFeeCents,
+  estimateStripeFeeCents,
+  splitSale,
+} from './commission';
+
+export type MarketplaceSort = 'popular' | 'newest' | 'price_low' | 'price_high' | 'rating';
 
 const PUBLIC_TEMPLATE_SELECT = {
   id: true,
@@ -29,6 +39,57 @@ const PUBLIC_SELLER_SELECT = {
   slug: true,
   tier: true,
 } as const;
+
+const TEMPLATE_CATEGORIES = new Set<string>(Object.values(TemplateCategory));
+
+function parseTemplateCategory(raw?: string): TemplateCategory | undefined {
+  if (!raw || !TEMPLATE_CATEGORIES.has(raw)) return undefined;
+  return raw as TemplateCategory;
+}
+
+function parseSort(raw?: string): MarketplaceSort {
+  if (
+    raw === 'newest' ||
+    raw === 'price_low' ||
+    raw === 'price_high' ||
+    raw === 'rating' ||
+    raw === 'popular'
+  ) {
+    return raw;
+  }
+  return 'popular';
+}
+
+function sortListings(
+  raw?: string
+):
+  | Prisma.MarketplaceTemplateOrderByWithRelationInput
+  | Prisma.MarketplaceTemplateOrderByWithRelationInput[] {
+  switch (parseSort(raw)) {
+    case 'newest':
+      return { publishedAt: 'desc' };
+    case 'price_low':
+      return { priceCents: 'asc' };
+    case 'price_high':
+      return { priceCents: 'desc' };
+    case 'rating':
+      return [{ rating: 'desc' }, { reviewCount: 'desc' }];
+    default:
+      return [{ rating: 'desc' }, { downloadCount: 'desc' }];
+  }
+}
+
+function marketplacePaymentMetadata(
+  buyerId: string,
+  listing: { id: string; sellerId: string }
+): Stripe.MetadataParam {
+  return {
+    type: 'marketplace',
+    listingId: listing.id,
+    buyerId,
+    sellerId: listing.sellerId,
+  };
+}
 
 function isUniqueViolation(err: unknown, field?: string): boolean {
   if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') {
@@ -53,25 +114,28 @@ export class MarketplaceService {
     }
   }
 
-  listPublished(query?: { q?: string; category?: string }) {
+  listPublished(query?: { q?: string; category?: string; sort?: string }) {
+    const category = parseTemplateCategory(query?.category);
+    const q = query?.q?.trim();
     return this.prisma.marketplaceTemplate.findMany({
       where: {
         isPublished: true,
         status: 'published',
-        ...(query?.q
+        ...(q
           ? {
               OR: [
-                { title: { contains: query.q, mode: 'insensitive' } },
-                { description: { contains: query.q, mode: 'insensitive' } },
+                { title: { contains: q, mode: 'insensitive' } },
+                { description: { contains: q, mode: 'insensitive' } },
               ],
             }
           : {}),
+        ...(category ? { template: { category } } : {}),
       },
       include: {
         template: { select: PUBLIC_TEMPLATE_SELECT },
         sellerProfile: { select: PUBLIC_SELLER_SELECT },
       },
-      orderBy: [{ rating: 'desc' }, { downloadCount: 'desc' }],
+      orderBy: sortListings(query?.sort),
       take: 50,
     });
   }
@@ -287,20 +351,83 @@ export class MarketplaceService {
   async createPaymentIntent(buyerId: string, listingId: string) {
     const stripe = this.requireStripe();
     const listing = await this.getPublishedListing(listingId);
+    const metadata = marketplacePaymentMetadata(buyerId, listing);
 
     const intent = await stripe.paymentIntents.create({
       amount: listing.priceCents,
       currency: listing.currency.toLowerCase(),
-      metadata: {
-        type: 'marketplace',
-        listingId,
-        buyerId,
-        sellerId: listing.sellerId,
-      },
+      metadata,
       automatic_payment_methods: { enabled: true },
+      ...this.destinationChargeParams(listing),
     });
 
     return { clientSecret: intent.client_secret, paymentIntentId: intent.id };
+  }
+
+  async createListingCheckout(buyerId: string, listingId: string) {
+    const stripe = this.requireStripe();
+    const listing = await this.getPublishedListing(listingId);
+    const origin = appOriginFromEnv();
+    const metadata = marketplacePaymentMetadata(buyerId, listing);
+    const destination = this.destinationChargeParams(listing);
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      client_reference_id: buyerId,
+      success_url: `${origin}/marketplace/${listingId}?checkout=success`,
+      cancel_url: `${origin}/marketplace/${listingId}?checkout=cancel`,
+      metadata,
+      payment_intent_data: {
+        metadata,
+        ...destination,
+      },
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: listing.currency.toLowerCase(),
+            unit_amount: listing.priceCents,
+            product_data: {
+              name: listing.title,
+              description: 'Licence d’usage personnelle dans CV Studio — non redistribuable',
+            },
+          },
+        },
+      ],
+    });
+
+    if (!session.url) {
+      throw new BadRequestException({
+        code: 'CHECKOUT_FAILED',
+        message: 'Stripe did not return a checkout URL',
+      });
+    }
+
+    return { url: session.url, sessionId: session.id };
+  }
+
+  async fulfillCheckoutSession(session: Stripe.Checkout.Session) {
+    const listingId = session.metadata?.listingId;
+    const buyerId = session.metadata?.buyerId ?? session.client_reference_id ?? undefined;
+    const paymentIntentId =
+      typeof session.payment_intent === 'string'
+        ? session.payment_intent
+        : session.payment_intent?.id;
+
+    if (!listingId || !buyerId || !paymentIntentId) {
+      throw new Error(
+        `marketplace checkout.session.completed missing listing, buyer, or payment (session=${session.id})`
+      );
+    }
+
+    try {
+      return await this.purchase(buyerId, listingId, paymentIntentId);
+    } catch (err) {
+      if (err instanceof ConflictException) {
+        return null;
+      }
+      throw err;
+    }
   }
 
   async purchase(buyerId: string, listingId: string, paymentIntentId: string) {
@@ -339,8 +466,9 @@ export class MarketplaceService {
     }
 
     const amountCents = listing.priceCents;
-    const stripeFeeCents = Math.round(amountCents * 0.029) + 30;
+    const stripeFeeCents = estimateStripeFeeCents(amountCents);
     const { platformFeeCents, sellerEarningCents } = splitSale(amountCents, stripeFeeCents);
+    const destinationSettled = Boolean(intent.transfer_data?.destination);
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -382,6 +510,16 @@ export class MarketplaceService {
               entryType: 'seller_earning',
               amountCents: sellerEarningCents,
             },
+            ...(destinationSettled
+              ? [
+                  {
+                    purchaseId: purchase.id,
+                    sellerId: listing.sellerId,
+                    entryType: 'payout' as const,
+                    amountCents: sellerEarningCents,
+                  },
+                ]
+              : []),
           ],
         });
         await tx.marketplaceTemplate.update({
@@ -511,6 +649,228 @@ export class MarketplaceService {
     };
   }
 
+  /**
+   * Stripe Node 17 has no Accounts v2 client. Express + Account Links matches ADR-019
+   * until the SDK is upgraded to `/v2/core/accounts` (dashboard express, platform
+   * fee collection, platform negative-balance liability, recipient transfers).
+   */
+  async startConnectOnboarding(userId: string) {
+    const stripe = this.requireStripe();
+    const profile = await this.prisma.sellerProfile.findUnique({ where: { userId } });
+    if (!profile) {
+      throw new ForbiddenException({
+        code: 'NOT_SELLER',
+        message: 'Must apply as seller first',
+      });
+    }
+    if (profile.status === SellerStatus.rejected || profile.status === SellerStatus.suspended) {
+      throw new ForbiddenException({
+        code: 'SELLER_BLOCKED',
+        message: `Cannot onboard while status is ${profile.status}`,
+      });
+    }
+
+    let accountId = profile.stripeAccountId;
+    if (!accountId) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true },
+      });
+      const account = await stripe.accounts.create({
+        type: 'express',
+        country: profile.country.toUpperCase(),
+        email: user?.email,
+        capabilities: { transfers: { requested: true } },
+        metadata: { userId, sellerProfileId: profile.id },
+      });
+      accountId = account.id;
+      await this.prisma.sellerProfile.update({
+        where: { id: profile.id },
+        data: { stripeAccountId: accountId },
+      });
+    }
+
+    const origin = appOriginFromEnv();
+    const link = await stripe.accountLinks.create({
+      account: accountId,
+      refresh_url: `${origin}/seller/payouts?onboarding=refresh`,
+      return_url: `${origin}/seller/payouts?onboarding=return`,
+      type: 'account_onboarding',
+    });
+    if (!link.url) {
+      throw new BadRequestException({
+        code: 'CONNECT_LINK_FAILED',
+        message: 'Stripe did not return an onboarding URL',
+      });
+    }
+    return { url: link.url };
+  }
+
+  async refreshConnectAccount(userId: string) {
+    const stripe = this.requireStripe();
+    const profile = await this.sellerMe(userId);
+    if (!profile.stripeAccountId) {
+      throw new BadRequestException({
+        code: 'CONNECT_NOT_STARTED',
+        message: 'Start payouts onboarding first',
+      });
+    }
+    const account = await stripe.accounts.retrieve(profile.stripeAccountId);
+    return this.applyConnectCapabilities(profile, account);
+  }
+
+  async syncConnectedAccountFromWebhook(account: Stripe.Account) {
+    const profile = await this.prisma.sellerProfile.findUnique({
+      where: { stripeAccountId: account.id },
+    });
+    if (!profile) return null;
+    return this.applyConnectCapabilities(profile, account);
+  }
+
+  async createConnectLoginLink(userId: string) {
+    const stripe = this.requireStripe();
+    const profile = await this.sellerMe(userId);
+    if (!profile.stripeAccountId || !profile.payoutsEnabled) {
+      throw new BadRequestException({
+        code: 'CONNECT_NOT_READY',
+        message: 'Complete payouts verification first',
+      });
+    }
+    const link = await stripe.accounts.createLoginLink(profile.stripeAccountId);
+    if (!link.url) {
+      throw new BadRequestException({
+        code: 'CONNECT_LINK_FAILED',
+        message: 'Stripe did not return a dashboard URL',
+      });
+    }
+    return { url: link.url };
+  }
+
+  async listPayouts(userId: string) {
+    const profile = await this.sellerMe(userId);
+    const items = await this.prisma.sellerPayout.findMany({
+      where: { sellerProfileId: profile.id },
+      orderBy: { createdAt: 'desc' },
+      take: 24,
+    });
+    return {
+      items,
+      status: profile.status,
+      payoutsEnabled: profile.payoutsEnabled,
+      country: profile.country,
+      displayName: profile.displayName,
+    };
+  }
+
+  /**
+   * Pays platform-held seller earnings to connected accounts (min $25, hold window).
+   * Destination charges already write a `payout` ledger row at purchase — those
+   * balances are skipped so sellers are not paid twice.
+   */
+  async processWeeklyPayouts(now = new Date()) {
+    const stripe = this.requireStripe();
+    const sellers = await this.prisma.sellerProfile.findMany({
+      where: {
+        status: SellerStatus.active,
+        payoutsEnabled: true,
+        stripeAccountId: { not: null },
+      },
+      include: { user: { select: { email: true } } },
+    });
+
+    const paid: Array<{
+      sellerId: string;
+      email: string;
+      amountCents: number;
+      transferId: string;
+    }> = [];
+
+    for (const seller of sellers) {
+      if (!seller.stripeAccountId) continue;
+      const holdDays = seller.tier === SellerTier.new ? 14 : 7;
+      const cutoff = new Date(now.getTime() - holdDays * 24 * 60 * 60 * 1000);
+
+      const [earned, alreadyPaid] = await Promise.all([
+        this.prisma.marketplaceLedgerEntry.aggregate({
+          where: {
+            sellerId: seller.userId,
+            entryType: 'seller_earning',
+            createdAt: { lt: cutoff },
+          },
+          _sum: { amountCents: true },
+        }),
+        this.prisma.marketplaceLedgerEntry.aggregate({
+          where: { sellerId: seller.userId, entryType: 'payout' },
+          _sum: { amountCents: true },
+        }),
+      ]);
+
+      const available = (earned._sum.amountCents ?? 0) - (alreadyPaid._sum.amountCents ?? 0);
+      if (available < PAYOUT_MIN_CENTS) continue;
+
+      const periodStart = new Date(cutoff);
+      try {
+        const transfer = await stripe.transfers.create({
+          amount: available,
+          currency: 'usd',
+          destination: seller.stripeAccountId,
+          metadata: {
+            type: 'marketplace_payout',
+            sellerId: seller.userId,
+            sellerProfileId: seller.id,
+          },
+        });
+
+        const payout = await this.prisma.sellerPayout.create({
+          data: {
+            sellerProfileId: seller.id,
+            amountCents: available,
+            currency: 'USD',
+            status: 'paid',
+            stripeTransferId: transfer.id,
+            periodStart,
+            periodEnd: now,
+            paidAt: now,
+          },
+        });
+
+        await this.prisma.marketplaceLedgerEntry.create({
+          data: {
+            payoutId: payout.id,
+            sellerId: seller.userId,
+            entryType: 'payout',
+            amountCents: available,
+            currency: 'USD',
+          },
+        });
+
+        paid.push({
+          sellerId: seller.userId,
+          email: seller.user.email,
+          amountCents: available,
+          transferId: transfer.id,
+        });
+      } catch (err) {
+        this.logger.error(
+          `Weekly payout failed for seller ${seller.userId}`,
+          err instanceof Error ? err.stack : String(err)
+        );
+        await this.prisma.sellerPayout.create({
+          data: {
+            sellerProfileId: seller.id,
+            amountCents: available,
+            currency: 'USD',
+            status: 'failed',
+            periodStart,
+            periodEnd: now,
+          },
+        });
+      }
+    }
+
+    return { paidCount: paid.length, payouts: paid };
+  }
+
   private async requireActiveSeller(userId: string) {
     const profile = await this.prisma.sellerProfile.findUnique({ where: { userId } });
     if (!profile) {
@@ -531,11 +891,48 @@ export class MarketplaceService {
   private async getPublishedListing(listingId: string) {
     const listing = await this.prisma.marketplaceTemplate.findUnique({
       where: { id: listingId },
+      include: {
+        sellerProfile: { select: { stripeAccountId: true, payoutsEnabled: true } },
+      },
     });
     if (!listing || !listing.isPublished) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Listing not found' });
     }
     return listing;
+  }
+
+  private async applyConnectCapabilities(
+    profile: { id: string; status: SellerStatus },
+    account: Stripe.Account
+  ) {
+    const ready = Boolean(account.payouts_enabled) && Boolean(account.details_submitted);
+    const blocked =
+      profile.status === SellerStatus.rejected || profile.status === SellerStatus.suspended;
+    const status = blocked
+      ? profile.status
+      : ready
+        ? SellerStatus.active
+        : SellerStatus.pending_kyc;
+
+    return this.prisma.sellerProfile.update({
+      where: { id: profile.id },
+      data: { payoutsEnabled: ready, status },
+    });
+  }
+
+  private destinationChargeParams(listing: {
+    priceCents: number;
+    sellerProfile?: { stripeAccountId: string | null; payoutsEnabled: boolean } | null;
+  }): Pick<Stripe.PaymentIntentCreateParams, 'transfer_data' | 'application_fee_amount'> {
+    const accountId = listing.sellerProfile?.stripeAccountId;
+    if (!accountId || !listing.sellerProfile?.payoutsEnabled) {
+      return {};
+    }
+    const stripeFeeCents = estimateStripeFeeCents(listing.priceCents);
+    return {
+      transfer_data: { destination: accountId },
+      application_fee_amount: destinationApplicationFeeCents(listing.priceCents, stripeFeeCents),
+    };
   }
 
   private requireStripe(): Stripe {

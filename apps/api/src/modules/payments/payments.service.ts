@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ServiceUnavailableException,
   Inject,
+  Optional,
   forwardRef,
 } from '@nestjs/common';
 import Stripe from 'stripe';
@@ -13,8 +14,9 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { MailService } from '../../mail/mail.service';
 import { StripeWebhookStoreService } from './stripe-webhook-store.service';
 import { StripeAlertService } from './stripe-alert.service';
-import { availablePaymentMethods } from './payment-env';
+import { availablePaymentMethods, isStripeFailClosed } from './payment-env';
 import { emitSecurityAlert } from '../../observability';
+import { MarketplaceService } from '../marketplace/marketplace.service';
 
 const MAX_RETRIES = 3;
 
@@ -23,7 +25,7 @@ function sleep(ms: number) {
 }
 
 function isProduction() {
-  return process.env.NODE_ENV === 'production' || process.env.STRIPE_FAIL_CLOSED === '1';
+  return isStripeFailClosed();
 }
 
 @Injectable()
@@ -37,7 +39,10 @@ export class PaymentsService {
     private readonly subscriptions: SubscriptionsService,
     private readonly mail: MailService,
     private readonly webhookStore: StripeWebhookStoreService,
-    private readonly alerts: StripeAlertService
+    private readonly alerts: StripeAlertService,
+    @Optional()
+    @Inject(forwardRef(() => MarketplaceService))
+    private readonly marketplace?: MarketplaceService
   ) {
     const key = process.env.STRIPE_SECRET_KEY;
     if (key && !key.includes('xxx')) {
@@ -297,12 +302,31 @@ export class PaymentsService {
         await this.onInvoiceFailed(event.data.object as Stripe.Invoice);
         break;
       }
+      case 'account.updated': {
+        if (!this.marketplace) {
+          this.logger.warn(
+            `account.updated ignored — marketplace not wired (account=${(event.data.object as Stripe.Account).id})`
+          );
+          break;
+        }
+        await this.marketplace.syncConnectedAccountFromWebhook(event.data.object as Stripe.Account);
+        break;
+      }
       default:
         this.logger.debug(`Unhandled Stripe event: ${event.type}`);
     }
   }
 
   private async onCheckoutCompleted(session: Stripe.Checkout.Session) {
+    if (session.metadata?.type === 'marketplace') {
+      if (!this.marketplace) {
+        throw new Error(`Marketplace fulfillment not wired (session=${session.id})`);
+      }
+      await this.marketplace.fulfillCheckoutSession(session);
+      this.logger.log(`Marketplace licence fulfilled via checkout ${session.id}`);
+      return;
+    }
+
     const userId = session.client_reference_id ?? session.metadata?.userId;
     if (!userId || !session.subscription) {
       throw new Error(

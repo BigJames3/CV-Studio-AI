@@ -1,5 +1,7 @@
 import { apiClient, setLogoutInProgress } from './client';
 import { useAuthStore } from '@/stores/auth-store';
+import type { PublicBillingPlan } from '@cvstudio/shared-types';
+import type { MarketplaceListing } from '@/lib/marketplace/types';
 
 export const queryKeys = {
   user: {
@@ -13,8 +15,13 @@ export const queryKeys = {
   cv: (id: string) => ['cvs', id] as const,
   templates: (q?: unknown) => ['templates', q] as const,
   subscription: ['subscription', 'me'] as const,
+  plans: ['plans'] as const,
+  invoices: ['invoices'] as const,
   analyticsDashboard: ['analytics', 'dashboard'] as const,
   marketplace: ['marketplace', 'templates'] as const,
+  marketplaceCatalog: (filters?: { q?: string; category?: string; sort?: string }) =>
+    ['marketplace', 'templates', filters ?? {}] as const,
+  marketplaceListing: (id: string) => ['marketplace', 'listing', id] as const,
   sessions: ['auth', 'sessions'] as const,
   payments: ['payments', 'history'] as const,
   paymentMethods: ['payments', 'methods'] as const,
@@ -309,7 +316,17 @@ export const subscriptionsApi = {
         currentPeriodStart: string;
       } | null;
       tier: 'free' | 'pro' | 'business';
-      entitlements: { cvCreate: boolean; aiOptimize: boolean; exportDocx: boolean };
+      entitlements: {
+        cvCreate: boolean;
+        exportPdf?: boolean;
+        print?: boolean;
+        share?: boolean;
+        proTemplates?: boolean;
+        businessTemplates?: boolean;
+        advancedFeatures?: boolean;
+        aiOptimize: boolean;
+        exportDocx: boolean;
+      };
     }>('/subscriptions/me'),
   checkout: (params: {
     plan: 'pro' | 'business';
@@ -329,6 +346,34 @@ export const subscriptionsApi = {
       cancelAtPeriodEnd: boolean;
       currentPeriodEnd: string;
     }>('/subscriptions/me/cancel', { method: 'DELETE' }),
+};
+
+export type {
+  BillingCatalogEntitlement as PlanEntitlement,
+  PublicBillingPlan as BillingPlan,
+} from '@cvstudio/shared-types';
+
+export const plansApi = {
+  list: () => apiClient<PublicBillingPlan[]>('/plans'),
+};
+
+export type InvoiceItem = {
+  id: string;
+  invoiceNumber: string;
+  amount: number | string;
+  currency: string;
+  status: string;
+  pdfUrl: string | null;
+  createdAt: string;
+  paidAt: string | null;
+};
+
+export const invoicesApi = {
+  list: () => apiClient<{ items: InvoiceItem[] }>('/invoices'),
+  download: (id: string) =>
+    apiClient<{ url: string | null; invoiceNumber: string; message?: string }>(
+      `/invoices/${id}/download`
+    ),
 };
 
 export type PaymentHistoryItem = {
@@ -392,14 +437,13 @@ export const aiApi = {
 };
 
 export const marketplaceApi = {
-  listTemplates: (params?: { q?: string; category?: string }) => {
+  listTemplates: (params?: { q?: string; category?: string; sort?: string }) => {
     const q = new URLSearchParams();
     if (params?.q) q.set('q', params.q);
     if (params?.category) q.set('category', params.category);
+    if (params?.sort) q.set('sort', params.sort);
     const qs = q.toString();
-    return apiClient<{ items?: unknown[] } | unknown[]>(
-      `/marketplace/templates${qs ? `?${qs}` : ''}`
-    );
+    return apiClient<MarketplaceListing[]>(`/marketplace/templates${qs ? `?${qs}` : ''}`);
   },
   sellerMe: () => apiClient('/marketplace/seller/me'),
   applySeller: (body: { displayName: string; slug: string; country: string; bio?: string }) =>
@@ -423,7 +467,7 @@ export const marketplaceApi = {
     priceCents: number;
     tags?: string[];
   }) => apiClient('/marketplace/seller/listings', { method: 'POST', body }),
-  getListing: (id: string) => apiClient<Record<string, unknown>>(`/marketplace/templates/${id}`),
+  getListing: (id: string) => apiClient<MarketplaceListing>(`/marketplace/templates/${id}`),
   getDesign: (id: string) =>
     apiClient<{ listingId: string; templateId: string; designData: unknown }>(
       `/marketplace/templates/${id}/design`
@@ -433,6 +477,11 @@ export const marketplaceApi = {
       `/marketplace/templates/${listingId}/payment-intent`,
       { method: 'POST', body: {} }
     ),
+  createCheckout: (listingId: string) =>
+    apiClient<{ url: string; sessionId: string }>(`/marketplace/templates/${listingId}/checkout`, {
+      method: 'POST',
+      body: {},
+    }),
   purchase: (listingId: string, paymentIntentId: string) =>
     apiClient(`/marketplace/templates/${listingId}/purchase`, {
       method: 'POST',
@@ -459,4 +508,36 @@ export const marketplaceApi = {
       sellerShareCents: number;
       listings: unknown[];
     }>('/marketplace/seller/analytics'),
+  startConnectOnboarding: () =>
+    apiClient<{ url: string }>('/marketplace/seller/connect/onboarding', {
+      method: 'POST',
+      body: {},
+    }),
+  refreshConnectAccount: () =>
+    apiClient<{
+      status: string;
+      payoutsEnabled: boolean;
+      stripeAccountId: string | null;
+    }>('/marketplace/seller/connect/sync', { method: 'POST', body: {} }),
+  connectLoginLink: () =>
+    apiClient<{ url: string }>('/marketplace/seller/connect/login', {
+      method: 'POST',
+      body: {},
+    }),
+  listPayouts: () =>
+    apiClient<{
+      items: Array<{
+        id: string;
+        amountCents: number;
+        currency: string;
+        status: string;
+        periodStart: string;
+        periodEnd: string;
+        paidAt: string | null;
+      }>;
+      status: string;
+      payoutsEnabled: boolean;
+      country: string;
+      displayName: string;
+    }>('/marketplace/seller/payouts'),
 };

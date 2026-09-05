@@ -93,6 +93,7 @@ services:
       SMTP_PORT: '1025'
       MAIL_FROM: CV Studio AI <noreply@cvstudio.local>
       CINETPAY_FAIL_CLOSED: 'true'
+      STRIPE_FAIL_CLOSED: '1'
       AUTH_RATE_LIMIT_DISABLED: 'true'
       LOG_FORMAT: json
     # Production image (node dist/). For hot reload use: pnpm docker:up && pnpm dev

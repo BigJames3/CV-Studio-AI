@@ -3,6 +3,7 @@ import {
   Logger,
   BadRequestException,
   NotFoundException,
+  ServiceUnavailableException,
   Optional,
   Inject,
   forwardRef,
@@ -13,6 +14,11 @@ import { EntitlementsService } from './entitlements.service';
 import { CheckoutDto, UpdateSubscriptionDto, CreateSubscriptionDto } from './dto/subscription.dto';
 import { CinetpayGateway } from '../payments/gateways/cinetpay.gateway';
 import { appOriginFromEnv, safeReturnUrl } from '../../common/utils/url.utils';
+import { STRIPE_TRIAL_DAYS } from '../plans/plan-catalog';
+
+function isStripeFailClosed() {
+  return process.env.NODE_ENV === 'production' || process.env.STRIPE_FAIL_CLOSED === '1';
+}
 
 @Injectable()
 export class SubscriptionsService {
@@ -43,6 +49,12 @@ export class SubscriptionsService {
       tier,
       entitlements: {
         cvCreate: await this.entitlements.can(userId, 'cv:create'),
+        exportPdf: await this.entitlements.can(userId, 'cv:export:pdf'),
+        print: await this.entitlements.can(userId, 'cv:print'),
+        share: await this.entitlements.can(userId, 'cv:share'),
+        proTemplates: await this.entitlements.can(userId, 'proTemplates'),
+        businessTemplates: await this.entitlements.can(userId, 'businessTemplates'),
+        advancedFeatures: await this.entitlements.can(userId, 'advancedFeatures'),
         aiOptimize: await this.entitlements.can(userId, 'ai:optimize'),
         exportDocx: await this.entitlements.can(userId, 'cv:export:docx'),
       },
@@ -169,12 +181,11 @@ export class SubscriptionsService {
     );
 
     if (!this.stripe) {
-      const failClosed =
-        process.env.NODE_ENV === 'production' || process.env.STRIPE_FAIL_CLOSED === '1';
-      if (failClosed) {
-        throw new BadRequestException({
+      if (isStripeFailClosed()) {
+        throw new ServiceUnavailableException({
           code: 'STRIPE_NOT_CONFIGURED',
-          message: 'Stripe is not configured (fail-closed). Checkout unavailable.',
+          message:
+            'Stripe is not configured (fail-closed). Checkout unavailable. Set STRIPE_FAIL_CLOSED=1 and STRIPE_SECRET_KEY in production.',
         });
       }
       // Dev fallback: activate plan locally without Stripe
@@ -193,6 +204,13 @@ export class SubscriptionsService {
       };
     }
 
+    const trialEligible = await this.isEligibleForStripeTrial(
+      userId,
+      user.subscriptionTier ?? 'free'
+    );
+    const trialFields: Record<string, string> = trialEligible
+      ? { trial_days: String(STRIPE_TRIAL_DAYS) }
+      : {};
     const priceId = this.resolvePriceId(dto.plan, dto.interval);
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: 'subscription',
@@ -200,9 +218,10 @@ export class SubscriptionsService {
       cancel_url: cancelUrl,
       client_reference_id: userId,
       customer_email: user.email,
-      metadata: { userId, plan: dto.plan, interval: dto.interval },
+      metadata: { userId, plan: dto.plan, interval: dto.interval, ...trialFields },
       subscription_data: {
-        metadata: { userId, plan: dto.plan },
+        metadata: { userId, plan: dto.plan, ...trialFields },
+        ...(trialEligible ? { trial_period_days: STRIPE_TRIAL_DAYS } : {}),
       },
     };
 
@@ -410,5 +429,39 @@ export class SubscriptionsService {
 
   private planName(plan: string) {
     return plan.charAt(0).toUpperCase() + plan.slice(1);
+  }
+
+  /**
+   * First-time Stripe Checkout only. Returning paid/trialing Stripe customers
+   * and completed CinetPay periods are excluded. The CinetPay unpaid placeholder
+   * (trialing, no provider charge id) does not consume the trial.
+   */
+  private async isEligibleForStripeTrial(
+    userId: string,
+    subscriptionTier: string
+  ): Promise<boolean> {
+    if (subscriptionTier === 'pro' || subscriptionTier === 'business') {
+      return false;
+    }
+
+    const sub = await this.prisma.subscription.findUnique({
+      where: { userId },
+      include: { plan: true },
+    });
+    if (!sub) return true;
+    if (sub.stripeSubscriptionId) return false;
+
+    const paidPlan = sub.plan?.name !== 'Free';
+    if (!paidPlan) return true;
+
+    if (sub.status === 'active' || sub.status === 'past_due' || sub.status === 'canceled') {
+      return false;
+    }
+
+    if (sub.status === 'trialing' && sub.provider === 'stripe') {
+      return false;
+    }
+
+    return true;
   }
 }

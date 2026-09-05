@@ -283,6 +283,7 @@ export class PaymentsService {
         await this.onCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
         break;
       }
+      case 'customer.subscription.created':
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
         await this.onSubscriptionChanged(event.data.object as Stripe.Subscription);

@@ -90,6 +90,7 @@ export type TemplateDesignData = {
     atsSafe: boolean;
   };
   usage: string;
+  tier?: 'free' | 'pro' | 'business';
 };
 
 export type TemplateListItem = {
@@ -102,6 +103,7 @@ export type TemplateListItem = {
   price?: number | null;
   rating: number;
   downloadCount: number;
+  accessTier?: 'free' | 'pro' | 'business';
   designData?: TemplateDesignData;
 };
 

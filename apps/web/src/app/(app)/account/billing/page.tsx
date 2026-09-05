@@ -6,9 +6,19 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { PaymentMethodSelector } from '@/components/billing/payment-selector';
-import { queryKeys, subscriptionsApi, paymentsApi, type PaymentHistoryItem } from '@/lib/api';
+import {
+  queryKeys,
+  plansApi,
+  subscriptionsApi,
+  paymentsApi,
+  invoicesApi,
+  type PaymentHistoryItem,
+  type InvoiceListItem,
+} from '@/lib/api';
 import { useMe, useSubscription, useUserPlan } from '@/hooks';
 import { cn, suggestPaymentMethod, type PaymentProvider } from '@/lib/utils';
+import { FALLBACK_PLANS, mergeCatalog, PLAN_DISPLAY_NAME } from '@/lib/billing/plans-catalog';
+import { BillingPlanCards, type BillingPeriod } from '@/components/billing/plan-cards';
 import {
   detectCountry,
   persistPaymentMethod,
@@ -23,23 +33,13 @@ const POLL_TIMEOUT_SEC = 300;
 const ACTIVATION_POLL_INTERVAL_MS = 500;
 const ACTIVATION_POLL_MAX_ATTEMPTS = 60;
 
-const PLANS = [
-  {
-    id: 'free' as const,
-    name: 'Gratuit',
-    description: '1 CV max',
-  },
-  {
-    id: 'pro' as const,
-    name: 'Pro',
-    description: 'CV illimités',
-  },
-  {
-    id: 'business' as const,
-    name: 'Business',
-    description: 'Tout illimité',
-  },
-] as const;
+const INVOICE_STATUS_LABEL: Record<string, string> = {
+  draft: 'Brouillon',
+  sent: 'Émise',
+  paid: 'Payée',
+  void: 'Annulée',
+  uncollectible: 'Impayée',
+};
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'En attente',
@@ -63,6 +63,29 @@ function formatPaymentAmount(amount: string | number, currency: string) {
     return `${Math.round(n).toLocaleString('fr-FR')} ${code}`;
   }
   return `${n.toFixed(2)} ${code}`;
+}
+
+function PlanCardsSkeleton() {
+  return (
+    <div className="mt-6 grid gap-4 sm:grid-cols-3" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="h-56 animate-pulse rounded-lg border border-border bg-surface-app"
+        />
+      ))}
+    </div>
+  );
+}
+
+function HistorySkeleton() {
+  return (
+    <div className="mt-4 space-y-2" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="h-10 animate-pulse rounded-md bg-surface-app" />
+      ))}
+    </div>
+  );
 }
 
 function CheckoutBanner({
@@ -100,7 +123,11 @@ export default function BillingPage() {
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-content px-4 py-8 text-sm">Chargement de la facturation…</div>
+        <div className="mx-auto max-w-content px-4 py-8">
+          <div className="h-8 w-48 animate-pulse rounded bg-surface-app" />
+          <PlanCardsSkeleton />
+          <HistorySkeleton />
+        </div>
       }
     >
       <BillingPageContent />
@@ -127,16 +154,39 @@ function BillingPageContent() {
 
   const [checkoutPending, setCheckoutPending] = useState<'pro' | 'business' | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>('month');
   const [cancelConfirm, setCancelConfirm] = useState(false);
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [pollingTimeLeft, setPollingTimeLeft] = useState(POLL_TIMEOUT_SEC);
 
-  const { data: paymentsData } = useQuery({
+  const {
+    data: paymentsData,
+    isError: paymentsError,
+    isPending: paymentsPending,
+    refetch: refetchPayments,
+  } = useQuery({
     queryKey: queryKeys.payments,
     queryFn: () => paymentsApi.history(),
     enabled: Boolean(user),
   });
+  const {
+    data: invoicesData,
+    isError: invoicesError,
+    isPending: invoicesPending,
+    refetch: refetchInvoices,
+  } = useQuery({
+    queryKey: queryKeys.invoices,
+    queryFn: () => invoicesApi.list(),
+    enabled: Boolean(user),
+  });
+  const { data: plansData, isPending: plansPending } = useQuery({
+    queryKey: queryKeys.plans,
+    queryFn: plansApi.list,
+    staleTime: 60 * 60 * 1000,
+    initialData: { items: FALLBACK_PLANS },
+  });
+  const catalog = mergeCatalog(plansData.items);
   const { data: paymentMethods } = useQuery({
     queryKey: queryKeys.paymentMethods,
     queryFn: () => paymentsApi.methods(),
@@ -179,6 +229,9 @@ function BillingPageContent() {
       ? 'stripe'
       : (paymentMethod ?? suggestedProvider);
   const payments = paymentsData?.items ?? [];
+  const invoices = invoicesData?.items ?? [];
+  const historyError = paymentsError || invoicesError;
+  const historyLoading = (paymentsPending && !paymentsData) || (invoicesPending && !invoicesData);
 
   const subscription = subData?.subscription ?? null;
   const cancelAtPeriodEnd = Boolean(subscription?.cancelAtPeriodEnd);
@@ -199,6 +252,7 @@ function BillingPageContent() {
         queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
         queryClient.invalidateQueries({ queryKey: queryKeys.payments }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.invoices }),
       ]);
     }
     if (checkoutState === 'cancel') {
@@ -239,6 +293,7 @@ function BillingPageContent() {
             queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
             queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
             queryClient.invalidateQueries({ queryKey: queryKeys.payments }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.invoices }),
           ]);
           return;
         }
@@ -283,6 +338,7 @@ function BillingPageContent() {
             queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
             queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
             queryClient.invalidateQueries({ queryKey: queryKeys.payments }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.invoices }),
           ]);
           window.location.replace(`${window.location.pathname}?checkout=success`);
           return;
@@ -342,6 +398,17 @@ function BillingPageContent() {
     }
   }
 
+  async function downloadInvoice(id: string) {
+    try {
+      const result = await invoicesApi.download(id);
+      if (result.url) {
+        window.open(result.url, '_blank', 'noopener,noreferrer');
+      }
+    } catch {
+      setCheckoutError('Impossible de télécharger la facture. Réessayez.');
+    }
+  }
+
   async function confirmCancel() {
     setCancelPending(true);
     setCancelError(null);
@@ -361,7 +428,13 @@ function BillingPageContent() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-content px-4 py-8 text-sm">Chargement de la facturation…</div>
+      <div className="mx-auto max-w-content px-4 py-8">
+        <div className="mb-8 h-8 w-48 animate-pulse rounded bg-surface-app" />
+        <PlanCardsSkeleton />
+        <div className="mt-6 rounded-lg border border-border bg-surface-card p-6">
+          <HistorySkeleton />
+        </div>
+      </div>
     );
   }
 
@@ -441,9 +514,16 @@ function BillingPageContent() {
       <section className="mb-6 rounded-lg border border-border bg-surface-card p-6">
         <h2 className="text-xl font-semibold">Plan actuel</h2>
         <p className="mt-2 text-sm text-content-secondary">Vous êtes actuellement sur</p>
-        <p data-testid="plan-badge" className="mt-1 text-2xl font-semibold capitalize">
-          Plan {displayTier}
+        <p data-testid="plan-badge" className="mt-1 text-2xl font-semibold">
+          Plan {PLAN_DISPLAY_NAME[displayTier]}
         </p>
+        {displayIsFree ? (
+          <p className="mt-2 text-sm text-content-secondary">
+            Créez jusqu&apos;à 1 CV. Passez à Pro pour l&apos;export PDF, le partage et l&apos;IA.
+          </p>
+        ) : periodEnd && !cancelAtPeriodEnd ? (
+          <p className="mt-2 text-sm text-content-secondary">Renouvellement le {periodEnd}</p>
+        ) : null}
 
         {cancelAtPeriodEnd && periodEnd ? (
           <p className="mt-3 text-sm text-warning" data-testid="cancel-pending">
@@ -452,27 +532,33 @@ function BillingPageContent() {
           </p>
         ) : null}
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
-          {PLANS.map((plan) => {
-            const active = displayTier === plan.id;
-            return (
-              <div
-                key={plan.id}
-                className={cn(
-                  'rounded-lg border p-4',
-                  active ? 'border-primary bg-primary-subtle' : 'border-border bg-surface-app'
-                )}
-              >
-                <p className="font-semibold">{plan.name}</p>
-                <p className="mt-1 text-sm text-content-secondary">{plan.description}</p>
-                {active ? <p className="mt-2 text-xs font-medium text-primary">Actuel</p> : null}
-              </div>
-            );
-          })}
+        <div className="mt-8">
+          <BillingPlanCards
+            catalog={catalog}
+            loading={plansPending && !plansData.items.length}
+            displayTier={displayTier}
+            billingPeriod={billingPeriod}
+            onBillingPeriodChange={setBillingPeriod}
+            checkoutPending={checkoutPending}
+            onCheckout={(plan, interval) => void checkout(plan, interval)}
+          />
         </div>
 
+        {checkoutError ? (
+          <p className="mt-4 text-sm text-error" data-testid="checkout-error" role="alert">
+            {checkoutError}
+          </p>
+        ) : null}
+
+        {cancelError ? (
+          <p className="mt-4 text-sm text-error" data-testid="cancel-error" role="alert">
+            {cancelError}
+          </p>
+        ) : null}
+
         {showPaymentSelector ? (
-          <div className="mt-6">
+          <div className="mt-8">
+            <h2 className="mb-4 text-xl font-semibold">Méthode de paiement</h2>
             <PaymentMethodSelector
               value={selectedMethod}
               onChange={(method) => {
@@ -487,70 +573,34 @@ function BillingPageContent() {
           </div>
         ) : null}
 
-        {checkoutError ? (
-          <p className="mt-4 text-sm text-error" data-testid="checkout-error" role="alert">
-            {checkoutError}
-          </p>
-        ) : null}
-
-        {cancelError ? (
-          <p className="mt-4 text-sm text-error" data-testid="cancel-error" role="alert">
-            {cancelError}
+        {displayIsFree && showPaymentSelector && selectedMethod === 'stripe' ? (
+          <p className="mt-3 text-sm text-content-secondary">
+            {catalog.find((p) => p.slug === 'pro')?.trialDays ?? 14} jours d’essai avec Stripe
+            (carte). Sans engagement.
           </p>
         ) : null}
 
         <div className="mt-6 flex flex-wrap gap-3">
-          {displayIsFree ? (
-            <>
-              <Button
-                data-testid="checkout-pro-month"
-                data-plan="pro"
-                disabled={checkoutPending !== null}
-                onClick={() => void checkout('pro', 'month')}
-              >
-                {checkoutPending === 'pro' ? 'Redirection…' : 'Passer à Pro'}
-              </Button>
-              <Button
-                variant="secondary"
-                data-testid="checkout-pro-year"
-                data-plan="pro"
-                disabled={checkoutPending !== null}
-                onClick={() => void checkout('pro', 'year')}
-              >
-                Pro annuel
-              </Button>
-              <Button
-                variant="outline"
-                data-testid="checkout-business-month"
-                data-plan="business"
-                disabled={checkoutPending !== null}
-                onClick={() => void checkout('business', 'month')}
-              >
-                Upgrade to Business
-              </Button>
-            </>
-          ) : null}
-
           {displayIsPro ? (
-            <>
-              <Button
-                data-testid="checkout-business-month"
-                data-plan="business"
-                disabled={checkoutPending !== null}
-                onClick={() => void checkout('business', 'month')}
-              >
-                {checkoutPending === 'business' ? 'Redirection…' : 'Passer à Business'}
-              </Button>
-              <Link href="/pricing">
-                <Button variant="outline">Comparer les plans</Button>
-              </Link>
-            </>
+            <Link href="/pricing">
+              <Button variant="outline">Comparer les plans</Button>
+            </Link>
           ) : null}
 
           {displayIsBusiness ? (
-            <p className="text-sm text-content-secondary">
-              Contactez le support pour les modifications de votre plan Business.
-            </p>
+            <div className="w-full rounded-lg border border-border bg-surface-app p-4">
+              <h3 className="text-sm font-semibold">Support Business</h3>
+              <p className="mt-2 text-sm text-content-secondary">
+                Besoin d’intégrations personnalisées ou d’une modification de plan ? Contactez notre
+                équipe.
+              </p>
+              <a
+                className="mt-3 inline-block text-sm font-medium text-primary underline"
+                href="mailto:support@cvstudio.ai?subject=Support%20Business%20-%20CV%20Studio"
+              >
+                Contacter le support
+              </a>
+            </div>
           ) : null}
 
           {(displayIsPro || displayIsBusiness) && !cancelAtPeriodEnd ? (
@@ -595,7 +645,70 @@ function BillingPageContent() {
 
       <section className="rounded-lg border border-border bg-surface-card p-6">
         <h2 className="text-xl font-semibold">Historique de facturation</h2>
-        {payments.length > 0 ? (
+        {historyLoading ? (
+          <HistorySkeleton />
+        ) : historyError ? (
+          <div className="mt-3">
+            <p className="text-sm text-error" role="alert">
+              Impossible de charger l’historique. Réessayer.
+            </p>
+            <Button
+              className="mt-3"
+              variant="outline"
+              type="button"
+              onClick={() => {
+                void refetchPayments();
+                void refetchInvoices();
+              }}
+            >
+              Réessayer
+            </Button>
+          </div>
+        ) : invoices.length > 0 ? (
+          <div className="mt-4 overflow-x-auto" data-testid="payment-history">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-content-secondary">
+                  <th className="py-2 pr-3 font-medium">Date</th>
+                  <th className="py-2 pr-3 font-medium">N°</th>
+                  <th className="py-2 pr-3 font-medium">Montant</th>
+                  <th className="py-2 pr-3 font-medium">Statut</th>
+                  <th className="py-2 font-medium">PDF</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.map((invoice: InvoiceListItem) => (
+                  <tr key={invoice.id} className="border-b border-border">
+                    <td className="py-2 pr-3">
+                      {new Date(invoice.createdAt).toLocaleDateString('fr-FR')}
+                    </td>
+                    <td className="py-2 pr-3">{invoice.invoiceNumber}</td>
+                    <td className="py-2 pr-3">
+                      {formatPaymentAmount(invoice.amount, invoice.currency)}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {INVOICE_STATUS_LABEL[invoice.status] ?? invoice.status}
+                    </td>
+                    <td className="py-2">
+                      {invoice.pdfUrl ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-8 px-2 text-xs"
+                          onClick={() => void downloadInvoice(invoice.id)}
+                        >
+                          Télécharger
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-content-muted">PDF bientôt disponible</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : payments.length > 0 ? (
           <div className="mt-4 overflow-x-auto" data-testid="payment-history">
             <table className="w-full text-sm">
               <thead>
@@ -623,7 +736,13 @@ function BillingPageContent() {
             </table>
           </div>
         ) : (
-          <p className="mt-2 text-sm text-content-secondary">Aucune facture pour le moment</p>
+          <div className="mt-4 rounded-lg border border-primary bg-primary-subtle p-4">
+            <p className="text-sm font-medium text-primary">Aucune facture pour le moment</p>
+            <p className="mt-2 text-sm text-content-secondary">
+              Après votre premier paiement, vos factures et reçus apparaîtront ici. Vous pourrez les
+              télécharger en PDF.
+            </p>
+          </div>
         )}
       </section>
 

@@ -6,10 +6,12 @@ import { TEMPLATE_CATALOG, categoryToKey, getTemplateById } from '@/lib/template
 import type { TemplateCustomization, TemplateKey, TemplateListItem } from '@/lib/templates/types';
 import { cvsApi } from '@/lib/api';
 import { SAMPLE_CV } from '@/lib/templates/sample-cv';
+import { useFeatureGate } from '@/hooks/useFeatureGate';
 
 export function useTemplateSelection(initialId?: string) {
   const router = useRouter();
   const templates = TEMPLATE_CATALOG;
+  const { canAccessTemplate, showUpgrade, templateAccessTier } = useFeatureGate();
 
   const initial = initialId ? getTemplateById(initialId) : templates[0];
   const [selectedId, setSelectedId] = useState(initial?.id ?? templates[0].id);
@@ -46,6 +48,12 @@ export function useTemplateSelection(initialId?: string) {
   );
 
   const createWithTemplate = useCallback(async () => {
+    if (!canAccessTemplate(selected)) {
+      showUpgrade(
+        templateAccessTier(selected) === 'business' ? 'businessTemplates' : 'proTemplates'
+      );
+      return;
+    }
     setCreating(true);
     setError(null);
     try {
@@ -84,7 +92,15 @@ export function useTemplateSelection(initialId?: string) {
     } finally {
       setCreating(false);
     }
-  }, [customization, router, selected, templateKey]);
+  }, [
+    canAccessTemplate,
+    customization,
+    router,
+    selected,
+    showUpgrade,
+    templateAccessTier,
+    templateKey,
+  ]);
 
   return {
     templates,

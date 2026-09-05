@@ -9,6 +9,11 @@ export const Roles = (...roles: string[]) => SetMetadata(ROLES_KEY, roles);
 export const ENTITLEMENT_KEY = 'entitlement';
 export const RequireEntitlement = (feature: string) => SetMetadata(ENTITLEMENT_KEY, feature);
 
+export const FEATURE_GATE_KEY = 'featureGate';
+export type GatedFeature =
+  'downloadPDF' | 'print' | 'share' | 'proTemplates' | 'businessTemplates' | 'advancedFeatures';
+export const RequireFeature = (feature: GatedFeature) => SetMetadata(FEATURE_GATE_KEY, feature);
+
 export type AuthUser = {
   id: string;
   email: string;

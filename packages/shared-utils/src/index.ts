@@ -58,6 +58,25 @@ export function slugify(input: string) {
     .replace(/^-+|-+$/g, '');
 }
 
+export {
+  PAID_TIERS,
+  canAccessAdvancedFeatures,
+  canAccessBusinessTemplates,
+  canAccessProTemplates,
+  canAccessTemplate,
+  canCreateCV,
+  canDownloadPDF,
+  canPrint,
+  canShare,
+  getAvailableTemplateTypes,
+  getTierLevel,
+  normalizeTier,
+  resolveTemplateAccessTier,
+  type FeatureGateUser,
+  type SubscriptionTier as FeatureGateTier,
+  type TemplateAccessType,
+} from './feature-gate';
+
 export type PaymentProvider = 'stripe' | 'cinetpay';
 
 export type GeoLocationSource = 'user-profile' | 'browser-ip' | 'unknown';

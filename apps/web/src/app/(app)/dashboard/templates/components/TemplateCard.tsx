@@ -2,6 +2,7 @@
 
 import type { TemplateListItem } from '@/lib/templates/types';
 import { cn } from '@/lib/utils';
+import { useFeatureGate } from '@/hooks/useFeatureGate';
 
 export function TemplateCard({
   template,
@@ -12,14 +13,29 @@ export function TemplateCard({
   selected?: boolean;
   onSelect: () => void;
 }) {
+  const { canAccessTemplate, showUpgrade, templateAccessTier } = useFeatureGate();
+  const hasAccess = canAccessTemplate(template);
+  const lockedTier = templateAccessTier(template);
+
   return (
     <button
       type="button"
-      onClick={onSelect}
+      onClick={() => {
+        if (!hasAccess) {
+          showUpgrade(lockedTier === 'business' ? 'businessTemplates' : 'proTemplates');
+          return;
+        }
+        onSelect();
+      }}
       aria-pressed={selected}
+      aria-disabled={!hasAccess}
+      data-testid={`template-card-${template.accessTier ?? (template.isPremium ? 'pro' : 'free')}`}
       className={cn(
         'group w-full rounded-xl border bg-surface-card p-3 text-left shadow-1 transition',
-        selected ? 'border-primary ring-2 ring-primary/30' : 'border-border hover:border-primary/50'
+        selected
+          ? 'border-primary ring-2 ring-primary/30'
+          : 'border-border hover:border-primary/50',
+        !hasAccess && 'cursor-not-allowed opacity-50'
       )}
     >
       <div
@@ -38,7 +54,11 @@ export function TemplateCard({
       <p className="line-clamp-2 text-xs text-content-secondary">{template.description}</p>
       <div className="mt-2 flex items-center justify-between text-xs text-content-secondary">
         <span>★ {template.rating.toFixed(1)}</span>
-        {template.isPremium ? (
+        {!hasAccess ? (
+          <span className="rounded-full bg-secondary/10 px-2 py-0.5 font-semibold text-secondary">
+            Business only
+          </span>
+        ) : template.isPremium ? (
           <span className="rounded-full bg-secondary/10 px-2 py-0.5 font-semibold text-secondary">
             Pro
           </span>

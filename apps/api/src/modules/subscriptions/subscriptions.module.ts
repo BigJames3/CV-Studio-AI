@@ -3,9 +3,10 @@ import { SubscriptionsController } from './subscriptions.controller';
 import { SubscriptionsService } from './subscriptions.service';
 import { EntitlementsService } from './entitlements.service';
 import { PaymentsModule } from '../payments/payments.module';
+import { PlansModule } from '../plans/plans.module';
 
 @Module({
-  imports: [forwardRef(() => PaymentsModule)],
+  imports: [PlansModule, forwardRef(() => PaymentsModule)],
   controllers: [SubscriptionsController],
   providers: [SubscriptionsService, EntitlementsService],
   exports: [SubscriptionsService, EntitlementsService],

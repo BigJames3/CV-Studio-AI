@@ -1,10 +1,18 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ENTITLEMENT_KEY } from '../decorators';
 import { EntitlementsService } from '../../modules/subscriptions/entitlements.service';
 
 @Injectable()
 export class EntitlementsGuard implements CanActivate {
+  private readonly logger = new Logger(EntitlementsGuard.name);
+
   constructor(
     private reflector: Reflector,
     private entitlements: EntitlementsService
@@ -25,6 +33,7 @@ export class EntitlementsGuard implements CanActivate {
 
     const allowed = await this.entitlements.can(user.id, feature);
     if (!allowed) {
+      this.logger.warn(`Feature denied: user=${user.id}, feature=${feature}`);
       throw new ForbiddenException({
         statusCode: 402,
         code: 'ENTITLEMENT_REQUIRED',

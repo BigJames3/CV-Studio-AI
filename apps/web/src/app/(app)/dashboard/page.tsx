@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useCreateCv, useMe, useUserPlan } from '@/hooks';
+import { useCreateCv, useMe, useUserPlan, useFeatureGate } from '@/hooks';
 import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 import { useCvMutations } from '@/hooks/useCvMutations';
 
@@ -16,6 +16,7 @@ export default function DashboardPage() {
     useCvsInfinite();
   const createCv = useCreateCv();
   const { remove, duplicate, rename, publish, star } = useCvMutations();
+  const { canCreateMoreCVs, canShare, showUpgrade } = useFeatureGate();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [shareInfo, setShareInfo] = useState<{
@@ -71,7 +72,11 @@ export default function DashboardPage() {
           </Link>
           <Button
             data-testid="create-cv"
-            onClick={() =>
+            onClick={() => {
+              if (!canCreateMoreCVs) {
+                showUpgrade('cv:create');
+                return;
+              }
               createCv.mutate(
                 { title: 'Nouveau CV' },
                 {
@@ -80,11 +85,12 @@ export default function DashboardPage() {
                     if (id) window.location.href = `/editor/${id}`;
                   },
                 }
-              )
-            }
+              );
+            }}
             disabled={createCv.isPending}
+            title={canCreateMoreCVs ? undefined : 'Free plan: 1 CV max'}
           >
-            Nouveau CV
+            {canCreateMoreCVs ? 'Nouveau CV' : 'Nouveau (Upgrade)'}
           </Button>
         </div>
       </div>
@@ -192,7 +198,14 @@ export default function DashboardPage() {
                     size="sm"
                     variant="outline"
                     disabled={duplicate.isPending}
-                    onClick={() => duplicate.mutate(cv.id)}
+                    onClick={() => {
+                      if (!canCreateMoreCVs) {
+                        showUpgrade('cv:create');
+                        return;
+                      }
+                      duplicate.mutate(cv.id);
+                    }}
+                    title={canCreateMoreCVs ? undefined : 'Free plan: 1 CV max'}
                   >
                     {duplicate.isPending ? '⏳ Duplication…' : 'Dupliquer'}
                   </Button>
@@ -200,7 +213,11 @@ export default function DashboardPage() {
                     size="sm"
                     variant="outline"
                     disabled={publish.isPending}
-                    onClick={() =>
+                    onClick={() => {
+                      if (!cv.isPublic && !canShare) {
+                        showUpgrade('cv:share');
+                        return;
+                      }
                       publish.mutate(
                         { id: cv.id, isPublic: !cv.isPublic },
                         {
@@ -215,10 +232,17 @@ export default function DashboardPage() {
                             }
                           },
                         }
-                      )
-                    }
+                      );
+                    }}
+                    title={cv.isPublic || canShare ? undefined : 'Sharing is a Pro feature'}
                   >
-                    {publish.isPending ? '⏳' : cv.isPublic ? 'Dépublier' : 'Partager'}
+                    {publish.isPending
+                      ? '⏳'
+                      : cv.isPublic
+                        ? 'Dépublier'
+                        : canShare
+                          ? 'Partager'
+                          : 'Partager (Pro)'}
                   </Button>
                   <Button
                     size="sm"

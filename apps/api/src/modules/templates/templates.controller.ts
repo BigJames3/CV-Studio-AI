@@ -1,10 +1,11 @@
 import { Controller, ForbiddenException, Get, Param, Post, Query } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsBoolean } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { Public } from '../../common/decorators';
+import { CurrentUser, AuthUser, Public } from '../../common/decorators';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { FeatureGateService } from '../../common/services/feature-gate.service';
 import { TemplatesService } from './templates.service';
 
 export enum TemplateCategoryParam {
@@ -26,13 +27,24 @@ class ListTemplatesQueryDto extends PaginationQueryDto {
 @ApiTags('Templates')
 @Controller('templates')
 export class TemplatesController {
-  constructor(private readonly templates: TemplatesService) {}
+  constructor(
+    private readonly templates: TemplatesService,
+    private readonly featureGate: FeatureGateService
+  ) {}
 
   @Public()
   @Get()
-  @ApiOperation({ summary: 'List published templates' })
+  @ApiOperation({ summary: 'List published templates (includes accessTier)' })
   list(@Query() query: ListTemplatesQueryDto) {
     return this.templates.list(query);
+  }
+
+  @Get('available')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Templates allowed for the current subscription tier' })
+  async listAvailable(@CurrentUser() user: AuthUser) {
+    const allowedTypes = this.featureGate.getAvailableTemplateTypes(user);
+    return this.templates.findByTypes(allowedTypes);
   }
 
   @Public()

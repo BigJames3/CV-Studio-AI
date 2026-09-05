@@ -12,6 +12,7 @@ import { useMe, useUserPlan } from '@/hooks/useMe';
 import { identify, resetAnalytics, track } from '@/lib/analytics';
 
 export { useCvsInfinite, useMe, useUserPlan };
+export { useFeatureGate } from '@/hooks/useFeatureGate';
 export type { User, SubscriptionTier } from '@/hooks/useMe';
 
 export function useUpdateProfile() {
@@ -254,8 +255,11 @@ export function useEntitlement(feature: string) {
 
   const map: Record<string, boolean> = {
     'cv:create': entitlements?.cvCreate ?? tier !== 'free',
+    'cv:export:pdf': entitlements?.exportPdf ?? tier !== 'free',
+    'cv:print': entitlements?.print ?? tier !== 'free',
+    'cv:share': entitlements?.share ?? tier !== 'free',
     'ai:optimize': entitlements?.aiOptimize ?? tier !== 'free',
-    'cv:export:docx': false, // coming soon — never gate as available
+    'cv:export:docx': false, // not sold — generator not shipped
   };
 
   return {

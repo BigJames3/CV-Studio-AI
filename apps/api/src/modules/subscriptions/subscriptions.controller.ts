@@ -10,8 +10,9 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SubscriptionsService } from './subscriptions.service';
+import { PlansService } from '../plans/plans.service';
 import { CheckoutDto, UpdateSubscriptionDto, CreateSubscriptionDto } from './dto/subscription.dto';
-import { CurrentUser, AuthUser } from '../../common/decorators';
+import { CurrentUser, AuthUser, Public } from '../../common/decorators';
 
 @ApiTags('Subscriptions')
 @ApiBearerAuth('JWT')
@@ -19,7 +20,20 @@ import { CurrentUser, AuthUser } from '../../common/decorators';
 export class SubscriptionsController {
   private readonly logger = new Logger(SubscriptionsController.name);
 
-  constructor(private readonly subscriptions: SubscriptionsService) {}
+  constructor(
+    private readonly subscriptions: SubscriptionsService,
+    private readonly plans: PlansService
+  ) {}
+
+  @Public()
+  @Get('plans')
+  @ApiOperation({
+    deprecated: true,
+    summary: 'Deprecated alias of GET /plans — public catalog of active plans',
+  })
+  listPlans() {
+    return this.plans.findAll();
+  }
 
   @Post()
   @ApiOperation({

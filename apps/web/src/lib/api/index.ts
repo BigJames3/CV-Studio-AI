@@ -1,5 +1,6 @@
 import { apiClient, setLogoutInProgress } from './client';
 import { useAuthStore } from '@/stores/auth-store';
+import { FALLBACK_PLANS, type CatalogPlan } from '@/lib/billing/plans-catalog';
 
 export const queryKeys = {
   user: {
@@ -13,6 +14,8 @@ export const queryKeys = {
   cv: (id: string) => ['cvs', id] as const,
   templates: (q?: unknown) => ['templates', q] as const,
   subscription: ['subscription', 'me'] as const,
+  plans: ['plans'] as const,
+  invoices: ['invoices'] as const,
   analyticsDashboard: ['analytics', 'dashboard'] as const,
   marketplace: ['marketplace', 'templates'] as const,
   sessions: ['auth', 'sessions'] as const,
@@ -292,14 +295,39 @@ export const templatesApi = {
         category: string;
         previewImageUrl: string;
         isPremium: boolean;
+        accessTier?: 'free' | 'pro' | 'business';
         designData?: unknown;
       }>;
     }>('/templates'),
   get: (id: string) => apiClient<Record<string, unknown>>(`/templates/${id}`),
   byCategory: (category: string) => apiClient(`/templates/category/${category}`),
+  available: () =>
+    apiClient<{
+      items: Array<{
+        id: string;
+        name: string;
+        isPremium: boolean;
+        accessTier?: 'free' | 'pro' | 'business';
+      }>;
+    }>('/templates/available'),
+};
+
+export const plansApi = {
+  list: async () => {
+    try {
+      return await apiClient<{ items: CatalogPlan[] }>('/plans');
+    } catch {
+      try {
+        return await apiClient<{ items: CatalogPlan[] }>('/subscriptions/plans');
+      } catch {
+        return { items: FALLBACK_PLANS };
+      }
+    }
+  },
 };
 
 export const subscriptionsApi = {
+  plans: () => plansApi.list(),
   me: () =>
     apiClient<{
       subscription: {
@@ -309,7 +337,17 @@ export const subscriptionsApi = {
         currentPeriodStart: string;
       } | null;
       tier: 'free' | 'pro' | 'business';
-      entitlements: { cvCreate: boolean; aiOptimize: boolean; exportDocx: boolean };
+      entitlements: {
+        cvCreate: boolean;
+        exportPdf: boolean;
+        print: boolean;
+        share: boolean;
+        proTemplates: boolean;
+        businessTemplates: boolean;
+        advancedFeatures: boolean;
+        aiOptimize: boolean;
+        exportDocx: boolean;
+      };
     }>('/subscriptions/me'),
   checkout: (params: {
     plan: 'pro' | 'business';
@@ -329,6 +367,27 @@ export const subscriptionsApi = {
       cancelAtPeriodEnd: boolean;
       currentPeriodEnd: string;
     }>('/subscriptions/me/cancel', { method: 'DELETE' }),
+};
+
+export type InvoiceListItem = {
+  id: string;
+  invoiceNumber: string;
+  amount: string | number;
+  currency: string;
+  status: string;
+  pdfUrl: string | null;
+  dueDate: string;
+  paidAt: string | null;
+  createdAt: string;
+};
+
+export const invoicesApi = {
+  list: () => apiClient<{ items: InvoiceListItem[] }>('/invoices'),
+  get: (id: string) => apiClient<InvoiceListItem>(`/invoices/${id}`),
+  download: (id: string) =>
+    apiClient<{ url: string | null; invoiceNumber: string; message?: string }>(
+      `/invoices/${id}/download`
+    ),
 };
 
 export type PaymentHistoryItem = {

@@ -141,6 +141,7 @@ export const TEMPLATE_SEEDS: TemplateSeed[] = [
         atsSafe: true,
       },
       usage: 'Executives, lawyers, consultants',
+      tier: 'pro',
     },
   },
   {

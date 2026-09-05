@@ -50,9 +50,10 @@ export class PdfExportService {
     if (userId) {
       const allowed = await this.entitlements.can(userId, 'cv:export:pdf');
       if (!allowed) {
-        throw new BadRequestException({
+        throw new ForbiddenException({
           code: 'ENTITLEMENT_REQUIRED',
           message: 'PDF export is not available on your plan',
+          details: { feature: 'cv:export:pdf', upgradeUrl: '/pricing' },
         });
       }
     }
@@ -141,9 +142,10 @@ export class PdfExportService {
   ): Promise<{ status: string; jobId: string; pollUrl: string }> {
     const allowed = await this.entitlements.can(userId, 'cv:export:pdf');
     if (!allowed) {
-      throw new BadRequestException({
+      throw new ForbiddenException({
         code: 'ENTITLEMENT_REQUIRED',
         message: 'PDF export is not available on your plan',
+        details: { feature: 'cv:export:pdf', upgradeUrl: '/pricing' },
       });
     }
 
@@ -221,7 +223,7 @@ export class PdfExportService {
     if (job.status !== 'completed' || !(job as { buffer?: Buffer }).buffer) {
       throw new BadRequestException({
         code: 'NOT_READY',
-        message: job.status === 'failed' ? job.error ?? 'Export failed' : 'PDF is not ready yet',
+        message: job.status === 'failed' ? (job.error ?? 'Export failed') : 'PDF is not ready yet',
       });
     }
     return {

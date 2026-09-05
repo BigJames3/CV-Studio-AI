@@ -65,6 +65,7 @@ async function bootstrap() {
       .addTag('Users')
       .addTag('CVs')
       .addTag('Templates')
+      .addTag('Plans')
       .addTag('Subscriptions')
       .addTag('Payments')
       .addTag('Invoices')

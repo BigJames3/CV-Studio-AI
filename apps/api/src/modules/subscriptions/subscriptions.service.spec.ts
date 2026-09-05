@@ -215,6 +215,29 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
     );
   });
 
+  it('grants Pro entitlements while Stripe status is trialing', async () => {
+    await service.applyPaidEntitlement({
+      userId,
+      plan: 'pro',
+      provider: 'stripe',
+      status: 'trialing',
+      periodEnd: future,
+      stripeSubscriptionId: 'sub_trial',
+    });
+
+    expect(prisma.subscription.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ status: 'trialing' }),
+        update: expect.objectContaining({ status: 'trialing' }),
+      })
+    );
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ subscriptionTier: 'pro' }),
+      })
+    );
+  });
+
   it('should persist currentPeriodEnd on create and update', async () => {
     await service.applyPaidEntitlement({
       userId,
@@ -236,8 +259,8 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
 describe('SubscriptionsService.checkout', () => {
   const userId = 'user-1';
   const prisma = {
-    plan: { findUnique: jest.fn() },
-    subscription: { upsert: jest.fn() },
+    plan: { findUnique: jest.fn(), findMany: jest.fn() },
+    subscription: { upsert: jest.fn(), findUnique: jest.fn() },
     user: { findFirst: jest.fn(), update: jest.fn() },
   };
   const entitlements = {};
@@ -253,7 +276,9 @@ describe('SubscriptionsService.checkout', () => {
       id: userId,
       email: 'user@example.com',
       deletedAt: null,
+      subscriptionTier: 'free',
     });
+    prisma.subscription.findUnique.mockResolvedValue(null);
     prisma.plan.findUnique.mockResolvedValue({
       id: 'plan-pro',
       name: 'Pro',
@@ -367,6 +392,56 @@ describe('SubscriptionsService.checkout', () => {
       ).rejects.toMatchObject({
         response: expect.objectContaining({ code: 'CINETPAY_NOT_CONFIGURED' }),
       });
+    });
+
+    it('adds a 14-day trial for first-time Stripe checkout', async () => {
+      await service.checkout(userId, { plan: 'pro', interval: 'month', paymentMethod: 'stripe' });
+      expect(createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({ trial_days: '14' }),
+          subscription_data: expect.objectContaining({
+            trial_period_days: 14,
+            metadata: expect.objectContaining({ trial_days: '14' }),
+          }),
+        })
+      );
+    });
+
+    it('omits trial for a returning Stripe subscriber', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({
+        stripeSubscriptionId: 'sub_old',
+        status: 'canceled',
+        provider: 'stripe',
+        plan: { name: 'Pro' },
+      });
+      await service.checkout(userId, { plan: 'pro', interval: 'month', paymentMethod: 'stripe' });
+      const params = createCheckoutSession.mock.calls[0][0] as {
+        subscription_data: { trial_period_days?: number };
+      };
+      expect(params.subscription_data.trial_period_days).toBeUndefined();
+    });
+
+    it('never sends Stripe trial params on the CinetPay path', async () => {
+      await service.checkout(userId, {
+        plan: 'pro',
+        interval: 'month',
+        paymentMethod: 'cinetpay',
+      });
+      expect(createCheckoutSession).not.toHaveBeenCalled();
+      expect(cinetpayGateway.createPayment).toHaveBeenCalled();
+    });
+
+    it('rejects checkout when Stripe is missing and fail-closed (no local grant)', async () => {
+      const prev = process.env.STRIPE_FAIL_CLOSED;
+      process.env.STRIPE_FAIL_CLOSED = '1';
+      (service as unknown as { stripe: unknown }).stripe = null;
+      await expect(
+        service.checkout(userId, { plan: 'pro', interval: 'month' })
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'STRIPE_NOT_CONFIGURED' }),
+      });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      process.env.STRIPE_FAIL_CLOSED = prev;
     });
   });
 

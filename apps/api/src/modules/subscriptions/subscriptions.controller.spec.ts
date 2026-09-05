@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { validate } from 'class-validator';
 import { SubscriptionsController } from './subscriptions.controller';
 import { SubscriptionsService } from './subscriptions.service';
+import { PlansService } from '../plans/plans.service';
 import { CheckoutDto } from './dto/subscription.dto';
 import { IS_PUBLIC_KEY, type AuthUser } from '../../common/decorators';
 
@@ -22,13 +23,20 @@ describe('SubscriptionsController', () => {
     cancel: jest.fn(),
   };
 
+  const plans = {
+    findAll: jest.fn(),
+  };
+
   let controller: SubscriptionsController;
 
   beforeEach(async () => {
     jest.clearAllMocks();
     const module = await Test.createTestingModule({
       controllers: [SubscriptionsController],
-      providers: [{ provide: SubscriptionsService, useValue: subscriptions }],
+      providers: [
+        { provide: SubscriptionsService, useValue: subscriptions },
+        { provide: PlansService, useValue: plans },
+      ],
     }).compile();
     controller = module.get(SubscriptionsController);
   });
@@ -85,6 +93,19 @@ describe('SubscriptionsController', () => {
     const nonAdmin: AuthUser = { ...user, roles: ['pro_user'] };
     expect(() => controller.create(nonAdmin, { plan: 'business' })).toThrow(ForbiddenException);
     expect(subscriptions.create).not.toHaveBeenCalled();
+  });
+
+  it('GET plans is @Public', () => {
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, SubscriptionsController.prototype.listPlans)).toBe(
+      true
+    );
+  });
+
+  it('GET plans returns the catalog from PlansService', async () => {
+    const catalog = { items: [{ slug: 'pro', priceMonthly: 9.99, priceYearly: 99 }] };
+    plans.findAll.mockResolvedValue(catalog);
+    await expect(controller.listPlans()).resolves.toEqual(catalog);
+    expect(plans.findAll).toHaveBeenCalled();
   });
 });
 

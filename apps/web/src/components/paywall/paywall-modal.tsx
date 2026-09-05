@@ -16,16 +16,44 @@ import { Badge } from '@/components/ui/badge';
 
 const featureNames: Record<string, { title: string; description: string }> = {
   'cv:create': {
-    title: '🎯 Limite atteinte',
+    title: 'Limite atteinte',
     description: 'Vous avez utilisé votre quota de CV gratuit.',
   },
   'cv:duplicate': {
-    title: '🔒 Fonctionnalité Premium',
+    title: 'Fonctionnalité Premium',
     description: 'La duplication de CV est réservée aux utilisateurs Premium.',
   },
-  'cv:export:docx': {
-    title: '📄 Export DOCX',
-    description: "L'export en DOCX est réservé aux utilisateurs Premium.",
+  'cv:export:pdf': {
+    title: 'Export PDF',
+    description: "L'export PDF est inclus dans les plans Pro et Business.",
+  },
+  'cv:print': {
+    title: 'Impression',
+    description: "L'impression du CV est incluse dans les plans Pro et Business.",
+  },
+  'cv:share': {
+    title: 'Partage de CV',
+    description: 'Le lien public et le QR code sont inclus dans les plans Pro et Business.',
+  },
+  downloadPDF: {
+    title: 'Export PDF',
+    description: "L'export PDF est inclus dans les plans Pro et Business.",
+  },
+  print: {
+    title: 'Impression',
+    description: "L'impression du CV est incluse dans les plans Pro et Business.",
+  },
+  share: {
+    title: 'Partage de CV',
+    description: 'Le lien public et le QR code sont inclus dans les plans Pro et Business.',
+  },
+  proTemplates: {
+    title: 'Templates Pro',
+    description: 'Les templates Pro sont réservés au plan Business.',
+  },
+  businessTemplates: {
+    title: 'Templates Business',
+    description: 'Les templates Business sont réservés au plan Business.',
   },
   'ai:generate': {
     title: '✨ Génération IA',
@@ -35,10 +63,9 @@ const featureNames: Record<string, { title: string; description: string }> = {
 
 const PREMIUM_BENEFITS = [
   'CV illimités',
-  'Export PDF & DOCX haute qualité',
+  'Export PDF haute qualité',
   'Optimisation IA du contenu',
-  'Templates premium exclusifs',
-  'Partage public & analytics',
+  'Partage public',
 ] as const;
 
 export type PaywallModalProps = {
@@ -143,7 +170,7 @@ export function PaywallModal({
         </DialogFooter>
 
         <p className="text-center text-xs text-content-muted dark:text-neutral-500">
-          Premiers 14 jours gratuits
+          14 jours d’essai avec Stripe (carte). Sans engagement.
         </p>
       </DialogContent>
     </Dialog>

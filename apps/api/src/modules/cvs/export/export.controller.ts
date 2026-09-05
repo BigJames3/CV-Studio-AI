@@ -9,10 +9,12 @@ import {
   HttpStatus,
   Logger,
   Header,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { CurrentUser, AuthUser } from '../../../common/decorators';
+import { CurrentUser, AuthUser, RequireFeature } from '../../../common/decorators';
+import { FeatureGateGuard } from '../../../common/guards/feature-gate.guard';
 import { PdfExportService } from './pdf-export.service';
 import { ExportPdfDto, BatchExportPdfDto, PDF_HTML_MAX_CHARS } from './dto/export-pdf.dto';
 
@@ -25,6 +27,8 @@ export class CvExportController {
 
   @Post('export/pdf')
   @ApiBearerAuth('JWT')
+  @UseGuards(FeatureGateGuard)
+  @RequireFeature('downloadPDF')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'Sync PDF from CV content (authenticated)' })
   async renderPdf(
@@ -92,6 +96,8 @@ export class CvExportController {
 
   @Post('export/pdf/batch')
   @ApiBearerAuth('JWT')
+  @UseGuards(FeatureGateGuard)
+  @RequireFeature('downloadPDF')
   @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @ApiOperation({ summary: 'Batch export multiple template contents as JSON (base64 PDFs)' })
   async batchExport(@CurrentUser() user: AuthUser, @Body() dto: BatchExportPdfDto) {

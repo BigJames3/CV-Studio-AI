@@ -110,12 +110,15 @@ export type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;
 
 export type PlanEntitlement =
   | 'cv:create'
+  | 'cv:share'
   | 'export:pdf'
   | 'export:docx'
   | 'ai:generate'
   | 'ai:optimize'
   | 'ai:ats'
-  | 'marketplace:buy';
+  | 'marketplace:buy'
+  | 'templates:pro'
+  | 'templates:business';
 
 // ─── Prompt-compatible CV entity model ───
 export interface CV {

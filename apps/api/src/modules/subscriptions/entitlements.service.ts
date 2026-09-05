@@ -1,12 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.module';
+import { FeatureGateService } from '../../common/services/feature-gate.service';
 
 /**
- * Server-side feature gates. Redis cache recommended in production.
+ * DB-backed entitlements. Feature matrix decisions delegate to FeatureGateService.
  */
 @Injectable()
 export class EntitlementsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly featureGate: FeatureGateService
+  ) {}
 
   async getTier(userId: string): Promise<'free' | 'pro' | 'business'> {
     const user = await this.prisma.user.findUnique({
@@ -16,25 +20,48 @@ export class EntitlementsService {
     return (user?.subscriptionTier as 'free' | 'pro' | 'business') ?? 'free';
   }
 
+  async countActiveCvs(userId: string): Promise<number> {
+    return this.prisma.cv.count({
+      where: { userId, deletedAt: null },
+    });
+  }
+
   async can(userId: string, feature: string): Promise<boolean> {
     const tier = await this.getTier(userId);
+    const user = { id: userId, subscriptionTier: tier };
 
-    if (feature === 'cv:create') {
-      if (tier !== 'free') return true;
-      const count = await this.prisma.cv.count({
-        where: { userId, deletedAt: null },
-      });
-      return count < 1;
+    switch (feature) {
+      case 'cv:create':
+        return this.featureGate.canCreateCV(user, await this.countActiveCvs(userId));
+      case 'cv:export:pdf':
+      case 'export:pdf':
+      case 'downloadPDF':
+        return this.featureGate.canDownloadPDF(user);
+      case 'cv:print':
+      case 'print':
+        return this.featureGate.canPrint(user);
+      case 'cv:share':
+      case 'share':
+        return this.featureGate.canShare(user);
+      case 'templates:pro':
+      case 'proTemplates':
+        return this.featureGate.canAccessProTemplates(user);
+      case 'templates:business':
+      case 'businessTemplates':
+        return this.featureGate.canAccessBusinessTemplates(user);
+      case 'advancedFeatures':
+        return this.featureGate.canAccessAdvancedFeatures(user);
+      default:
+        break;
     }
 
     const matrix: Record<string, Array<'free' | 'pro' | 'business'>> = {
-      'cv:export:pdf': ['free', 'pro', 'business'],
       // Étape 13: DOCX generator not ready — entitlement hidden until real export ships
       'cv:export:docx': [],
       'ai:generate': ['pro', 'business'],
       'ai:optimize': ['pro', 'business'],
       'ai:cover_letter': ['pro', 'business'],
-      'ai:ats': ['free', 'pro', 'business'], // Free = teaser allowed
+      'ai:ats': ['free', 'pro', 'business'],
       'ai:interview': ['pro', 'business'],
       'marketplace:buy': ['pro', 'business'],
       'api:access': ['business'],

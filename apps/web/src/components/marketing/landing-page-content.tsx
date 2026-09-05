@@ -26,7 +26,8 @@ const features = [
 
 const testimonials = [
   {
-    quote: 'Mon CV est passé les ATS en une semaine. L’aperçu live m’a évité trois aller-retours PDF.',
+    quote:
+      'Mon CV est passé les ATS en une semaine. L’aperçu live m’a évité trois aller-retours PDF.',
     name: 'Camille R.',
     role: 'Product Designer',
   },
@@ -45,7 +46,7 @@ const testimonials = [
 const faqs = [
   {
     q: 'Le plan Free est-il vraiment utilisable ?',
-    a: 'Oui : 1 CV, 5 templates, export PDF sans watermark. L’IA est sur Pro. Export DOCX arrive bientôt.',
+    a: 'Oui : 1 CV et 5 templates. L’export PDF, le partage et l’IA sont inclus dans Pro.',
   },
   {
     q: 'Mes données sont-elles sécurisées ?',
@@ -277,8 +278,7 @@ export function LandingPageContent() {
               price: '0',
               priceCurrency: 'USD',
             },
-            description:
-              'Builder de CV ATS-ready avec aperçu live, templates pro et export PDF.',
+            description: 'Builder de CV ATS-ready avec aperçu live, templates pro et export PDF.',
           }),
         }}
       />

@@ -3,10 +3,12 @@ import {
   NotFoundException,
   ForbiddenException,
   ConflictException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.module';
 import { EntitlementsService } from '../subscriptions/entitlements.service';
+import { AuditLogService } from '../../common/services/audit-log.service';
 import { CreateCvDto, UpdateCvDto, PublishCvDto, ListCvsQueryDto } from './dto/cv.dto';
 import { PdfExportService } from './export/pdf-export.service';
 import { EMPTY_CV_CONTENT, normalizeCvContent } from './cv-content.util';
@@ -19,8 +21,13 @@ export class CvsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly entitlements: EntitlementsService,
-    private readonly pdfExport: PdfExportService
+    private readonly pdfExport: PdfExportService,
+    @Optional() private readonly auditLog?: AuditLogService
   ) {}
+
+  countByUser(userId: string): Promise<number> {
+    return this.prisma.cv.count({ where: { userId, deletedAt: null } });
+  }
 
   async list(userId: string, query: ListCvsQueryDto) {
     const limit = query.limit ?? 20;
@@ -65,6 +72,8 @@ export class CvsService {
   async create(userId: string, dto: CreateCvDto) {
     const can = await this.entitlements.can(userId, 'cv:create');
     if (!can) {
+      const tier = await this.entitlements.getTier(userId);
+      void this.auditLog?.logFeatureDenial(userId, 'cv:create', tier);
       throw new ForbiddenException({
         code: 'ENTITLEMENT_REQUIRED',
         message: 'CV limit reached — upgrade to Pro',
@@ -125,6 +134,18 @@ export class CvsService {
 
   async publish(userId: string, id: string, dto: PublishCvDto) {
     await this.get(userId, id);
+    if (dto.isPublic) {
+      const canShare = await this.entitlements.can(userId, 'cv:share');
+      if (!canShare) {
+        const tier = await this.entitlements.getTier(userId);
+        void this.auditLog?.logFeatureDenial(userId, 'share', tier);
+        throw new ForbiddenException({
+          code: 'ENTITLEMENT_REQUIRED',
+          message: 'Sharing requires Pro or Business',
+          details: { feature: 'cv:share', upgradeUrl: '/pricing' },
+        });
+      }
+    }
     const slug = dto.publicUrl ?? `cv-${randomBytes(6).toString('hex')}`;
     try {
       return await this.prisma.cv.update({
@@ -170,6 +191,8 @@ export class CvsService {
     const source = await this.get(userId, id);
     const can = await this.entitlements.can(userId, 'cv:create');
     if (!can) {
+      const tier = await this.entitlements.getTier(userId);
+      void this.auditLog?.logFeatureDenial(userId, 'cv:create', tier);
       throw new ForbiddenException({
         code: 'ENTITLEMENT_REQUIRED',
         message: 'CV limit reached — upgrade to Pro',
@@ -190,6 +213,16 @@ export class CvsService {
   }
 
   async shareMeta(userId: string, id: string) {
+    const canShare = await this.entitlements.can(userId, 'cv:share');
+    if (!canShare) {
+      const tier = await this.entitlements.getTier(userId);
+      void this.auditLog?.logFeatureDenial(userId, 'share', tier);
+      throw new ForbiddenException({
+        code: 'ENTITLEMENT_REQUIRED',
+        message: 'Sharing requires Pro or Business',
+        details: { feature: 'cv:share', upgradeUrl: '/pricing' },
+      });
+    }
     const cv = await this.get(userId, id);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
     if (!cv.isPublic || !cv.publicUrl) {

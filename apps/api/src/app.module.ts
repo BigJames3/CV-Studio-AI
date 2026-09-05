@@ -11,6 +11,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { CvsModule } from './modules/cvs/cvs.module';
 import { TemplatesModule } from './modules/templates/templates.module';
+import { PlansModule } from './modules/plans/plans.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
@@ -20,6 +21,7 @@ import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { HealthModule } from './modules/health/health.module';
 import { GeoModule } from './modules/geo/geo.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
+import { FeatureGateModule } from './common/feature-gate.module';
 
 @Module({
   imports: [
@@ -36,12 +38,14 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
       ? []
       : [ScheduleModule.forRoot()]),
     PrismaModule,
+    FeatureGateModule,
     RedisModule,
     MailModule,
     AuthModule,
     UsersModule,
     CvsModule,
     TemplatesModule,
+    PlansModule,
     SubscriptionsModule,
     PaymentsModule,
     InvoicesModule,

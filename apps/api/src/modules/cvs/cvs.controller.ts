@@ -9,17 +9,24 @@ import {
   Query,
   ParseUUIDPipe,
   HttpCode,
+  UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CvsService } from './cvs.service';
 import { CreateCvDto, UpdateCvDto, PublishCvDto, ListCvsQueryDto } from './dto/cv.dto';
-import { CurrentUser, AuthUser } from '../../common/decorators';
+import { CurrentUser, AuthUser, RequireFeature } from '../../common/decorators';
+import { FeatureGateService } from '../../common/services/feature-gate.service';
+import { FeatureGateGuard } from '../../common/guards/feature-gate.guard';
 
 @ApiTags('CVs')
 @ApiBearerAuth('JWT')
 @Controller('cvs')
 export class CvsController {
-  constructor(private readonly cvs: CvsService) {}
+  constructor(
+    private readonly cvs: CvsService,
+    private readonly featureGate: FeatureGateService
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List my CVs' })
@@ -29,7 +36,15 @@ export class CvsController {
 
   @Post()
   @ApiOperation({ summary: 'Create CV (entitlement-gated)' })
-  create(@CurrentUser() user: AuthUser, @Body() dto: CreateCvDto) {
+  async create(@CurrentUser() user: AuthUser, @Body() dto: CreateCvDto) {
+    const cvCount = await this.cvs.countByUser(user.id);
+    if (!this.featureGate.canCreateCV(user, cvCount)) {
+      throw new ForbiddenException({
+        code: 'ENTITLEMENT_REQUIRED',
+        message: 'Free plan: 1 CV max',
+        details: { feature: 'cv:create', upgradeUrl: '/pricing' },
+      });
+    }
     return this.cvs.create(user.id, dto);
   }
 
@@ -70,12 +85,16 @@ export class CvsController {
   }
 
   @Get(':id/share')
+  @UseGuards(FeatureGateGuard)
+  @RequireFeature('share')
   @ApiOperation({ summary: 'Public share URL + QR for a CV' })
   share(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.cvs.shareMeta(user.id, id);
   }
 
   @Get(':id/export/pdf')
+  @UseGuards(FeatureGateGuard)
+  @RequireFeature('downloadPDF')
   @ApiOperation({ summary: 'Enqueue PDF export (async job)' })
   exportPdf(
     @CurrentUser() user: AuthUser,

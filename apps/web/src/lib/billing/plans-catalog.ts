@@ -31,7 +31,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
   {
     id: 'pro',
     name: 'Pro',
-    description: 'Unlimited CVs',
+    description: '5 CVs, 50+ templates, all AI features, ATS, portfolio',
     position: 1,
     priceMonthly: 9.99,
     priceAnnual: 99,
@@ -41,7 +41,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
     stripePriceMonthlyId: null,
     stripePriceAnnualId: null,
     entitlements: [
-      { feature: 'cvLimit', value: 'unlimited', included: true },
+      { feature: 'cvLimit', value: '5', included: true },
       { feature: 'downloadPdf', value: 'true', included: true },
       { feature: 'share', value: 'true', included: true },
       { feature: 'aiFeatures', value: 'true', included: true },
@@ -53,7 +53,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
   {
     id: 'business',
     name: 'Business',
-    description: 'Teams',
+    description: '20 CVs, everything in Pro + team collab, analytics, API, branding',
     position: 2,
     priceMonthly: 29.99,
     priceAnnual: 299,
@@ -63,7 +63,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
     stripePriceMonthlyId: null,
     stripePriceAnnualId: null,
     entitlements: [
-      { feature: 'cvLimit', value: 'unlimited', included: true },
+      { feature: 'cvLimit', value: '20', included: true },
       { feature: 'downloadPdf', value: 'true', included: true },
       { feature: 'share', value: 'true', included: true },
       { feature: 'aiFeatures', value: 'true', included: true },
@@ -85,7 +85,10 @@ export function formatPlanPrice(amount: number, currency = 'EUR'): string {
 
 export function formatFeatureName(ent: BillingPlan['entitlements'][number]): string {
   const labels: Record<string, string> = {
-    cvLimit: ent.value === 'unlimited' ? 'CVs illimités' : `Créer ${ent.value} CV`,
+    cvLimit:
+      ent.value === 'unlimited'
+        ? 'CVs illimités'
+        : `Créer ${ent.value} CV${ent.value === '1' ? '' : 's'}`,
     downloadPdf: 'Télécharger en PDF',
     share: 'Partager des CV',
     aiFeatures: 'Optimisation IA',

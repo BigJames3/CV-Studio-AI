@@ -5,13 +5,14 @@ import { useRouter } from 'next/navigation';
 import { TEMPLATE_CATALOG, categoryToKey, getTemplateById } from '@/lib/templates/catalog';
 import type { TemplateCustomization, TemplateKey, TemplateListItem } from '@/lib/templates/types';
 import { cvsApi } from '@/lib/api';
+import { ApiError } from '@/lib/api/client';
 import { SAMPLE_CV } from '@/lib/templates/sample-cv';
 import { templateAccessType } from '@cvstudio/shared-utils';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
 
 export function useTemplateSelection(initialId?: string) {
   const router = useRouter();
-  const { canCreateMoreCVs, canUseTemplateType, showUpgrade } = useFeatureGate();
+  const { canCreateMoreCVs, canUseTemplateType, showUpgrade, cvCount, cvLimit } = useFeatureGate();
   const templates = TEMPLATE_CATALOG;
 
   const initial = initialId ? getTemplateById(initialId) : templates[0];
@@ -79,7 +80,11 @@ export function useTemplateSelection(initialId?: string) {
         content,
       })) as { id: string };
       router.push(`/editor/${cv.id}`);
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'ENTITLEMENT_REQUIRED') {
+        showUpgrade('cv:create');
+        return;
+      }
       // Offline / API down — still open editor with local id for demo
       const localId = `local-${selected.id.slice(0, 8)}`;
       if (typeof window !== 'undefined') {
@@ -115,6 +120,9 @@ export function useTemplateSelection(initialId?: string) {
     previewData,
     creating,
     error,
+    canCreateMoreCVs,
+    cvCount,
+    cvLimit,
     selectTemplate,
     patchCustomization,
     createWithTemplate,

@@ -13,6 +13,7 @@ import { EMPTY_CV_CONTENT, normalizeCvContent } from './cv-content.util';
 import { randomBytes } from 'crypto';
 
 const EMPTY_CONTENT = EMPTY_CV_CONTENT as Prisma.InputJsonValue;
+const CV_CREATE_LIMIT_MESSAGE = 'CV creation limit reached for your plan';
 
 @Injectable()
 export class CvsService {
@@ -63,7 +64,7 @@ export class CvsService {
   }
 
   async create(userId: string, dto: CreateCvDto) {
-    await this.entitlements.assertCan(userId, 'cv:create', 'Free plan: 1 CV max');
+    await this.entitlements.assertCan(userId, 'cv:create', CV_CREATE_LIMIT_MESSAGE);
     await this.assertTemplateAccess(userId, dto.templateId);
 
     return this.prisma.cv.create({
@@ -166,7 +167,7 @@ export class CvsService {
 
   async duplicate(userId: string, id: string) {
     const source = await this.get(userId, id);
-    await this.entitlements.assertCan(userId, 'cv:create', 'Free plan: 1 CV max');
+    await this.entitlements.assertCan(userId, 'cv:create', CV_CREATE_LIMIT_MESSAGE);
 
     return this.prisma.cv.create({
       data: {

@@ -327,6 +327,9 @@ export const subscriptionsApi = {
         aiOptimize: boolean;
         exportDocx: boolean;
       };
+      cvCount: number;
+      cvLimit: number;
+      cvRemaining: number;
     }>('/subscriptions/me'),
   checkout: (params: {
     plan: 'pro' | 'business';

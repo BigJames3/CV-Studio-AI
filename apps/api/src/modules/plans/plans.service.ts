@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { BillingCatalogEntitlement, PublicBillingPlan } from '@cvstudio/shared-types';
+import { getCvLimit } from '@cvstudio/shared-utils';
 import { PrismaService } from '../../database/prisma.module';
 import { RedisService } from '../../redis/redis.module';
 
@@ -53,10 +54,10 @@ export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   },
   {
     name: 'Pro',
-    description: 'Unlimited CVs, 50+ templates, all AI features, ATS, portfolio',
+    description: '5 CVs, 50+ templates, all AI features, ATS, portfolio',
     priceMonthly: 9.99,
     priceYearly: 99,
-    cvLimit: 999999,
+    cvLimit: 5,
     aiFeatures: true,
     prioritySupport: true,
     customDomain: false,
@@ -65,10 +66,10 @@ export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   },
   {
     name: 'Business',
-    description: 'Everything in Pro + team collab, analytics, API, branding',
+    description: '20 CVs, everything in Pro + team collab, analytics, API, branding',
     priceMonthly: 29.99,
     priceYearly: 299,
-    cvLimit: 999999,
+    cvLimit: 20,
     aiFeatures: true,
     prioritySupport: true,
     customDomain: true,
@@ -97,13 +98,13 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
   const id = slugFromName(plan.name);
   const priceMonthly = toNumber(plan.priceMonthly);
   const priceYearly = toNumber(plan.priceYearly);
-  const unlimitedCvs = plan.cvLimit >= 999999;
+  const cvLimit = getCvLimit(id);
   const paid = priceMonthly > 0;
 
   const entitlements: PlanEntitlementDto[] = [
     {
       feature: 'cvLimit',
-      value: unlimitedCvs ? 'unlimited' : String(plan.cvLimit),
+      value: String(cvLimit),
       included: true,
     },
     { feature: 'downloadPdf', value: 'true', included: true },

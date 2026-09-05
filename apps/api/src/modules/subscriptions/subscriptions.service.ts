@@ -44,6 +44,9 @@ export class SubscriptionsService {
       subscription: sub,
       tier: snap.tier,
       entitlements: snap.entitlements,
+      cvCount: snap.cvCount,
+      cvLimit: snap.cvLimit,
+      cvRemaining: snap.cvRemaining,
     };
   }
 

@@ -20,10 +20,10 @@ const FREE = {
 
 const PRO = {
   name: 'Pro',
-  description: 'Unlimited CVs',
+  description: '5 CVs',
   priceMonthly: 9.99,
   priceYearly: 99,
-  cvLimit: 999999,
+  cvLimit: 5,
   aiFeatures: true,
   prioritySupport: true,
   customDomain: false,
@@ -36,7 +36,7 @@ const BUSINESS = {
   description: 'Teams',
   priceMonthly: 29.99,
   priceYearly: 299,
-  cvLimit: 999999,
+  cvLimit: 20,
   aiFeatures: true,
   prioritySupport: true,
   customDomain: true,
@@ -88,7 +88,7 @@ describe('mapPlanToPublicDto', () => {
     });
     expect(dto.currency).toBe('EUR');
     expect(dto.currency).toBe('EUR');
-    expect(dto.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('unlimited');
+    expect(dto.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('5');
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'templates')?.value).toBe('unlimited');
     expect(dto.entitlements.find((e) => e.feature === 'collaborate')?.included).toBe(false);
@@ -102,6 +102,7 @@ describe('mapPlanToPublicDto', () => {
     expect(dto.entitlements.find((e) => e.feature === 'apiAccess')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'customDomain')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'collaborate')?.included).toBe(true);
+    expect(dto.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('20');
   });
 });
 
@@ -161,5 +162,8 @@ describe('PlansService.findAll', () => {
     expect(plans[1]?.priceMonthly).toBe(9.99);
     expect(plans[1]?.priceAnnual).toBe(99);
     expect(plans[1]?.recommended).toBe(true);
+    expect(plans[0]?.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('1');
+    expect(plans[1]?.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('5');
+    expect(plans[2]?.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('20');
   });
 });

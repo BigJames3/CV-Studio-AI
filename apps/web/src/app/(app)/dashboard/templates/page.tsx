@@ -18,6 +18,9 @@ export default function TemplatesPage() {
     selectTemplate,
     patchCustomization,
     createWithTemplate,
+    canCreateMoreCVs,
+    cvCount,
+    cvLimit,
   } = useTemplateSelection();
 
   return (
@@ -29,9 +32,21 @@ export default function TemplatesPage() {
             Five professional layouts — customize colors, fonts, and sections, then create your CV.
             Preview updates in real time.
           </p>
+          <p className="mt-1 text-sm text-content-muted" data-testid="cv-quota">
+            {cvCount} / {cvLimit} CVs utilisés
+          </p>
         </div>
-        <Button size="lg" disabled={creating} onClick={() => void createWithTemplate()}>
-          {creating ? 'Creating…' : 'Create with this template'}
+        <Button
+          size="lg"
+          disabled={creating}
+          data-testid="create-with-template"
+          onClick={() => void createWithTemplate()}
+        >
+          {creating
+            ? 'Creating…'
+            : canCreateMoreCVs
+              ? 'Create with this template'
+              : `Limite atteinte (${cvCount}/${cvLimit})`}
         </Button>
       </div>
 

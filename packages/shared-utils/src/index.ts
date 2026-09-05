@@ -16,11 +16,24 @@ export function templateAccessType(isPremium: boolean): TemplateAccessType {
   return isPremium ? 'pro' : 'free';
 }
 
+/** Source of truth for CV quotas. Scratch + template + duplicate share this cap. */
+export const CV_LIMIT_BY_TIER: Record<SubscriptionTierName, number> = {
+  free: 1,
+  pro: 5,
+  business: 20,
+};
+
+export function getCvLimit(tier?: string | null): number {
+  return CV_LIMIT_BY_TIER[normalizeTier(tier)];
+}
+
+/**
+ * Determine if user can create another CV based on tier.
+ * Aggregated: scratch + template + duplicate all count toward the same quota.
+ * Grandfathering: users already at/above cap keep existing CVs; new creates are blocked.
+ */
 export function canCreateCV(user: FeatureGateUser, currentCvCount = 0): boolean {
-  if (normalizeTier(user.subscriptionTier) === 'free') {
-    return currentCvCount < 1;
-  }
-  return true;
+  return currentCvCount < getCvLimit(user.subscriptionTier);
 }
 
 export function canDownloadPDF(user: FeatureGateUser): boolean {

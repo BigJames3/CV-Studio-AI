@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { cvsApi, queryKeys, type ListCvsResponse } from '@/lib/api';
 import { ApiError } from '@/lib/api/client';
 import { useUiStore } from '@/stores/ui-store';
+import { getCvLimit } from '@cvstudio/shared-utils';
 
 type RenameInput = { id: string; title: string };
 type PublishInput = { id: string; isPublic: boolean };
@@ -40,6 +41,7 @@ export function useCvMutations() {
 
   const invalidateCvs = () => {
     void qc.invalidateQueries({ queryKey: queryKeys.cvs() });
+    void qc.invalidateQueries({ queryKey: queryKeys.subscription });
   };
 
   const remove = useMutation({
@@ -72,11 +74,15 @@ export function useCvMutations() {
     onError: (err) => {
       // Critical: free-tier quota → paywall only (no error toast)
       if (isEntitlementRequired(err)) {
+        const sub = qc.getQueryData<{ cvCount?: number; cvLimit?: number; tier?: string }>(
+          queryKeys.subscription
+        );
         const cached = qc.getQueryData<InfiniteData<ListCvsResponse>>(queryKeys.cvs());
-        const cvCount = cached?.pages.flatMap((page) => page.items).length ?? 0;
-        openPaywall('cv:duplicate', 'cv:duplicate', {
+        const cvCount = sub?.cvCount ?? cached?.pages.flatMap((page) => page.items).length ?? 0;
+        const cvLimit = sub?.cvLimit ?? getCvLimit(sub?.tier);
+        openPaywall('cv:create', 'cv:create', {
           cvCount,
-          cvLimit: 1,
+          cvLimit,
         });
         return;
       }

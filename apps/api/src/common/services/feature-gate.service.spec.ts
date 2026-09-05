@@ -24,12 +24,19 @@ describe('FeatureGateService', () => {
       expect(service.canCreateCV(free, 3)).toBe(false);
     });
 
-    it('should allow pro user unlimited CVs', () => {
-      expect(service.canCreateCV(pro, 1000)).toBe(true);
+    it('should allow pro user up to 5 CVs', () => {
+      expect(service.canCreateCV(pro, 4)).toBe(true);
+      expect(service.canCreateCV(pro, 5)).toBe(false);
     });
 
-    it('should allow business user unlimited CVs', () => {
-      expect(service.canCreateCV(business, 1000)).toBe(true);
+    it('should allow business user up to 20 CVs', () => {
+      expect(service.canCreateCV(business, 19)).toBe(true);
+      expect(service.canCreateCV(business, 20)).toBe(false);
+    });
+
+    it('grandfathers users above cap: no extra create, existing CVs untouched', () => {
+      expect(service.canCreateCV(pro, 7)).toBe(false);
+      expect(service.canCreateCV(business, 25)).toBe(false);
     });
   });
 
@@ -128,6 +135,15 @@ describe('FeatureGateService', () => {
 
     it('should return all templates for business tier', () => {
       expect(service.getAvailableTemplateTypes(business)).toEqual(['free', 'pro', 'business']);
+    });
+  });
+
+  describe('getCvLimit', () => {
+    it('returns 1/5/20 by tier and treats unknown as free', () => {
+      expect(service.getCvLimit(free)).toBe(1);
+      expect(service.getCvLimit(pro)).toBe(5);
+      expect(service.getCvLimit(business)).toBe(20);
+      expect(service.getCvLimit({ subscriptionTier: 'gold' })).toBe(1);
     });
   });
 

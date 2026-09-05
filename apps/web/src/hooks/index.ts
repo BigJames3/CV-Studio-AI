@@ -10,6 +10,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 import { useMe, useUserPlan } from '@/hooks/useMe';
 import { identify, resetAnalytics, track } from '@/lib/analytics';
+import { getCvLimit } from '@cvstudio/shared-utils';
 
 export { useCvsInfinite, useMe, useUserPlan };
 export { useFeatureGate } from '@/hooks/useFeatureGate';
@@ -147,6 +148,8 @@ export function useRegister() {
 
 export function useCreateCv() {
   const qc = useQueryClient();
+  const { data: sub } = useSubscription();
+  const { data: user } = useMe();
   const { data: cvsData } = useCvs();
 
   return useMutation({
@@ -154,14 +157,16 @@ export function useCreateCv() {
     onSuccess: () => {
       track('cv_created');
       qc.invalidateQueries({ queryKey: queryKeys.cvs() });
+      qc.invalidateQueries({ queryKey: queryKeys.subscription });
     },
     onError: (err) => {
       // Show paywall modal only — no toast (global PaywallModal in app layout)
       if (err instanceof ApiError && err.code === 'ENTITLEMENT_REQUIRED') {
-        const cvCount = cvsData?.items?.length ?? 0;
+        const cvCount = sub?.cvCount ?? cvsData?.items?.length ?? 0;
+        const cvLimit = sub?.cvLimit ?? getCvLimit(user?.subscriptionTier);
         useUiStore.getState().openPaywall('cv:create', 'cv:create', {
           cvCount,
-          cvLimit: 1,
+          cvLimit,
         });
       }
     },
@@ -249,12 +254,13 @@ export function useAutosave(resumeId: string | null) {
 
 export function useEntitlement(feature: string) {
   const { data } = useSubscription();
-  const tier = (data as { tier?: string } | undefined)?.tier ?? 'free';
-  const entitlements = (data as { entitlements?: Record<string, boolean> } | undefined)
-    ?.entitlements;
+  const tier = data?.tier ?? 'free';
+  const entitlements = data?.entitlements;
+  const cvLimit = data?.cvLimit ?? getCvLimit(tier);
+  const cvCount = data?.cvCount ?? 0;
 
   const map: Record<string, boolean> = {
-    'cv:create': entitlements?.cvCreate ?? tier !== 'free',
+    'cv:create': entitlements?.cvCreate ?? cvCount < cvLimit,
     'cv:export:pdf': entitlements?.exportPdf ?? tier !== 'free',
     'cv:print': entitlements?.print ?? tier !== 'free',
     'cv:share': entitlements?.share ?? tier !== 'free',
@@ -265,7 +271,9 @@ export function useEntitlement(feature: string) {
   return {
     allowed: map[feature] ?? tier !== 'free',
     tier,
-    openPaywall: () => useUiStore.getState().openPaywall(feature, feature),
+    cvCount,
+    cvLimit,
+    openPaywall: () => useUiStore.getState().openPaywall(feature, feature, { cvCount, cvLimit }),
   };
 }
 

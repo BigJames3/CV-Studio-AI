@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 const featureNames: Record<string, { title: string; description: string }> = {
   'cv:create': {
     title: '🎯 Limite atteinte',
-    description: 'Vous avez utilisé votre quota de CV gratuit.',
+    description: 'Vous avez atteint la limite de CV de votre plan.',
   },
   'cv:duplicate': {
     title: '🔒 Fonctionnalité Premium',
@@ -50,7 +50,7 @@ const featureNames: Record<string, { title: string; description: string }> = {
 };
 
 const PREMIUM_BENEFITS = [
-  'CV illimités',
+  'Jusqu’à 5 CVs (Pro) ou 20 (Business)',
   'Export PDF haute qualité',
   'Optimisation IA du contenu',
   'Templates premium exclusifs',

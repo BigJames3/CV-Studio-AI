@@ -1,4 +1,5 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
+import { getCvLimit } from '@cvstudio/shared-utils';
 import { PrismaService } from '../../database/prisma.module';
 import { FeatureGateService } from '../../common/services/feature-gate.service';
 import { AuditLogService } from '../../common/services/audit-log.service';
@@ -79,9 +80,12 @@ export class EntitlementsService {
     const cvCount = await this.prisma.cv.count({
       where: { userId, deletedAt: null },
     });
+    const cvLimit = getCvLimit(user.subscriptionTier);
     return {
       tier: user.subscriptionTier,
       cvCount,
+      cvLimit,
+      cvRemaining: Math.max(0, cvLimit - cvCount),
       entitlements: {
         cvCreate: this.featureGate.canCreateCV(user, cvCount),
         exportPdf: this.featureGate.canDownloadPDF(user),

@@ -53,7 +53,7 @@ describe('CvsService feature gates', () => {
     expect(prisma.cv.create).not.toHaveBeenCalled();
   });
 
-  it('create allows unlimited CVs when assertCan passes (pro/business)', async () => {
+  it('create allows insert when assertCan passes (within plan cap)', async () => {
     await service.create('u1', { title: 'CV 1000' });
     expect(prisma.cv.create).toHaveBeenCalled();
   });

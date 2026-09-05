@@ -27,6 +27,28 @@ describe('EntitlementsService', () => {
     await expect(service.can('u1', 'cv:create')).resolves.toBe(false);
   });
 
+  it('pro user can create up to 5 CVs and is blocked at cap', async () => {
+    prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'pro' });
+    prisma.cv.count.mockResolvedValue(4);
+    await expect(service.can('u1', 'cv:create')).resolves.toBe(true);
+    prisma.cv.count.mockResolvedValue(5);
+    await expect(service.can('u1', 'cv:create')).resolves.toBe(false);
+  });
+
+  it('business user can create up to 20 CVs and is blocked at cap', async () => {
+    prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'business' });
+    prisma.cv.count.mockResolvedValue(19);
+    await expect(service.can('u1', 'cv:create')).resolves.toBe(true);
+    prisma.cv.count.mockResolvedValue(20);
+    await expect(service.can('u1', 'cv:create')).resolves.toBe(false);
+  });
+
+  it('grandfathers pro users already above cap', async () => {
+    prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'pro' });
+    prisma.cv.count.mockResolvedValue(7);
+    await expect(service.can('u1', 'cv:create')).resolves.toBe(false);
+  });
+
   it('denies PDF export on free tier (matrix lock)', async () => {
     prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'free' });
     await expect(service.can('u1', 'cv:export:pdf')).resolves.toBe(false);
@@ -74,5 +96,18 @@ describe('EntitlementsService', () => {
     expect(snap.entitlements.exportPdf).toBe(false);
     expect(snap.entitlements.share).toBe(false);
     expect(snap.entitlements.proTemplates).toBe(false);
+    expect(snap.cvCount).toBe(0);
+    expect(snap.cvLimit).toBe(1);
+    expect(snap.cvRemaining).toBe(1);
+  });
+
+  it('snapshot exposes pro quota remaining', async () => {
+    prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'pro' });
+    prisma.cv.count.mockResolvedValue(3);
+    const snap = await service.snapshot('u1');
+    expect(snap.cvCount).toBe(3);
+    expect(snap.cvLimit).toBe(5);
+    expect(snap.cvRemaining).toBe(2);
+    expect(snap.entitlements.cvCreate).toBe(true);
   });
 });

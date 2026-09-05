@@ -9,6 +9,7 @@ import {
   canShare,
   canUseTemplateType,
   getAvailableTemplateTypes,
+  getCvLimit as cvLimitForTier,
   normalizeTier,
   type FeatureGateUser,
   type TemplateAccessType,
@@ -20,6 +21,10 @@ export type { FeatureGateUser, TemplateAccessType };
 export class FeatureGateService {
   canCreateCV(user: FeatureGateUser, currentCvCount = 0): boolean {
     return canCreateCV(user, currentCvCount);
+  }
+
+  getCvLimit(user: FeatureGateUser): number {
+    return cvLimitForTier(user.subscriptionTier);
   }
 
   canDownloadPDF(user: FeatureGateUser): boolean {

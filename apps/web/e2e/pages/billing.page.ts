@@ -17,14 +17,14 @@ const CATALOG = [
   {
     id: 'pro',
     name: 'Pro',
-    description: 'Unlimited',
+    description: '5 CVs',
     position: 1,
     priceMonthly: 9.99,
     priceAnnual: 99,
     currency: 'EUR',
     trialDays: 14,
     recommended: true,
-    entitlements: [{ feature: 'cvLimit', value: 'unlimited', included: true }],
+    entitlements: [{ feature: 'cvLimit', value: '5', included: true }],
   },
   {
     id: 'business',
@@ -36,7 +36,10 @@ const CATALOG = [
     currency: 'EUR',
     trialDays: 14,
     recommended: false,
-    entitlements: [{ feature: 'apiAccess', value: 'true', included: true }],
+    entitlements: [
+      { feature: 'cvLimit', value: '20', included: true },
+      { feature: 'apiAccess', value: 'true', included: true },
+    ],
   },
 ];
 

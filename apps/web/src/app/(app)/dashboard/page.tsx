@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,9 +11,10 @@ import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 import { useCvMutations } from '@/hooks/useCvMutations';
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { data: user } = useMe();
   const { isFree, tier } = useUserPlan();
-  const { canCreateMoreCVs, canShare, showUpgrade } = useFeatureGate();
+  const { canCreateMoreCVs, canShare, showUpgrade, cvCount, cvLimit } = useFeatureGate();
   const { data, isLoading, isError, isFetchingNextPage, hasNextPage, fetchNextPage } =
     useCvsInfinite();
   const createCv = useCreateCv();
@@ -43,8 +45,9 @@ export default function DashboardPage() {
             {firstName ? `Bonjour, ${firstName}` : 'Dashboard'}
           </h1>
           <p className="text-content-secondary">
-            {cvs.length} CV{cvs.length === 1 ? '' : 's'}
-            {hasNextPage ? '+' : ''}
+            <span data-testid="cv-quota">
+              {cvCount} / {cvLimit} CVs utilisés
+            </span>
             {user ? (
               <>
                 {' '}
@@ -68,9 +71,21 @@ export default function DashboardPage() {
             </Link>
           ) : null}
 
-          <Link href="/dashboard/templates">
-            <Button variant="secondary">Nouveau depuis template</Button>
-          </Link>
+          <Button
+            variant="secondary"
+            data-testid="create-from-template"
+            onClick={() => {
+              if (!canCreateMoreCVs) {
+                showUpgrade('cv:create');
+                return;
+              }
+              router.push('/dashboard/templates');
+            }}
+          >
+            {canCreateMoreCVs
+              ? 'Nouveau depuis template'
+              : `Limite atteinte (${cvCount}/${cvLimit})`}
+          </Button>
           <Button
             data-testid="create-cv"
             onClick={() => {
@@ -90,7 +105,7 @@ export default function DashboardPage() {
             }}
             disabled={createCv.isPending}
           >
-            {canCreateMoreCVs ? 'Nouveau CV' : 'Nouveau (Upgrade)'}
+            {canCreateMoreCVs ? 'Nouveau CV' : `Limite atteinte (${cvCount}/${cvLimit})`}
           </Button>
         </div>
       </div>
@@ -198,7 +213,13 @@ export default function DashboardPage() {
                     size="sm"
                     variant="outline"
                     disabled={duplicate.isPending}
-                    onClick={() => duplicate.mutate(cv.id)}
+                    onClick={() => {
+                      if (!canCreateMoreCVs) {
+                        showUpgrade('cv:create');
+                        return;
+                      }
+                      duplicate.mutate(cv.id);
+                    }}
                   >
                     {duplicate.isPending ? '⏳ Duplication…' : 'Dupliquer'}
                   </Button>

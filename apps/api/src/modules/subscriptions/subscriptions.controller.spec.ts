@@ -76,6 +76,15 @@ describe('SubscriptionsController', () => {
     ).toBeFalsy();
   });
 
+  it('POST checkout is throttled to 10 requests per minute', () => {
+    expect(
+      Reflect.getMetadata('THROTTLER:LIMITdefault', SubscriptionsController.prototype.checkout)
+    ).toBe(10);
+    expect(
+      Reflect.getMetadata('THROTTLER:TTLdefault', SubscriptionsController.prototype.checkout)
+    ).toBe(60_000);
+  });
+
   it('POST /subscriptions is forbidden for regular users and does not create', () => {
     expect(() => controller.create(user, { plan: 'pro' })).toThrow(ForbiddenException);
     expect(subscriptions.create).not.toHaveBeenCalled();

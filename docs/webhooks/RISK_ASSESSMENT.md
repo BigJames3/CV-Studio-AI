@@ -149,7 +149,7 @@ Puis checkout arrive → sub créée → CronJob/Stripe rejoue invoice → OK.
 
 ### R7 — DLQ processor inopérant
 
-CronJob `image: cvstudioai/api:latest` + `secretRef: cvstudio-api-secrets` vs API `sha-replace` + `api-secrets`.
+CronJob `image: cvstudioai/api:latest` vs API `sha-replace`. `secretRef` is aligned on `api-secrets`.
 
 **Impact:** filet interne absent. On dépend de Stripe (retry exponentiel ~3 jours puis abandon). Events en `dlq` jamais reclaim.
 

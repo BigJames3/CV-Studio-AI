@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, AuthUser, Public, RequireEntitlement } from '../../common/decorators';
 import { EntitlementsGuard } from '../../common/guards/entitlements.guard';
@@ -45,6 +46,7 @@ export class MarketplaceController {
   @ApiBearerAuth('JWT')
   @UseGuards(EntitlementsGuard)
   @RequireEntitlement('marketplace:buy')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('templates/:id/payment-intent')
   @ApiOperation({ summary: 'Create Stripe PaymentIntent for a listing' })
   createPaymentIntent(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
@@ -54,6 +56,7 @@ export class MarketplaceController {
   @ApiBearerAuth('JWT')
   @UseGuards(EntitlementsGuard)
   @RequireEntitlement('marketplace:buy')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('templates/:id/checkout')
   @ApiOperation({ summary: 'Create Stripe Checkout Session for a listing (hosted payment)' })
   createListingCheckout(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {

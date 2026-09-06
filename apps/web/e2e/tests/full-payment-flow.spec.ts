@@ -1,10 +1,11 @@
 import { test, expect } from '../fixtures/auth.fixture';
 import { mockPdfExport } from '../utils/wait-helpers';
 import { expectSubscriptionTier } from '../utils/assertions';
+import { stripeEnabled } from '../env';
 
 /**
- * AC 1–8: login → create CV → export PDF → pricing → upgrade Pro → checkout → verify plan.
- * Default: Stripe `dev_bypass` (no live keys). Hosted Checkout is `@stripe`.
+ * AC 1–8: login → create CV → export PDF → billing.
+ * Pro upgrade requires Stripe test keys (`E2E_STRIPE=1`). There is no checkout bypass.
  */
 test.describe('Full payment flow (Free → Pro)', () => {
   test('login, create CV, export PDF, upgrade to Pro @payment @ac', async ({
@@ -35,13 +36,17 @@ test.describe('Full payment flow (Free → Pro)', () => {
     await billingPage.goto();
     await billingPage.expectPlan('free');
     await billingPage.startProCheckout();
-    await billingPage.waitForCheckoutReturn();
 
-    await billingPage.goto();
-    await billingPage.expectPlan('pro');
-    await expect(page.getByTestId('plan-badge').first()).toContainText(/pro/i);
-
-    await expectSubscriptionTier(request, testUser.accessToken, 'pro');
+    if (!stripeEnabled) {
+      await expect(page.getByTestId('checkout-error')).toBeVisible({ timeout: 15_000 });
+      await billingPage.expectPlan('free');
+    } else {
+      await billingPage.waitForCheckoutReturn();
+      await billingPage.goto();
+      await billingPage.expectPlan('pro');
+      await expect(page.getByTestId('plan-badge').first()).toContainText(/pro/i);
+      await expectSubscriptionTier(request, testUser.accessToken, 'pro');
+    }
 
     await mockPdfExport(page);
     await page.goto('/dashboard');

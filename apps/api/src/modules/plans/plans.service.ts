@@ -4,6 +4,7 @@ import type { BillingCatalogEntitlement, PublicBillingPlan } from '@cvstudio/sha
 import { getCvLimit } from '@cvstudio/shared-utils';
 import { PrismaService } from '../../database/prisma.module';
 import { RedisService } from '../../redis/redis.module';
+import { isNonPlaceholderSecret } from '../payments/payment-env';
 
 export const PLAN_CACHE_KEY = 'plans:all';
 export const PLAN_CACHE_TTL_SECONDS = 3600;
@@ -84,8 +85,7 @@ function toNumber(value: Prisma.Decimal | number | string): number {
 
 function envPriceId(plan: PlanSlug, interval: 'MONTHLY' | 'YEARLY'): string | null {
   const raw = process.env[`STRIPE_PRICE_${plan.toUpperCase()}_${interval}`];
-  if (!raw || raw.includes('xxx')) return null;
-  return raw;
+  return isNonPlaceholderSecret(raw) ? raw : null;
 }
 
 function slugFromName(name: string): PlanSlug {

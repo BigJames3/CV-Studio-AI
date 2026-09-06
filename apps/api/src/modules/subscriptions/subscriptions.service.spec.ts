@@ -99,6 +99,21 @@ describe('SubscriptionsService.applyStripeSubscription', () => {
       })
     );
   });
+
+  it('persists stripeCustomerId when provided', async () => {
+    await service.applyStripeSubscription({
+      ...base,
+      status: 'active',
+      stripeCustomerId: 'cus_1',
+    });
+
+    expect(prisma.subscription.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ stripeCustomerId: 'cus_1' }),
+        update: expect.objectContaining({ stripeCustomerId: 'cus_1' }),
+      })
+    );
+  });
 });
 
 describe('SubscriptionsService.applyPaidEntitlement', () => {
@@ -237,18 +252,41 @@ describe('SubscriptionsService.checkout', () => {
   const userId = 'user-1';
   const prisma = {
     plan: { findUnique: jest.fn() },
-    subscription: { upsert: jest.fn(), findUnique: jest.fn() },
+    subscription: {
+      upsert: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn(),
+    },
     user: { findFirst: jest.fn(), update: jest.fn() },
   };
   const entitlements = {};
   let service: SubscriptionsService;
   let createCheckoutSession: jest.Mock;
+  let createCustomer: jest.Mock;
+  let listCustomers: jest.Mock;
+  let updateCustomer: jest.Mock;
+  let retrieveSubscription: jest.Mock;
   const cinetpayGateway = {
     createPayment: jest.fn(),
+  };
+  const prevPrices = {
+    STRIPE_PRICE_PRO_MONTHLY: process.env.STRIPE_PRICE_PRO_MONTHLY,
+    STRIPE_PRICE_PRO_YEARLY: process.env.STRIPE_PRICE_PRO_YEARLY,
+    STRIPE_PRICE_PRO_ANNUAL: process.env.STRIPE_PRICE_PRO_ANNUAL,
+    STRIPE_PRICE_BUSINESS_MONTHLY: process.env.STRIPE_PRICE_BUSINESS_MONTHLY,
+    STRIPE_PRICE_BUSINESS_YEARLY: process.env.STRIPE_PRICE_BUSINESS_YEARLY,
+    STRIPE_PRICE_BUSINESS_ANNUAL: process.env.STRIPE_PRICE_BUSINESS_ANNUAL,
   };
 
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.STRIPE_PRICE_PRO_MONTHLY = 'price_pro_month';
+    process.env.STRIPE_PRICE_PRO_YEARLY = 'price_pro_year';
+    process.env.STRIPE_PRICE_BUSINESS_MONTHLY = 'price_biz_month';
+    process.env.STRIPE_PRICE_BUSINESS_YEARLY = 'price_biz_year';
+    delete process.env.STRIPE_PRICE_PRO_ANNUAL;
+    delete process.env.STRIPE_PRICE_BUSINESS_ANNUAL;
     prisma.user.findFirst.mockResolvedValue({
       id: userId,
       email: 'user@example.com',
@@ -256,12 +294,37 @@ describe('SubscriptionsService.checkout', () => {
       deletedAt: null,
     });
     prisma.subscription.findUnique.mockResolvedValue(null);
-    prisma.plan.findUnique.mockResolvedValue({
-      id: 'plan-pro',
-      name: 'Pro',
-      priceMonthly: 9.99,
-      priceYearly: 99,
-      description: 'Pro plan',
+    prisma.subscription.update.mockResolvedValue({});
+    prisma.subscription.create.mockResolvedValue({ id: 'sub-1', userId });
+    prisma.plan.findUnique.mockImplementation(async (args: { where: { name: string } }) => {
+      if (args.where.name === 'Pro') {
+        return {
+          id: 'plan-pro',
+          name: 'Pro',
+          priceMonthly: 9.99,
+          priceYearly: 99,
+          description: 'Pro plan',
+        };
+      }
+      if (args.where.name === 'Business') {
+        return {
+          id: 'plan-biz',
+          name: 'Business',
+          priceMonthly: 29.99,
+          priceYearly: 299,
+          description: 'Business plan',
+        };
+      }
+      if (args.where.name === 'Free') {
+        return {
+          id: 'plan-free',
+          name: 'Free',
+          priceMonthly: 0,
+          priceYearly: 0,
+          description: 'Free',
+        };
+      }
+      return null;
     });
     prisma.user.update.mockResolvedValue({});
     prisma.subscription.upsert.mockResolvedValue({ id: 'sub-1', userId });
@@ -281,9 +344,23 @@ describe('SubscriptionsService.checkout', () => {
       id: 'cs_test_123',
       url: 'https://checkout.stripe.com/c/pay/cs_test_123',
     });
+    createCustomer = jest.fn().mockResolvedValue({ id: 'cus_new' });
+    listCustomers = jest.fn().mockResolvedValue({ data: [] });
+    updateCustomer = jest.fn().mockResolvedValue({ id: 'cus_old' });
+    retrieveSubscription = jest.fn();
     (service as unknown as { stripe: unknown }).stripe = {
       checkout: { sessions: { create: createCheckoutSession } },
+      customers: { create: createCustomer, list: listCustomers, update: updateCustomer },
+      subscriptions: { retrieve: retrieveSubscription },
     };
+  });
+
+  afterEach(() => {
+    (Object.keys(prevPrices) as Array<keyof typeof prevPrices>).forEach((key) => {
+      const prev = prevPrices[key];
+      if (prev === undefined) delete process.env[key];
+      else process.env[key] = prev;
+    });
   });
 
   describe('paymentMethod routing', () => {
@@ -399,14 +476,18 @@ describe('SubscriptionsService.checkout', () => {
       });
       prisma.subscription.findUnique.mockResolvedValue({
         stripeSubscriptionId: 'sub_existing',
+        stripeCustomerId: 'cus_existing',
       });
 
       await service.checkout(userId, { plan: 'business', interval: 'month' });
 
       const params = createCheckoutSession.mock.calls[0][0] as {
         subscription_data?: { trial_period_days?: number };
+        customer?: string;
       };
       expect(params.subscription_data?.trial_period_days).toBeUndefined();
+      expect(params.customer).toBe('cus_existing');
+      expect(createCustomer).not.toHaveBeenCalled();
     });
   });
 
@@ -417,6 +498,19 @@ describe('SubscriptionsService.checkout', () => {
     afterEach(() => {
       process.env.STRIPE_FAIL_CLOSED = prevFailClosed;
       process.env.NODE_ENV = prevNodeEnv;
+    });
+
+    it('rejects checkout when Stripe is missing (no dev_bypass)', async () => {
+      delete process.env.STRIPE_FAIL_CLOSED;
+      process.env.NODE_ENV = 'development';
+      (service as unknown as { stripe: unknown }).stripe = null;
+
+      await expect(
+        service.checkout(userId, { plan: 'pro', interval: 'month' })
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'STRIPE_NOT_CONFIGURED' }),
+      });
+      expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
     it('rejects checkout when Stripe is missing and fail-closed is on', async () => {
@@ -432,6 +526,24 @@ describe('SubscriptionsService.checkout', () => {
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
 
+    it('blocks live Stripe keys unless STRIPE_ALLOW_LIVE=1', async () => {
+      const prevKey = process.env.STRIPE_SECRET_KEY;
+      const prevAllow = process.env.STRIPE_ALLOW_LIVE;
+      process.env.STRIPE_SECRET_KEY = 'sk_live_blocked';
+      delete process.env.STRIPE_ALLOW_LIVE;
+      try {
+        await expect(
+          service.checkout(userId, { plan: 'pro', interval: 'month' })
+        ).rejects.toMatchObject({
+          response: expect.objectContaining({ code: 'STRIPE_LIVE_KEY_BLOCKED' }),
+        });
+        expect(createCheckoutSession).not.toHaveBeenCalled();
+      } finally {
+        process.env.STRIPE_SECRET_KEY = prevKey;
+        process.env.STRIPE_ALLOW_LIVE = prevAllow;
+      }
+    });
+
     it('does not grant entitlements when Stripe Checkout throws', async () => {
       createCheckoutSession.mockRejectedValue(new Error('Stripe API unavailable'));
 
@@ -439,6 +551,125 @@ describe('SubscriptionsService.checkout', () => {
         /Stripe API unavailable/
       );
       expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Stripe customer persistence', () => {
+    it('creates a Stripe customer once and persists stripeCustomerId', async () => {
+      await service.checkout(userId, { plan: 'pro', interval: 'month' });
+
+      expect(createCustomer).toHaveBeenCalledWith({
+        email: 'user@example.com',
+        metadata: { userId },
+      });
+      expect(prisma.subscription.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId,
+            planId: 'plan-free',
+            stripeCustomerId: 'cus_new',
+          }),
+        })
+      );
+      const params = createCheckoutSession.mock.calls[0][0] as {
+        customer?: string;
+        customer_email?: string;
+        line_items?: Array<{ price?: string; price_data?: unknown }>;
+      };
+      expect(params.customer).toBe('cus_new');
+      expect(params.customer_email).toBeUndefined();
+      expect(params.line_items?.[0]?.price).toBe('price_pro_month');
+      expect(params.line_items?.[0]?.price_data).toBeUndefined();
+    });
+
+    it('reuses the persisted Stripe customer on a second checkout', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({
+        stripeCustomerId: 'cus_existing',
+        stripeSubscriptionId: null,
+      });
+
+      await service.checkout(userId, { plan: 'pro', interval: 'year' });
+
+      expect(createCustomer).not.toHaveBeenCalled();
+      expect(listCustomers).not.toHaveBeenCalled();
+      expect(createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customer: 'cus_existing',
+          line_items: [{ price: 'price_pro_year', quantity: 1 }],
+        })
+      );
+    });
+
+    it('recovers the customer from an existing Stripe subscription', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({
+        stripeCustomerId: null,
+        stripeSubscriptionId: 'sub_existing',
+      });
+      retrieveSubscription.mockResolvedValue({ customer: 'cus_from_sub' });
+
+      await service.checkout(userId, { plan: 'pro', interval: 'month' });
+
+      expect(createCustomer).not.toHaveBeenCalled();
+      expect(prisma.subscription.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { stripeCustomerId: 'cus_from_sub' },
+        })
+      );
+      expect(createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({ customer: 'cus_from_sub' })
+      );
+    });
+
+    it('reuses an untagged Stripe customer with the same email instead of creating another', async () => {
+      listCustomers.mockResolvedValue({
+        data: [{ id: 'cus_old', email: 'user@example.com', metadata: {} }],
+      });
+
+      await service.checkout(userId, { plan: 'pro', interval: 'month' });
+
+      expect(createCustomer).not.toHaveBeenCalled();
+      expect(updateCustomer).toHaveBeenCalledWith('cus_old', { metadata: { userId } });
+      expect(createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({ customer: 'cus_old' })
+      );
+    });
+
+    it('does not steal a Stripe customer tagged with another userId', async () => {
+      listCustomers.mockResolvedValue({
+        data: [{ id: 'cus_other', metadata: { userId: 'other-user' } }],
+      });
+
+      await service.checkout(userId, { plan: 'pro', interval: 'month' });
+
+      expect(createCustomer).toHaveBeenCalled();
+      expect(createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({ customer: 'cus_new' })
+      );
+    });
+  });
+
+  describe('catalog price fail-closed', () => {
+    it('throws when STRIPE_PRICE_* is missing', async () => {
+      delete process.env.STRIPE_PRICE_PRO_MONTHLY;
+
+      await expect(
+        service.checkout(userId, { plan: 'pro', interval: 'month' })
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'STRIPE_PRICE_NOT_CONFIGURED' }),
+      });
+      expect(createCheckoutSession).not.toHaveBeenCalled();
+      expect(createCustomer).not.toHaveBeenCalled();
+    });
+
+    it('throws when STRIPE_PRICE_* is a placeholder', async () => {
+      process.env.STRIPE_PRICE_PRO_MONTHLY = 'price_placeholder';
+
+      await expect(
+        service.checkout(userId, { plan: 'pro', interval: 'month' })
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'STRIPE_PRICE_NOT_CONFIGURED' }),
+      });
+      expect(createCheckoutSession).not.toHaveBeenCalled();
     });
   });
 

@@ -23,6 +23,7 @@ function mockCheckoutEvent(
         metadata: overrides.plan
           ? { plan: overrides.plan, userId: overrides.userId ?? 'user-1' }
           : { userId: overrides.userId ?? 'user-1' },
+        customer: 'cus_1',
         subscription: 'sub_1',
       },
     },
@@ -41,6 +42,7 @@ function mockSubscriptionEvent(overrides: {
     data: {
       object: {
         id: 'sub_1',
+        customer: 'cus_1',
         status: overrides.status ?? 'active',
         cancel_at_period_end: overrides.cancelAtPeriodEnd,
         current_period_start: 1_700_000_000,
@@ -98,6 +100,7 @@ describe('PaymentsService webhook fail-closed', () => {
   ) {
     const retrieve = jest.fn().mockResolvedValue({
       id: 'sub_1',
+      customer: 'cus_1',
       status: 'active',
       cancel_at_period_end: cancelAtPeriodEnd,
       current_period_start: 1_700_000_000,
@@ -143,6 +146,37 @@ describe('PaymentsService webhook fail-closed', () => {
     jest.restoreAllMocks();
   });
 
+  it('rejects webhooks when Stripe is not configured (no soft-ack)', async () => {
+    const prevKey = process.env.STRIPE_SECRET_KEY;
+    const prevSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    const prevEnv = process.env.NODE_ENV;
+    const prevFail = process.env.STRIPE_FAIL_CLOSED;
+    process.env.STRIPE_SECRET_KEY = 'sk_test_xxx';
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
+    process.env.NODE_ENV = 'development';
+    delete process.env.STRIPE_FAIL_CLOSED;
+    try {
+      const unconfigured = new PaymentsService(
+        prisma as never,
+        subscriptions as never,
+        mail as never,
+        webhookStore as never,
+        alerts as never
+      );
+      await expect(
+        unconfigured.handleStripeWebhook(Buffer.from('{"type":"charge.succeeded"}'), 'invalid_sig')
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'STRIPE_NOT_CONFIGURED' }),
+      });
+      expect(webhookStore.markProcessed).not.toHaveBeenCalled();
+    } finally {
+      process.env.STRIPE_SECRET_KEY = prevKey;
+      process.env.STRIPE_WEBHOOK_SECRET = prevSecret;
+      process.env.NODE_ENV = prevEnv;
+      process.env.STRIPE_FAIL_CLOSED = prevFail;
+    }
+  });
+
   it('skips already processed events (idempotency)', async () => {
     webhookStore.isProcessed.mockResolvedValue(true);
     await service.processEventWithRetry({
@@ -166,6 +200,7 @@ describe('PaymentsService webhook fail-closed', () => {
         plan: 'pro',
         provider: 'stripe',
         stripeSubscriptionId: 'sub_1',
+        stripeCustomerId: 'cus_1',
         cancelAtPeriodEnd: false,
       })
     );

@@ -53,6 +53,7 @@ export class PaymentsController {
   }
 
   @Public()
+  @SkipThrottle()
   @Post('webhook')
   @ApiExcludeEndpoint()
   webhook(

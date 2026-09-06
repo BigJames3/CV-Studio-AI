@@ -67,6 +67,7 @@ jobs:
       CINETPAY_API_KEY: test_api_key
       CINETPAY_SITE_ID: test_site_id
       CINETPAY_FAIL_CLOSED: 'true'
+      STRIPE_FAIL_CLOSED: '1'
       STRIPE_SECRET_KEY: ${{ inputs.stripe && secrets.E2E_STRIPE_SECRET_KEY || 'sk_test_xxx' }}
       STRIPE_WEBHOOK_SECRET: ${{ inputs.stripe && secrets.E2E_STRIPE_WEBHOOK_SECRET || 'whsec_xxx' }}
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ inputs.stripe && secrets.E2E_STRIPE_PUBLISHABLE_KEY || 'pk_test_xxx' }}

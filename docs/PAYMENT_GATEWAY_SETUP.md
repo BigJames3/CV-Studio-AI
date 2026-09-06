@@ -8,13 +8,14 @@ Copy from `apps/api/.env.example`. **Never commit real keys.** Do not put secret
 
 ### Stripe
 
-| Variable                                    | Role                                                              |
-| ------------------------------------------- | ----------------------------------------------------------------- |
-| `STRIPE_SECRET_KEY`                         | Server SDK. Placeholder `sk_test_xxx` = unconfigured              |
-| `STRIPE_WEBHOOK_SECRET`                     | `POST /api/v1/payments/webhook` signature                         |
-| `STRIPE_PRICE_PRO_MONTHLY` / `_YEARLY`      | Price IDs                                                         |
-| `STRIPE_PRICE_BUSINESS_MONTHLY` / `_YEARLY` | Price IDs                                                         |
-| `STRIPE_FAIL_CLOSED`                        | `1` = no `dev_bypass` checkout (also on in `NODE_ENV=production`) |
+| Variable                                    | Role                                                                                                                                              |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STRIPE_SECRET_KEY`                         | Server SDK. Placeholder `sk_test_xxx` = unconfigured                                                                                              |
+| `STRIPE_WEBHOOK_SECRET`                     | `POST /api/v1/payments/webhook` signature                                                                                                         |
+| `STRIPE_PRICE_PRO_MONTHLY` / `_YEARLY`      | Price IDs                                                                                                                                         |
+| `STRIPE_PRICE_BUSINESS_MONTHLY` / `_YEARLY` | Price IDs                                                                                                                                         |
+| `STRIPE_FAIL_CLOSED`                        | Default on. Missing keys → checkout 400 / webhook 503 (no `dev_bypass`, no soft-ack). `0` disables the flag only; checkout still requires Stripe. |
+| `STRIPE_ALLOW_LIVE`                         | Staging must omit. Production go-live only (`1`) to allow `sk_live_` / `rk_live_`.                                                                |
 
 Web: `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`.
 

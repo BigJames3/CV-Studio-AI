@@ -14,7 +14,12 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { MailService } from '../../mail/mail.service';
 import { StripeWebhookStoreService } from './stripe-webhook-store.service';
 import { StripeAlertService } from './stripe-alert.service';
-import { availablePaymentMethods, isStripeFailClosed } from './payment-env';
+import {
+  availablePaymentMethods,
+  expandableStripeId,
+  isNonPlaceholderSecret,
+  stripeSecretForClient,
+} from './payment-env';
 import { emitSecurityAlert } from '../../observability';
 import { MarketplaceService } from '../marketplace/marketplace.service';
 
@@ -22,10 +27,6 @@ const MAX_RETRIES = 3;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isProduction() {
-  return isStripeFailClosed();
 }
 
 @Injectable()
@@ -44,8 +45,8 @@ export class PaymentsService {
     @Inject(forwardRef(() => MarketplaceService))
     private readonly marketplace?: MarketplaceService
   ) {
-    const key = process.env.STRIPE_SECRET_KEY;
-    if (key && !key.includes('xxx')) {
+    const key = stripeSecretForClient();
+    if (key) {
       this.stripe = new Stripe(key, { apiVersion: '2025-02-24.acacia' });
     }
   }
@@ -112,22 +113,18 @@ export class PaymentsService {
 
   async handleStripeWebhook(rawBody: Buffer, signature: string) {
     const secret = process.env.STRIPE_WEBHOOK_SECRET;
-    if (!this.stripe || !secret || secret.includes('xxx')) {
-      if (isProduction()) {
-        this.alerts.captureException(
-          new Error('Stripe webhook received but Stripe is not configured'),
-          {
-            level: 'fatal',
-            extra: { failClosed: true },
-          }
-        );
-        throw new ServiceUnavailableException({
-          code: 'STRIPE_NOT_CONFIGURED',
-          message: 'Stripe webhooks are not configured (fail-closed)',
-        });
-      }
-      this.logger.warn('Stripe webhook received but Stripe is not configured (dev soft-ack)');
-      return { received: true, configured: false };
+    if (!this.stripe || !isNonPlaceholderSecret(secret)) {
+      this.alerts.captureException(
+        new Error('Stripe webhook received but Stripe is not configured'),
+        {
+          level: 'fatal',
+          extra: { failClosed: true },
+        }
+      );
+      throw new ServiceUnavailableException({
+        code: 'STRIPE_NOT_CONFIGURED',
+        message: 'Stripe webhooks are not configured (fail-closed)',
+      });
     }
 
     let event: Stripe.Event;
@@ -338,6 +335,8 @@ export class PaymentsService {
       typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
     const stripeSub = await this.stripe!.subscriptions.retrieve(stripeSubId);
     const plan = resolvePaidPlan(session, stripeSub);
+    const stripeCustomerId =
+      expandableStripeId(session.customer) ?? expandableStripeId(stripeSub.customer);
 
     await this.subscriptions.applyPaidEntitlement({
       userId,
@@ -347,6 +346,7 @@ export class PaymentsService {
       periodStart: new Date(stripeSub.current_period_start * 1000),
       periodEnd: new Date(stripeSub.current_period_end * 1000),
       stripeSubscriptionId: stripeSub.id,
+      stripeCustomerId,
       cancelAtPeriodEnd: Boolean(stripeSub.cancel_at_period_end),
     });
 
@@ -400,6 +400,7 @@ export class PaymentsService {
       periodStart: new Date(stripeSub.current_period_start * 1000),
       periodEnd: new Date(stripeSub.current_period_end * 1000),
       stripeSubscriptionId: stripeSub.id,
+      stripeCustomerId: expandableStripeId(stripeSub.customer),
       cancelAtPeriodEnd,
     });
 
@@ -536,7 +537,7 @@ export function mapStripePriceToPlan(priceId: string | undefined | null): PaidPl
   const mapping: Record<string, PaidPlan> = {};
   const add = (envKey: string, plan: PaidPlan) => {
     const id = process.env[envKey];
-    if (id && !id.includes('xxx')) mapping[id] = plan;
+    if (isNonPlaceholderSecret(id)) mapping[id] = plan;
   };
   add('STRIPE_PRICE_PRO_MONTHLY', 'pro');
   add('STRIPE_PRICE_PRO_YEARLY', 'pro');

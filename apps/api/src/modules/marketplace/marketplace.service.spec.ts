@@ -75,6 +75,7 @@ describe('MarketplaceService security fixes', () => {
     marketplaceDispute: { create: jest.fn() },
     user: { findUnique: jest.fn() },
     sellerPayout: { findMany: jest.fn(), create: jest.fn() },
+    subscription: { findUnique: jest.fn() },
     $transaction: jest.fn(),
   };
 
@@ -101,6 +102,7 @@ describe('MarketplaceService security fixes', () => {
     jest.clearAllMocks();
     service = new MarketplaceService(prisma as never);
     (service as unknown as { stripe: typeof stripe }).stripe = stripe;
+    prisma.subscription.findUnique.mockResolvedValue(null);
     prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) =>
       fn(prisma)
     );
@@ -372,6 +374,20 @@ describe('MarketplaceService security fixes', () => {
           client_reference_id: 'buyer-1',
           metadata: expect.objectContaining({ type: 'marketplace', listingId: 'listing-1' }),
         })
+      );
+    });
+
+    it('createListingCheckout reuses a persisted Stripe customer', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({ stripeCustomerId: 'cus_buyer' });
+      stripe.checkout.sessions.create.mockResolvedValue({
+        id: 'cs_1',
+        url: 'https://checkout.stripe.com/c/pay/cs_1',
+      });
+
+      await service.createListingCheckout('buyer-1', 'listing-1');
+
+      expect(stripe.checkout.sessions.create).toHaveBeenCalledWith(
+        expect.objectContaining({ customer: 'cus_buyer' })
       );
     });
 

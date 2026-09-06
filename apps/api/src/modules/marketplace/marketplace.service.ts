@@ -13,6 +13,7 @@ import { Prisma, SellerStatus, SellerTier, TemplateCategory } from '@prisma/clie
 import Stripe from 'stripe';
 import { PrismaService } from '../../database/prisma.module';
 import { appOriginFromEnv } from '../../common/utils/url.utils';
+import { stripeSecretForClient } from '../payments/payment-env';
 import {
   PAYOUT_MIN_CENTS,
   PRICE_MAX_CENTS,
@@ -108,8 +109,8 @@ export class MarketplaceService {
   private stripe: Stripe | null = null;
 
   constructor(private readonly prisma: PrismaService) {
-    const key = process.env.STRIPE_SECRET_KEY;
-    if (key && !key.includes('xxx')) {
+    const key = stripeSecretForClient();
+    if (key) {
       this.stripe = new Stripe(key, { apiVersion: '2025-02-24.acacia' });
     }
   }
@@ -352,12 +353,14 @@ export class MarketplaceService {
     const stripe = this.requireStripe();
     const listing = await this.getPublishedListing(listingId);
     const metadata = marketplacePaymentMetadata(buyerId, listing);
+    const stripeCustomerId = await this.existingStripeCustomerId(buyerId);
 
     const intent = await stripe.paymentIntents.create({
       amount: listing.priceCents,
       currency: listing.currency.toLowerCase(),
       metadata,
       automatic_payment_methods: { enabled: true },
+      ...(stripeCustomerId ? { customer: stripeCustomerId } : {}),
       ...this.destinationChargeParams(listing),
     });
 
@@ -370,6 +373,7 @@ export class MarketplaceService {
     const origin = appOriginFromEnv();
     const metadata = marketplacePaymentMetadata(buyerId, listing);
     const destination = this.destinationChargeParams(listing);
+    const stripeCustomerId = await this.existingStripeCustomerId(buyerId);
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
@@ -377,6 +381,7 @@ export class MarketplaceService {
       success_url: `${origin}/marketplace/${listingId}?checkout=success`,
       cancel_url: `${origin}/marketplace/${listingId}?checkout=cancel`,
       metadata,
+      ...(stripeCustomerId ? { customer: stripeCustomerId } : {}),
       payment_intent_data: {
         metadata,
         ...destination,
@@ -933,6 +938,14 @@ export class MarketplaceService {
       transfer_data: { destination: accountId },
       application_fee_amount: destinationApplicationFeeCents(listing.priceCents, stripeFeeCents),
     };
+  }
+
+  private async existingStripeCustomerId(userId: string): Promise<string | undefined> {
+    const sub = await this.prisma.subscription.findUnique({
+      where: { userId },
+      select: { stripeCustomerId: true },
+    });
+    return sub?.stripeCustomerId ?? undefined;
   }
 
   private requireStripe(): Stripe {

@@ -94,6 +94,12 @@ services:
       MAIL_FROM: CV Studio AI <noreply@cvstudio.local>
       CINETPAY_FAIL_CLOSED: 'true'
       STRIPE_FAIL_CLOSED: '1'
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_PRO_MONTHLY: ${STRIPE_PRICE_PRO_MONTHLY:-}
+      STRIPE_PRICE_PRO_YEARLY: ${STRIPE_PRICE_PRO_YEARLY:-${STRIPE_PRICE_PRO_ANNUAL:-}}
+      STRIPE_PRICE_BUSINESS_MONTHLY: ${STRIPE_PRICE_BUSINESS_MONTHLY:-}
+      STRIPE_PRICE_BUSINESS_YEARLY: ${STRIPE_PRICE_BUSINESS_YEARLY:-${STRIPE_PRICE_BUSINESS_ANNUAL:-}}
       AUTH_RATE_LIMIT_DISABLED: 'true'
       LOG_FORMAT: json
     # Production image (node dist/). For hot reload use: pnpm docker:up && pnpm dev
@@ -114,6 +120,7 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost:3001/api/v1
+        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-${STRIPE_PUBLISHABLE_KEY:-}}
     container_name: cvstudio-web
     restart: unless-stopped
     ports:
@@ -124,6 +131,7 @@ services:
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: http://localhost:3001/api/v1
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-${STRIPE_PUBLISHABLE_KEY:-}}
       PORT: '3000'
       HOSTNAME: 0.0.0.0
     healthcheck:

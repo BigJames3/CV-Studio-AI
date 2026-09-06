@@ -322,10 +322,10 @@ export class PaymentsModule {}
 |         | API deployment                     | Webhook CronJob                          |
 | ------- | ---------------------------------- | ---------------------------------------- |
 | Image   | ECR `.../cvstudio/api:sha-replace` | `cvstudioai/api:latest`                  |
-| Secret  | `api-secrets`                      | `cvstudio-api-secrets`                   |
+| Secret  | `api-secrets`                      | `api-secrets`                            |
 | Command | `node dist/main.js` (implicite)    | `node dist/scripts/retry-webhook-dlq.js` |
 
-Le script est bien dans `src/` donc compilé par `nest build`. Le CronJob **ne tournera pas** en prod tant que image + secret ne sont pas alignés. Filet de sécurité actuel: **retries Stripe uniquement**.
+Le script est bien dans `src/` donc compilé par `nest build`. `secretRef` est `api-secrets` (aligné). L’image CronJob (`cvstudioai/api:latest`) reste distincte du Deployment ECR `sha-replace` — à aligner à part. Filet: retries Stripe.
 
 ### 5.2 Redis
 

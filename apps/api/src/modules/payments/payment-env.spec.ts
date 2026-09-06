@@ -1,5 +1,6 @@
 import {
   availablePaymentMethods,
+  expandableStripeId,
   isCinetpayConfiguredFromEnv,
   isCinetpayFailClosed,
   isStripeConfiguredFromEnv,
@@ -15,6 +16,8 @@ describe('payment-env', () => {
 
   it('treats placeholder Stripe keys as unconfigured', () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test_xxx';
+    expect(isStripeConfiguredFromEnv()).toBe(false);
+    process.env.STRIPE_SECRET_KEY = 'sk_test_placeholder';
     expect(isStripeConfiguredFromEnv()).toBe(false);
   });
 
@@ -40,14 +43,16 @@ describe('payment-env', () => {
     expect(availablePaymentMethods().cinetpay).toBe(false);
   });
 
-  it('enables Stripe fail-closed in production or when STRIPE_FAIL_CLOSED=1', () => {
+  it('enables Stripe fail-closed by default (opt out with 0/false/off)', () => {
     delete process.env.STRIPE_FAIL_CLOSED;
+    process.env.NODE_ENV = 'development';
+    expect(isStripeFailClosed()).toBe(true);
     process.env.NODE_ENV = 'production';
     expect(isStripeFailClosed()).toBe(true);
-    process.env.NODE_ENV = 'development';
-    expect(isStripeFailClosed()).toBe(false);
     process.env.STRIPE_FAIL_CLOSED = '1';
     expect(isStripeFailClosed()).toBe(true);
+    process.env.STRIPE_FAIL_CLOSED = '0';
+    expect(isStripeFailClosed()).toBe(false);
   });
 
   it('defaults fail-closed in production', () => {
@@ -63,7 +68,7 @@ describe('payment-env', () => {
   });
 
   it('exposes configured providers without leaking secrets', () => {
-    process.env.STRIPE_SECRET_KEY = 'sk_live_real';
+    process.env.STRIPE_SECRET_KEY = 'sk_test_real';
     process.env.CINETPAY_API_KEY = '';
     process.env.CINETPAY_SITE_ID = '';
     process.env.CINETPAY_FAIL_CLOSED = 'true';
@@ -72,5 +77,18 @@ describe('payment-env', () => {
       cinetpay: false,
       cinetpayFailClosed: true,
     });
+  });
+
+  it('does not advertise Stripe when a live key is blocked', () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_live_real';
+    delete process.env.STRIPE_ALLOW_LIVE;
+    expect(availablePaymentMethods().stripe).toBe(false);
+  });
+
+  it('extracts ids from Stripe expandable fields', () => {
+    expect(expandableStripeId('cus_1')).toBe('cus_1');
+    expect(expandableStripeId({ id: 'cus_2' })).toBe('cus_2');
+    expect(expandableStripeId(null)).toBeUndefined();
+    expect(expandableStripeId(undefined)).toBeUndefined();
   });
 });

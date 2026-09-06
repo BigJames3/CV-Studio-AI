@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SubscriptionsService } from './subscriptions.service';
 import { CheckoutDto, UpdateSubscriptionDto, CreateSubscriptionDto } from './dto/subscription.dto';
@@ -49,9 +50,10 @@ export class SubscriptionsController {
     return this.subscriptions.cancel(user.id);
   }
 
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('checkout')
   @ApiOperation({
-    summary: 'Create checkout session (Stripe by default; CinetPay coming in Phase 2)',
+    summary: 'Create checkout session (Stripe default, or CinetPay when paymentMethod=cinetpay)',
   })
   checkout(@CurrentUser() user: AuthUser, @Body() dto: CheckoutDto) {
     return this.subscriptions.checkout(user.id, dto);

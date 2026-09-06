@@ -118,6 +118,12 @@ describe('PaymentsController', () => {
     it('remains @Public (Stripe servers have no JWT)', () => {
       expect(Reflect.getMetadata(IS_PUBLIC_KEY, PaymentsController.prototype.webhook)).toBe(true);
     });
+
+    it('skips throttle so Stripe retries are not 429', () => {
+      expect(
+        Reflect.getMetadata('THROTTLER:SKIPdefault', PaymentsController.prototype.webhook)
+      ).toBe(true);
+    });
   });
 
   describe('GET /payments/status/:transactionId', () => {

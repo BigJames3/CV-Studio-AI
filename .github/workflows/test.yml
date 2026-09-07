@@ -94,7 +94,7 @@ jobs:
           PORT: '3001'
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         continue-on-error: true
         with:
           files: ./apps/api/coverage/coverage-final.json

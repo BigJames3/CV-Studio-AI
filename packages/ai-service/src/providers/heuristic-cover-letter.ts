@@ -1,8 +1,5 @@
 import type { CoverLetterInput, CoverLetterResult } from '../prompts/cover-letter';
-import {
-  COVER_LETTER_PROMPT_ID,
-  COVER_LETTER_PROMPT_VERSION,
-} from '../prompts/cover-letter';
+import { COVER_LETTER_PROMPT_ID, COVER_LETTER_PROMPT_VERSION } from '../prompts/cover-letter';
 
 function extractName(cvFacts: Record<string, unknown>): string {
   const identity = (cvFacts.identity ?? cvFacts.personal ?? {}) as Record<string, unknown>;

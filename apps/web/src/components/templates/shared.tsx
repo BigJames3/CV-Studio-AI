@@ -18,7 +18,14 @@ export function densityStyle(density: DensityPreset) {
 }
 
 export function contactLine(identity: CvContent['identity']) {
-  return [identity.email, identity.phone, identity.city, identity.linkedin, identity.github, identity.website]
+  return [
+    identity.email,
+    identity.phone,
+    identity.city,
+    identity.linkedin,
+    identity.github,
+    identity.website,
+  ]
     .filter(Boolean)
     .join(' · ');
 }
@@ -156,7 +163,9 @@ export function ProjectsSection({
               {p.name}
             </strong>
             {p.url ? (
-              <span style={{ fontSize: ats ? '9pt' : '0.7rem', color: tone?.mutedColor ?? '#6b7280' }}>
+              <span
+                style={{ fontSize: ats ? '9pt' : '0.7rem', color: tone?.mutedColor ?? '#6b7280' }}
+              >
                 {p.url.replace(/^https?:\/\//, '')}
               </span>
             ) : null}
@@ -226,8 +235,12 @@ export function CertificatesSection({
       </SectionTitle>
       {certificates.map((cert) => (
         <div key={cert.id} style={{ marginTop: 10 }}>
-          <strong style={{ fontFamily: tone?.headerFont, fontSize: '0.875rem' }}>{cert.name}</strong>
-          <p style={{ margin: '2px 0 0', fontSize: '0.8rem', color: tone?.mutedColor ?? '#6b7280' }}>
+          <strong style={{ fontFamily: tone?.headerFont, fontSize: '0.875rem' }}>
+            {cert.name}
+          </strong>
+          <p
+            style={{ margin: '2px 0 0', fontSize: '0.8rem', color: tone?.mutedColor ?? '#6b7280' }}
+          >
             {[cert.issuer, cert.year].filter(Boolean).join(' · ')}
           </p>
         </div>

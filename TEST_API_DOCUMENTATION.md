@@ -3,6 +3,7 @@
 ## 🎯 Vue d'Ensemble
 
 Ce document décrit le test complet de l'API CV Studio AI, qui couvre:
+
 - **5 sections de test**
 - **30+ endpoints testés**
 - **Authentification, CRUD, Sécurité, Validation**
@@ -13,6 +14,7 @@ Ce document décrit le test complet de l'API CV Studio AI, qui couvre:
 ## 🧪 Qu'est-ce qui est Testé?
 
 ### Section 1: AUTHENTIFICATION (10 tests)
+
 ```
 ✅ 1.1  Signup - Créer un compte
 ✅ 1.2  Signup Validation - Email invalide (400)
@@ -27,6 +29,7 @@ Ce document décrit le test complet de l'API CV Studio AI, qui couvre:
 ```
 
 ### Section 2: CRUD CVS (11 tests)
+
 ```
 ✅ 2.1  Create CV - Créer un CV
 ✅ 2.2  Create Validation - Données manquantes
@@ -42,6 +45,7 @@ Ce document décrit le test complet de l'API CV Studio AI, qui couvre:
 ```
 
 ### Section 3: TEMPLATES (5 tests, optionnel)
+
 ```
 ✅ 3.1 Create Template
 ✅ 3.2 List Templates
@@ -51,6 +55,7 @@ Ce document décrit le test complet de l'API CV Studio AI, qui couvre:
 ```
 
 ### Section 4: SÉCURITÉ (4 tests)
+
 ```
 ✅ 4.1 Pas de token - GET /cvs (401)
 ✅ 4.2 Token invalide - GET /cvs (401)
@@ -59,6 +64,7 @@ Ce document décrit le test complet de l'API CV Studio AI, qui couvre:
 ```
 
 ### Section 5: VALIDATION & ERREURS (4 tests)
+
 ```
 ✅ 5.1 Données manquantes (400)
 ✅ 5.2 Types incorrects (400)
@@ -73,6 +79,7 @@ Ce document décrit le test complet de l'API CV Studio AI, qui couvre:
 ## 📊 Cas Testés
 
 ### Tests de Succès (Happy Path)
+
 - ✅ Signup → accessToken
 - ✅ Login → accessToken
 - ✅ Créer CV → retourne ID
@@ -82,6 +89,7 @@ Ce document décrit le test complet de l'API CV Studio AI, qui couvre:
 - ✅ Profil → retourne user
 
 ### Tests d'Erreur (Sad Path)
+
 - ❌ Signup email invalide → 400
 - ❌ Login password incorrect → 401
 - ❌ GET sans token → 401
@@ -91,6 +99,7 @@ Ce document décrit le test complet de l'API CV Studio AI, qui couvre:
 - ❌ Content trop gros → 413
 
 ### Tests de Sécurité
+
 - 🔒 Isolation données (user voit que SES données)
 - 🔒 Authorization (token requis)
 - 🔒 Validation des inputs
@@ -114,6 +123,7 @@ cd "D:\Projets\CV Studio AI"
 ```
 
 **Avec options:**
+
 ```powershell
 # Test verbose
 .\test-api-complete.ps1 -Verbose
@@ -139,6 +149,7 @@ chmod +x test-api-complete.sh
 ```
 
 **Avec options:**
+
 ```bash
 # Test verbose
 ./test-api-complete.sh http://localhost:3001/api/v1 true
@@ -216,6 +227,7 @@ Exit code: 1
 ## 🔍 Interprétation des Résultats
 
 ### Tous les tests passent (100%)
+
 ```
 ✅ L'API fonctionne parfaitement
 ✅ Prêt pour développement/production
@@ -223,6 +235,7 @@ Exit code: 1
 ```
 
 ### 95-99% des tests passent
+
 ```
 ⚠️ Quelques tests échouent (probablement optionnels)
 ⚠️ Vérifiez les erreurs listées
@@ -233,6 +246,7 @@ Exit code: 1
 ```
 
 ### 80-94% des tests passent
+
 ```
 ❌ Plusieurs tests échouent
 ❌ L'API a des problèmes
@@ -243,6 +257,7 @@ Exit code: 1
 ```
 
 ### < 80% des tests passent
+
 ```
 🔴 Majorité des tests échouent
 🔴 L'API ne fonctionne pas
@@ -258,6 +273,7 @@ Exit code: 1
 ## 🛠️ Troubleshooting
 
 ### Erreur: "Connection refused"
+
 ```
 ❌ Le backend n'est pas lancé
 ✅ Solution:
@@ -265,6 +281,7 @@ Exit code: 1
 ```
 
 ### Erreur: "Database connection failed"
+
 ```
 ❌ PostgreSQL n'est pas accessible
 ✅ Solution:
@@ -273,6 +290,7 @@ Exit code: 1
 ```
 
 ### Erreur: "Cannot find module"
+
 ```
 ❌ Les dépendances ne sont pas installées
 ✅ Solution:
@@ -281,6 +299,7 @@ Exit code: 1
 ```
 
 ### Erreur: "401 Unauthorized"
+
 ```
 ❌ Token JWT invalide ou expiré
 ✅ Solution:
@@ -289,6 +308,7 @@ Exit code: 1
 ```
 
 ### Erreur: "400 Bad Request"
+
 ```
 ❌ Les données envoyées sont invalides
 ✅ Solution:
@@ -298,6 +318,7 @@ Exit code: 1
 ```
 
 ### Erreur: "404 Not Found"
+
 ```
 ❌ L'endpoint n'existe pas
 ✅ Solution:
@@ -307,6 +328,7 @@ Exit code: 1
 ```
 
 ### Erreur: "Timeout"
+
 ```
 ❌ Le backend répond trop lentement
 ✅ Solution:
@@ -334,6 +356,7 @@ Average:         155ms   (< 500ms ✅)
 ```
 
 ### Seuils Acceptables
+
 - Signup/Login: < 500ms
 - CRUD: < 1000ms
 - List: < 1000ms
@@ -387,6 +410,7 @@ Avant de mettre en production, assure-toi:
 ## 🚀 Prochaines Étapes Après les Tests
 
 ### Si Tous les Tests Passent ✅
+
 1. Déployer en staging
 2. Tester en conditions réelles
 3. Tester avec plusieurs utilisateurs
@@ -394,6 +418,7 @@ Avant de mettre en production, assure-toi:
 5. Déployer en production
 
 ### Si Certains Tests Échouent ❌
+
 1. Identifier les endpoints en erreur
 2. Vérifier les logs du backend
 3. Déboguer avec des requêtes manuelles
@@ -401,6 +426,7 @@ Avant de mettre en production, assure-toi:
 5. Relancer les tests
 
 ### Si les Tests Timeout ⏱️
+
 1. Vérifier la performance de la DB
 2. Ajouter des indexes
 3. Optimiser les queries
@@ -412,12 +438,14 @@ Avant de mettre en production, assure-toi:
 ## 💡 Tips & Tricks
 
 ### Exécuter un Test Spécifique
+
 ```powershell
 # Modifier le script pour commenter les autres tests
 # Ou adapter le script pour prendre un paramètre --test="1.1"
 ```
 
 ### Exécuter les Tests en Boucle
+
 ```powershell
 # Pour vérifier la stabilité
 for ($i = 1; $i -le 10; $i++) {
@@ -427,6 +455,7 @@ for ($i = 1; $i -le 10; $i++) {
 ```
 
 ### Envoyer les Résultats par Email
+
 ```powershell
 # Capturer les résultats dans un fichier
 .\test-api-complete.ps1 | Tee-Object -FilePath "test-results.txt"
@@ -436,11 +465,12 @@ Send-MailMessage -To "team@example.com" -Attachment "test-results.txt"
 ```
 
 ### Intégrer dans CI/CD
+
 ```yaml
 # .github/workflows/test.yml
 - name: Run API Tests
   run: .\test-api-complete.ps1
-  
+
 - name: Check Results
   if: failure()
   run: exit 1
@@ -464,6 +494,7 @@ Send-MailMessage -To "team@example.com" -Attachment "test-results.txt"
 ## 📝 Résumé
 
 Ce test complet:
+
 - ✅ Teste 30+ endpoints
 - ✅ Vérifie l'authentification
 - ✅ Valide le CRUD
@@ -473,5 +504,5 @@ Ce test complet:
 - ✅ Fournit un rapport détaillé
 
 **Résultat:**
-- 100% de tests passent = API prête pour production 🚀
 
+- 100% de tests passent = API prête pour production 🚀

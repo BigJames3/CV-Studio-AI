@@ -1,8 +1,5 @@
 import type { AtsExplainInput, AtsExplainResult } from '../prompts/ats-explain';
-import {
-  ATS_EXPLAIN_PROMPT_ID,
-  ATS_EXPLAIN_PROMPT_VERSION,
-} from '../prompts/ats-explain';
+import { ATS_EXPLAIN_PROMPT_ID, ATS_EXPLAIN_PROMPT_VERSION } from '../prompts/ats-explain';
 
 /**
  * Deterministic ATS explanation layered on the rules score.
@@ -48,7 +45,9 @@ export function explainAtsHeuristic(input: AtsExplainInput): AtsExplainResult {
 
   const quickWins = [
     'Use standard section headings',
-    missing[0] ? `Consider adding supported mention of “${missing[0]}”` : 'Quantify 1–2 achievements with metrics you can verify',
+    missing[0]
+      ? `Consider adding supported mention of “${missing[0]}”`
+      : 'Quantify 1–2 achievements with metrics you can verify',
     'Export PDF with selectable text (avoid image-only CVs)',
   ];
 

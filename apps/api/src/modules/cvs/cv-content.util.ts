@@ -33,7 +33,16 @@ export const EMPTY_CV_CONTENT: FlatCvContent = {
  */
 export function normalizeCvContent(raw: unknown): FlatCvContent {
   if (!raw || typeof raw !== 'object') {
-    return { ...EMPTY_CV_CONTENT, experiences: [], education: [], skills: [], languages: [], projects: [], certificates: [], references: [] };
+    return {
+      ...EMPTY_CV_CONTENT,
+      experiences: [],
+      education: [],
+      skills: [],
+      languages: [],
+      projects: [],
+      certificates: [],
+      references: [],
+    };
   }
 
   const obj = raw as Record<string, unknown>;
@@ -58,8 +67,10 @@ export function normalizeCvContent(raw: unknown): FlatCvContent {
     },
     summary: {
       text:
-        src.summary && typeof src.summary === 'object' && typeof (src.summary as { text?: unknown }).text === 'string'
-          ? ((src.summary as { text: string }).text)
+        src.summary &&
+        typeof src.summary === 'object' &&
+        typeof (src.summary as { text?: unknown }).text === 'string'
+          ? (src.summary as { text: string }).text
           : '',
     },
     experiences: Array.isArray(src.experiences) ? src.experiences : [],

@@ -8,7 +8,10 @@ type LegacyWrapped = {
 };
 
 /** Flatten legacy API `{ sections: { … } }` into editor `CvContent`. */
-export function normalizeCvContent(raw: unknown, fallbackTemplate: TemplateKey = 'modern'): CvContent {
+export function normalizeCvContent(
+  raw: unknown,
+  fallbackTemplate: TemplateKey = 'modern'
+): CvContent {
   const empty: CvContent = {
     schemaVersion: 1,
     templateKey: fallbackTemplate,
@@ -26,8 +29,7 @@ export function normalizeCvContent(raw: unknown, fallbackTemplate: TemplateKey =
   if (!raw || typeof raw !== 'object') return empty;
 
   const obj = raw as LegacyWrapped & Partial<CvContent>;
-  const sections =
-    obj.sections && typeof obj.sections === 'object' ? obj.sections : null;
+  const sections = obj.sections && typeof obj.sections === 'object' ? obj.sections : null;
   const src = sections ?? obj;
 
   const identity = (src.identity ?? empty.identity) as CvContent['identity'];

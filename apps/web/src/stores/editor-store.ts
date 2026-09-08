@@ -31,13 +31,7 @@ export type CvCertificate = { id: string; name: string; issuer?: string; year?: 
 export type CvReference = { id: string; name: string; role?: string; contact?: string };
 
 type ListKey =
-  | 'experiences'
-  | 'education'
-  | 'skills'
-  | 'languages'
-  | 'projects'
-  | 'certificates'
-  | 'references';
+  'experiences' | 'education' | 'skills' | 'languages' | 'projects' | 'certificates' | 'references';
 
 function newId(prefix: string) {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;

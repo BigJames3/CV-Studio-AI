@@ -30,13 +30,14 @@ pnpm dev --filter=@cvstudio/api
 ```
 
 ### Résultat Attendu
+
 ```
 NAME      IMAGE                COMMAND                STATUS
 postgres  postgres:16-alpine   "docker-entrypoint.s…" Up 5 minutes
 redis     redis:7-alpine       "docker-entrypoint.s…" Up 5 minutes
 
 [Nest] 12345  - 01/01/2024, 10:00:00 AM     LOG [NestFactory] Application initialized
-[Nest] 12345  - 01/01/2024, 10:00:00 AM     LOG [RoutesResolver] AppController {/api/v1/}: 
+[Nest] 12345  - 01/01/2024, 10:00:00 AM     LOG [RoutesResolver] AppController {/api/v1/}:
 ✅ Server running on http://localhost:3001
 ```
 
@@ -329,14 +330,14 @@ Actions:
 
 ## 📊 Tableau de Synthèse
 
-| Étape | Action | Durée | Prérequis |
-|-------|--------|-------|-----------|
-| 1 | Vérifier Docker | 1 min | Docker Desktop |
-| 2 | Lancer backend | 1 min | pnpm, Node |
-| 3 | Télécharger script | 1 min | Navigateur |
-| 4 | Exécuter test | 5-10 min | Backend running |
-| 5 | Lire résumé | 2 min | Eyes 👀 |
-| **Total** | | **10-15 min** | |
+| Étape     | Action             | Durée         | Prérequis       |
+| --------- | ------------------ | ------------- | --------------- |
+| 1         | Vérifier Docker    | 1 min         | Docker Desktop  |
+| 2         | Lancer backend     | 1 min         | pnpm, Node      |
+| 3         | Télécharger script | 1 min         | Navigateur      |
+| 4         | Exécuter test      | 5-10 min      | Backend running |
+| 5         | Lire résumé        | 2 min         | Eyes 👀         |
+| **Total** |                    | **10-15 min** |                 |
 
 ---
 
@@ -376,16 +377,16 @@ chmod +x test-api-complete.sh
 ```
 💡 Le test crée un utilisateur aléatoire
   → Pas de conflit si tu le relances plusieurs fois
-  
+
 💡 Le test ne supprime rien en prod
   → Les données sont isolées dans la DB
-  
+
 💡 Les tokens JWT sont temporaires
   → Pas de problème après le test
-  
+
 💡 Tu peux relancer plusieurs fois
   → Chaque run est indépendant
-  
+
 💡 Ajoute des tests personnalisés
   → Modifie le script PowerShell
   → Ajoute des Test-Endpoint calls
@@ -418,4 +419,3 @@ cd "D:\Projets\CV Studio AI"
 **Patience... ⏳ (5-10 minutes)**
 
 **Succès! ✅**
-

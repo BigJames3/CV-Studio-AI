@@ -2,15 +2,15 @@
 
 ## Document de référence Database Architect
 
-| Métadonnée    | Valeur                                                      |
-| ------------- | ----------------------------------------------------------- |
-| **Produit**   | CV Studio AI                                                |
-| **Version**   | 1.0                                                         |
-| **Date**      | 26 juillet 2026                                             |
-| **Auteur**    | Database Architect                                          |
-| **Engine**    | PostgreSQL 16+ (AWS RDS / Aurora PostgreSQL)                |
-| **ORM**       | Prisma                                                      |
-| **Cibles**    | 1M users · queries p95 < 100ms · HA · GDPR · audit · collab |
+| Métadonnée    | Valeur                                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------- |
+| **Produit**   | CV Studio AI                                                                                   |
+| **Version**   | 1.0                                                                                            |
+| **Date**      | 26 juillet 2026                                                                                |
+| **Auteur**    | Database Architect                                                                             |
+| **Engine**    | PostgreSQL 16+ (AWS RDS / Aurora PostgreSQL)                                                   |
+| **ORM**       | Prisma                                                                                         |
+| **Cibles**    | 1M users · queries p95 < 100ms · HA · GDPR · audit · collab                                    |
 | **Artefacts** | `apps/api/prisma/schema.prisma` · `docs/sql/*` · [`docs/prisma/README.md`](./prisma/README.md) |
 
 ---

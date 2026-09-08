@@ -95,7 +95,12 @@ function inlineElementStyles(source: HTMLElement, target: HTMLElement) {
   for (const prop of STYLE_PROPS) {
     const value = computed.getPropertyValue(prop);
     if (!value || value === 'none' || value === 'normal' || value === 'auto') {
-      if (prop === 'display' || prop === 'width' || prop === 'font-family' || prop === 'font-size') {
+      if (
+        prop === 'display' ||
+        prop === 'width' ||
+        prop === 'font-family' ||
+        prop === 'font-size'
+      ) {
         parts.push(`${prop}:${value}`);
       }
       continue;

@@ -61,9 +61,7 @@ export function ATSTemplate({ data, customization: c }: TemplateProps) {
         </section>
       ) : null}
 
-      {c.showProjects && projects.length > 0 ? (
-        <ProjectsSection projects={projects} ats />
-      ) : null}
+      {c.showProjects && projects.length > 0 ? <ProjectsSection projects={projects} ats /> : null}
 
       {c.showEducation && education.length > 0 ? (
         <section style={{ marginTop: 14 }}>

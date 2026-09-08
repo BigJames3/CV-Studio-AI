@@ -7,9 +7,7 @@ export async function optimizeImageForPdf(src: string): Promise<string> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const sharpMod = require('sharp');
-    const sharp = (sharpMod.default ?? sharpMod) as (
-      input: Buffer
-    ) => {
+    const sharp = (sharpMod.default ?? sharpMod) as (input: Buffer) => {
       rotate: () => {
         resize: (o: object) => {
           jpeg: (o: object) => { toBuffer: () => Promise<Buffer> };

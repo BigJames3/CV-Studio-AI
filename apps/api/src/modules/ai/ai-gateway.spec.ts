@@ -1,8 +1,4 @@
-import {
-  optimizeResumeHeuristic,
-  resolveProviderMode,
-  runAiFeature,
-} from '@cvstudio/ai-service';
+import { optimizeResumeHeuristic, resolveProviderMode, runAiFeature } from '@cvstudio/ai-service';
 
 describe('@cvstudio/ai-service optimize-resume gateway', () => {
   it('strengthens weak verbs without inventing metrics', () => {

@@ -19,7 +19,6 @@
     "dev": "tsc -p tsconfig.json --watch",
     "clean": "rimraf dist .turbo"
   },
-
   "dependencies": {
     "@cvstudio/shared-types": "workspace:*"
   },

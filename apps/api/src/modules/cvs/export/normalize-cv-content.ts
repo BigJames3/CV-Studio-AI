@@ -38,7 +38,8 @@ export function normalizeCvContent(raw: unknown): PdfCvContent {
       languages: asArray(sections.languages).map(mapLanguage),
       projects: asArray(sections.projects).map(mapProject),
       certificates: asArray(sections.certificates).map(mapCertificate),
-      customization: (sections.customization ?? root.customization) as PdfCvContent['customization'],
+      customization: (sections.customization ??
+        root.customization) as PdfCvContent['customization'],
       templateKey: asString(root.templateKey ?? sections.templateKey),
     };
   }

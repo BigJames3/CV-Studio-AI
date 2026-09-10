@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, staging]
   push:
-    branches: [main, develop]
+    branches: [main, develop, staging]
     tags: ['v*']
 
 concurrency:
@@ -243,7 +243,7 @@ jobs:
   deploy-staging:
     name: Deploy staging
     needs: [quality, lighthouse, e2e, build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
     uses: ./.github/workflows/cd-staging.yml
     secrets: inherit
     permissions:

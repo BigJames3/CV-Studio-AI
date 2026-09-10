@@ -26,7 +26,6 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   output: 'standalone',
-  outputFileTracingRoot: path.join(dir, '../..'),
   eslint: {
     dirs: ['src'],
   },
@@ -56,6 +55,7 @@ const nextConfig = {
     ],
   },
   experimental: {
+    outputFileTracingRoot: path.join(dir, '../..'),
     optimizePackageImports: ['lucide-react', 'framer-motion'],
     instrumentationHook: true,
   },

@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, develop, staging]
+    branches: [main, develop, staging, ci-cd-hardening] # ← Ajouter
   push:
-    branches: [main, develop, staging]
+    branches: [main, develop, staging, ci-cd-hardening] # ← Ajouter
     tags: ['v*']
 
 concurrency:

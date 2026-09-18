@@ -2,9 +2,9 @@ name: Lint & Format Check
 
 on:
   push:
-    branches: [main, develop, staging]
+    branches: [main, develop, staging, ci-cd-hardening] # ← Ajouter
   pull_request:
-    branches: [main, develop, staging]
+    branches: [main, develop, staging, ci-cd-hardening] # ← Ajouter
 
 concurrency:
   group: lint-${{ github.ref }}
@@ -36,4 +36,4 @@ jobs:
         run: pnpm type-check
 
       - name: Check formatting
-        run: pnpm lint:fix
+        run: pnpm exec prettier --check .

@@ -76,7 +76,7 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install
 
       - name: Prettier
         run: pnpm lint:fix

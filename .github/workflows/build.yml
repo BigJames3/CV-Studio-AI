@@ -2,9 +2,9 @@ name: Build
 
 on:
   push:
-    branches: [main, develop, staging, ci-cd-hardening] # ← Ajouter
+    branches: [main, develop, staging] # ← Ajouter
   pull_request:
-    branches: [main, develop, staging, ci-cd-hardening] # ← Ajouter
+    branches: [main, develop, staging] # ← Ajouter
 
 concurrency:
   group: build-${{ github.ref }}

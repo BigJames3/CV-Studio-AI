@@ -76,10 +76,10 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
-      - name: Prettier
-        run: pnpm lint:fix
+      - name: Format check
+        run: pnpm exec prettier --check .
 
       - name: Lint
         run: pnpm lint
@@ -175,7 +175,7 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Prisma generate + migrate + seed
         run: |
@@ -235,7 +235,7 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm build --filter=@cvstudio/api --filter=@cvstudio/web --filter=@cvstudio/ui --filter=@cvstudio/shared-types --filter=@cvstudio/shared-utils --filter=@cvstudio/ai-service

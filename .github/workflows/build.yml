@@ -37,4 +37,3 @@ jobs:
 
       - name: Build web (bundle check)
         run: pnpm build:web
-        continue-on-error: true

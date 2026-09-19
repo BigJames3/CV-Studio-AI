@@ -78,7 +78,7 @@ const nextConfig = {
       "font-src 'self' https://fonts.gstatic.com data:",
       "img-src 'self' data: https: blob:",
       `connect-src 'self' ${apiOrigin} https://accounts.google.com https://oauth2.googleapis.com https://api.stripe.com https://*.sentry.io https://*.posthog.com https://us.i.posthog.com`,
-      "frame-src https://accounts.google.com https://js.stripe.com https://hooks.stripe.com",
+      'frame-src https://accounts.google.com https://js.stripe.com https://hooks.stripe.com',
     ].join('; ');
 
     return [

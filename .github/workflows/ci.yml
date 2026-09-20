@@ -147,7 +147,6 @@ jobs:
         ports:
           - 6379:6379
     env:
-      NODE_ENV: production
       DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_lh?schema=public
       DIRECT_DATABASE_URL: postgresql://cvstudio:cvstudio@localhost:5432/cvstudio_lh?schema=public
       REDIS_URL: redis://localhost:6379/0
@@ -175,6 +174,8 @@ jobs:
           cache: pnpm
 
       - name: Install
+        env:
+          HUSKY: '0'
         run: pnpm install --frozen-lockfile
 
       - name: Prisma generate + migrate + seed
@@ -187,6 +188,8 @@ jobs:
         run: pnpm build --filter=@cvstudio/api --filter=@cvstudio/web --filter=@cvstudio/ui --filter=@cvstudio/shared-types --filter=@cvstudio/shared-utils --filter=@cvstudio/ai-service
 
       - name: Start API
+        env:
+          NODE_ENV: production
         run: |
           nohup pnpm --filter @cvstudio/api exec node dist/main.js > /tmp/api-lh.log 2>&1 &
           echo $! > /tmp/api-lh.pid

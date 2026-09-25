@@ -25,7 +25,10 @@ const reactQueryEntry = resolveReactQueryEntry();
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  output: 'standalone',
+  // Standalone copies traced files with fs.symlink. Windows without
+  // SeCreateSymbolicLinkPrivilege fails with EPERM; Linux CI and Docker
+  // still produce the image layout expected by apps/web/Dockerfile.
+  output: process.platform === 'win32' ? undefined : 'standalone',
   eslint: {
     dirs: ['src'],
   },

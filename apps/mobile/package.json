@@ -9,7 +9,6 @@
     "ios": "expo start --ios",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "jest",
     "clean": "rimraf .expo .turbo"
   },
   "dependencies": {

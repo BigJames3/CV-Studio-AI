@@ -91,7 +91,7 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       # GitHub Actions service containers are on localhost, not hostnames postgres/redis.
       - name: Wait for Postgres + Redis

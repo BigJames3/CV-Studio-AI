@@ -86,3 +86,6 @@ infrastructure/terraform/**/crash.log
 .claude
 .cursor/*
 !.cursor/rules/
+
+# Local directory-tree dumps (generated, not source)
+project-tree.txt

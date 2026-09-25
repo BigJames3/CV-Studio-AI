@@ -286,6 +286,8 @@ jobs:
         run: pnpm --filter @cvstudio/api exec prisma db seed
 
       - name: Build API and Web
+        env:
+          NODE_ENV: production
         run: >
           pnpm build
           --filter=@cvstudio/api

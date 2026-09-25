@@ -17,7 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "type-check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --ext .ts",
-    "test": "node --import tsx --test src/**/*.test.ts || echo \"no tests yet\"",
+    "test": "node --import tsx --test src/**/*.test.ts",
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {

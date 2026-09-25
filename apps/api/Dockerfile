@@ -2,7 +2,7 @@
 # NestJS API — build from repo root:
 #   docker build -f apps/api/Dockerfile .
 
-FROM node:20-alpine AS base
+FROM node:26-alpine AS base
 RUN apk add --no-cache libc6-compat openssl dumb-init curl chromium \
   && if [ -x /usr/bin/chromium-browser ]; then ln -sf /usr/bin/chromium-browser /usr/local/bin/cv-chrome; \
      elif [ -x /usr/bin/chromium ]; then ln -sf /usr/bin/chromium /usr/local/bin/cv-chrome; \

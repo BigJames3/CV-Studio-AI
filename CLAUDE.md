@@ -6,15 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 pnpm 9.15.0 workspaces (`apps/*`, `packages/*`) orchestrated by Turborepo 2. Node `>=20.11.0` (`.nvmrc`: 20.11.0). All internal packages are scoped `@cvstudio/*` and consumed via `workspace:*`.
 
-| Package | Role |
-| --- | --- |
-| `apps/api` (`@cvstudio/api`) | NestJS modular monolith + Prisma/PostgreSQL + Redis/BullMQ. Port 3001. |
-| `apps/web` (`@cvstudio/web`) | Next.js 14 App Router, Zustand stores, TanStack Query. Port 3000. |
-| `apps/mobile` (`@cvstudio/mobile`) | Expo app (partial, Phase 4). |
-| `packages/ai-service` | Multi-model AI gateway, built to `dist/` and consumed by the API. |
-| `packages/ui` | shadcn/Radix design system + Storybook + Vitest. `shared-ui` just re-exports it. |
-| `packages/shared-types`, `shared-utils` | Shared TS used by api and web (source-exported via `./src/index.ts`). |
-| `packages/eslint-config`, `typescript-config` | Shared configs. |
+| Package                                       | Role                                                                             |
+| --------------------------------------------- | -------------------------------------------------------------------------------- |
+| `apps/api` (`@cvstudio/api`)                  | NestJS modular monolith + Prisma/PostgreSQL + Redis/BullMQ. Port 3001.           |
+| `apps/web` (`@cvstudio/web`)                  | Next.js 14 App Router, Zustand stores, TanStack Query. Port 3000.                |
+| `apps/mobile` (`@cvstudio/mobile`)            | Expo app (partial, Phase 4).                                                     |
+| `packages/ai-service`                         | Multi-model AI gateway, built to `dist/` and consumed by the API.                |
+| `packages/ui`                                 | shadcn/Radix design system + Storybook + Vitest. `shared-ui` just re-exports it. |
+| `packages/shared-types`, `shared-utils`       | Shared TS used by api and web (source-exported via `./src/index.ts`).            |
+| `packages/eslint-config`, `typescript-config` | Shared configs.                                                                  |
 
 Most docs (`docs/`, README) are written in French. Canonical specs: `docs/ARCHITECTURE-CV-STUDIO-AI.md`, `docs/API-CV-STUDIO-AI.md`, `docs/FRONTEND-CV-STUDIO-AI.md`, `docs/DATABASE-CV-STUDIO-AI.md`, `docs/INFRASTRUCTURE-CV-STUDIO-AI.md`. Architecture decisions live in `docs/adr/`.
 

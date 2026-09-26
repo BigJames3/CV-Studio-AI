@@ -91,7 +91,7 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       # GitHub Actions service containers are on localhost, not hostnames postgres/redis.
       - name: Wait for Postgres + Redis
@@ -120,6 +120,7 @@ jobs:
             echo "CORS_ORIGINS=${CORS_ORIGINS}"
             echo "APP_URL=${APP_URL}"
             echo "AUTH_RATE_LIMIT_DISABLED=true"
+            echo "THROTTLE_DISABLED=true"
             echo "CINETPAY_API_KEY=${CINETPAY_API_KEY}"
             echo "CINETPAY_SITE_ID=${CINETPAY_SITE_ID}"
             echo "CINETPAY_FAIL_CLOSED=${CINETPAY_FAIL_CLOSED}"
@@ -145,11 +146,6 @@ jobs:
 
       - name: Build API + Web
         run: pnpm build --filter=@cvstudio/api --filter=@cvstudio/web --filter=@cvstudio/ui --filter=@cvstudio/shared-types --filter=@cvstudio/shared-utils --filter=@cvstudio/ai-service
-
-      - name: Point workspace packages at compiled output
-        # The built API runs on plain Node, which cannot load the TypeScript sources the
-        # packages export; same rewrite as apps/api/Dockerfile.
-        run: node scripts/use-compiled-workspace-packages.cjs
 
       - name: Install Playwright Chromium
         run: pnpm --filter @cvstudio/web exec playwright install --with-deps chromium

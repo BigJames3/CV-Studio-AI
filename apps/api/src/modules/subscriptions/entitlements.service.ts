@@ -76,6 +76,8 @@ export class EntitlementsService {
       'ai:interview': ['pro', 'business'],
       'marketplace:buy': ['pro', 'business'],
       'api:access': ['business'],
+      // Per-CV views, visitors and traffic sources (the basic dashboard stays open to all).
+      'analytics:advanced': ['business'],
     };
 
     const allowed = matrix[feature];

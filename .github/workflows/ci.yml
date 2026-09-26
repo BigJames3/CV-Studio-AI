@@ -154,6 +154,7 @@ jobs:
       PORT: '3001'
       JWT_ACCESS_SECRET: lh-access-secret-min-32-characters!!!!
       JWT_REFRESH_SECRET: lh-refresh-secret-min-32-characters!!!
+      ENCRYPTION_KEY: lh-encryption-key-min-32-characters!!!
       CORS_ORIGINS: http://localhost:3000
       APP_URL: http://localhost:3000
       NEXT_PUBLIC_API_URL: http://localhost:3001/api/v1

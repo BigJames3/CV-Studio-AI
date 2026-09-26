@@ -79,6 +79,10 @@ pnpm --filter @cvstudio/web test:e2e:report
 
 Stripe hosted checkout is opt-in: `E2E_STRIPE=1` (see `docs/e2e/EXECUTION_GUIDE.md`).
 
+Tests tagged `@mobile-wip` (mobile nav + editor section tabs/rail) describe UI that is not implemented yet
+(`marketing-nav-trigger`, `editor-section-rail`, … do not exist; `mobile-nav.tsx` is not mounted). They are
+excluded by default; run them with `E2E_MOBILE_WIP=1` and drop the tag once the UI ships.
+
 ## CI/CD
 
 | Workflow                                 | What runs                                                                       |

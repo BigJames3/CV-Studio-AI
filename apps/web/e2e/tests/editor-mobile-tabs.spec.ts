@@ -50,7 +50,10 @@ async function openLocalEditor(page: import('@playwright/test').Page, user: Test
 }
 
 test.describe('Editor mobile section tabs', () => {
-  test('all sections reachable at 375px without page overflow', async ({ page, testUser }) => {
+  test('all sections reachable at 375px without page overflow @mobile-wip', async ({
+    page,
+    testUser,
+  }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await openLocalEditor(page, testUser);
 
@@ -75,7 +78,7 @@ test.describe('Editor mobile section tabs', () => {
     await noPageOverflow(page);
   });
 
-  test('tabs hidden and rail visible at 768px', async ({ page, testUser }) => {
+  test('tabs hidden and rail visible at 768px @mobile-wip', async ({ page, testUser }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await openLocalEditor(page, testUser);
 
@@ -89,7 +92,7 @@ test.describe('Editor mobile section tabs', () => {
     await noPageOverflow(page);
   });
 
-  test('keyboard arrows switch sections at 375px', async ({ page, testUser }) => {
+  test('keyboard arrows switch sections at 375px @mobile-wip', async ({ page, testUser }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await openLocalEditor(page, testUser);
 

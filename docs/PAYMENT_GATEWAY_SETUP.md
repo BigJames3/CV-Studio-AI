@@ -26,7 +26,7 @@ Web: `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`.
 | `CINETPAY_API_KEY`      | Dashboard → Settings                                                                                                                                    |
 | `CINETPAY_SITE_ID`      | Dashboard → Settings                                                                                                                                    |
 | `CINETPAY_SECRET_KEY`   | Reserved (HMAC v2)                                                                                                                                      |
-| `CINETPAY_USD_XOF_RATE` | Default `656`                                                                                                                                           |
+| `CINETPAY_EUR_XOF_RATE` | Default `655.957` (fixed EUR/XOF peg; plan prices are in EUR). The old `CINETPAY_USD_XOF_RATE` is still read as a fallback.                             |
 | `CINETPAY_FAIL_CLOSED`  | `true` (default in production): checkout throws `CINETPAY_NOT_CONFIGURED` if keys missing. Billing hides the CinetPay radio via `GET /payments/methods` |
 
 ### URLs (used in CinetPay create-payment)

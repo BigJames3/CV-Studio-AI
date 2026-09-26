@@ -415,4 +415,34 @@ describe('CinetpayGateway', () => {
       );
     });
   });
+
+  describe('XOF amount (plan prices are in EUR)', () => {
+    const amount = (plan: 'pro' | 'business', interval: 'month' | 'year') =>
+      (
+        gateway as unknown as {
+          amountXof: (p: string, i: string, dbPlan?: unknown) => number;
+        }
+      ).amountXof(plan, interval, { priceMonthly: 9.99, priceYearly: 99 });
+
+    afterEach(() => {
+      delete env.CINETPAY_EUR_XOF_RATE;
+      delete env.CINETPAY_USD_XOF_RATE;
+    });
+
+    it('uses the fixed EUR/XOF peg by default', () => {
+      expect(amount('pro', 'month')).toBe(Math.round(9.99 * 655.957));
+      expect(amount('pro', 'year')).toBe(Math.round(99 * 655.957));
+    });
+
+    it('prefers CINETPAY_EUR_XOF_RATE', () => {
+      env.CINETPAY_EUR_XOF_RATE = '650';
+      env.CINETPAY_USD_XOF_RATE = '600';
+      expect(amount('pro', 'month')).toBe(Math.round(9.99 * 650));
+    });
+
+    it('still honours the legacy CINETPAY_USD_XOF_RATE when the new one is unset', () => {
+      env.CINETPAY_USD_XOF_RATE = '656';
+      expect(amount('pro', 'month')).toBe(Math.round(9.99 * 656));
+    });
+  });
 });

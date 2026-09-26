@@ -22,7 +22,7 @@ import { HealthModule } from './modules/health/health.module';
 import { GeoModule } from './modules/geo/geo.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { FeatureGateModule } from './common/feature-gate.module';
-import { shouldSkipAuthThrottle } from './common/utils/throttle-skip';
+import { shouldSkipThrottle } from './common/utils/throttle-skip';
 
 @Module({
   imports: [
@@ -36,7 +36,7 @@ import { shouldSkipAuthThrottle } from './common/utils/throttle-skip';
     }),
     ThrottlerModule.forRoot({
       throttlers: [{ ttl: 60_000, limit: 120 }],
-      skipIf: shouldSkipAuthThrottle,
+      skipIf: shouldSkipThrottle,
     }),
     ...(process.env.WORKER_KIND || process.env.NODE_ENV === 'test'
       ? []

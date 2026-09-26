@@ -76,8 +76,8 @@ Tags obligatoires : `Project=cvstudio`, `Env`, `Owner=platform`, `CostCenter`.
 
 | Image              | Base                                                     | Contenu            |
 | ------------------ | -------------------------------------------------------- | ------------------ |
-| `cvstudio/api`     | `node:20-alpine` multi-stage                             | NestJS dist        |
-| `cvstudio/web`     | `node:20-alpine` → `nginx:alpine` **ou** Node standalone | Next.js            |
+| `cvstudio/api`     | `node:24-alpine` multi-stage                             | NestJS dist        |
+| `cvstudio/web`     | `node:24-alpine` → `nginx:alpine` **ou** Node standalone | Next.js            |
 | `cvstudio/worker`  | same as api + Chromium deps (PDF)                        | BullMQ consumers   |
 | `cvstudio/migrate` | api slim                                                 | Prisma migrate job |
 

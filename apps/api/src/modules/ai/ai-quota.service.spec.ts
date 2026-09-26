@@ -136,4 +136,10 @@ describe('AiQuotaService', () => {
     prisma.aiHistory.deleteMany.mockRejectedValueOnce(new Error('db down'));
     await expect(service.release({ id: 'res-x', used: 0, limit: 50 })).resolves.toBeUndefined();
   });
+
+  it('release never throws when the failure is not an Error', async () => {
+    const { service, prisma } = makeService('pro');
+    prisma.aiHistory.deleteMany.mockRejectedValueOnce('db down');
+    await expect(service.release({ id: 'res-y', used: 0, limit: 50 })).resolves.toBeUndefined();
+  });
 });

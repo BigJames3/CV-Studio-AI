@@ -76,6 +76,8 @@ export class EntitlementsService {
       'ai:interview': ['pro', 'business'],
       'marketplace:buy': ['pro', 'business'],
       'api:access': ['business'],
+      // Creating a team, inviting members and keeping shared CVs visible to them.
+      'team:manage': ['business'],
     };
 
     const allowed = matrix[feature];

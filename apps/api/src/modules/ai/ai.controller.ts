@@ -1,23 +1,34 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, NotImplementedException, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AiService } from './ai.service';
-import {
-  GenerateCvDto,
-  OptimizeResumeDto,
-  GenerateCoverLetterDto,
-  CheckAtsDto,
-  InterviewPrepDto,
-  MatchJobDto,
-  CareerAdviceDto,
-  GeneratePortfolioDto,
-  GrammarCheckDto,
-  SkillsSuggestDto,
-  LinkedInImportDto,
-  ParsePdfDto,
-} from './dto/ai.dto';
+import { OptimizeResumeDto, GenerateCoverLetterDto, CheckAtsDto } from './dto/ai.dto';
 import { CurrentUser, AuthUser, RequireEntitlement } from '../../common/decorators';
 import { EntitlementsGuard } from '../../common/guards/entitlements.guard';
+
+/**
+ * AI features whose pipeline is not wired yet. They answer 501 rather than the scaffold
+ * payloads in `AiService`, so no client ever shows placeholder results as real ones.
+ * Remove a feature from here once its service method does real work.
+ */
+export const UNAVAILABLE_AI_FEATURES = [
+  'generate-cv',
+  'match-job',
+  'interview-prep',
+  'career-advice',
+  'generate-portfolio',
+  'grammar-check',
+  'skills-suggest',
+  'linkedin-import',
+  'parse-pdf',
+] as const;
+
+function unavailable(feature: (typeof UNAVAILABLE_AI_FEATURES)[number]): never {
+  throw new NotImplementedException({
+    code: 'AI_FEATURE_UNAVAILABLE',
+    message: `AI feature "${feature}" is not available yet`,
+  });
+}
 
 @ApiTags('AI')
 @ApiBearerAuth('JWT')
@@ -30,9 +41,9 @@ export class AiController {
 
   @Post('generate-cv')
   @RequireEntitlement('ai:generate')
-  @ApiOperation({ summary: 'CV Generator — LinkedIn / PDF facts / scratch' })
-  generateCv(@CurrentUser() user: AuthUser, @Body() dto: GenerateCvDto) {
-    return this.ai.generateCv(user.id, dto);
+  @ApiOperation({ summary: 'CV Generator — not available yet (501)' })
+  generateCv(): never {
+    return unavailable('generate-cv');
   }
 
   @Post('optimize-resume')
@@ -51,8 +62,8 @@ export class AiController {
   @Post('match-job')
   @RequireEntitlement('ai:optimize')
   @ApiOperation({ summary: 'Job Matcher — score + gaps + safe edits' })
-  matchJob(@CurrentUser() user: AuthUser, @Body() dto: MatchJobDto) {
-    return this.ai.matchJob(user.id, dto);
+  matchJob(): never {
+    return unavailable('match-job');
   }
 
   @Post('check-ats')
@@ -70,44 +81,44 @@ export class AiController {
 
   @Post('interview-prep')
   @RequireEntitlement('ai:interview')
-  interviewPrep(@CurrentUser() user: AuthUser, @Body() dto: InterviewPrepDto) {
-    return this.ai.interviewPrep(user.id, dto);
+  interviewPrep(): never {
+    return unavailable('interview-prep');
   }
 
   @Post('career-advice')
   @RequireEntitlement('ai:optimize')
-  careerAdvice(@CurrentUser() user: AuthUser, @Body() dto: CareerAdviceDto) {
-    return this.ai.careerAdvice(user.id, dto);
+  careerAdvice(): never {
+    return unavailable('career-advice');
   }
 
   @Post('generate-portfolio')
   @RequireEntitlement('ai:generate')
-  generatePortfolio(@CurrentUser() user: AuthUser, @Body() dto: GeneratePortfolioDto) {
-    return this.ai.generatePortfolio(user.id, dto);
+  generatePortfolio(): never {
+    return unavailable('generate-portfolio');
   }
 
   @Post('grammar-check')
   @RequireEntitlement('ai:optimize')
-  grammarCheck(@CurrentUser() user: AuthUser, @Body() dto: GrammarCheckDto) {
-    return this.ai.grammarCheck(user.id, dto);
+  grammarCheck(): never {
+    return unavailable('grammar-check');
   }
 
   @Post('skills-suggest')
   @RequireEntitlement('ai:optimize')
-  skillsSuggest(@CurrentUser() user: AuthUser, @Body() dto: SkillsSuggestDto) {
-    return this.ai.skillsSuggest(user.id, dto);
+  skillsSuggest(): never {
+    return unavailable('skills-suggest');
   }
 
   @Post('linkedin-import')
   @RequireEntitlement('ai:generate')
-  linkedInImport(@CurrentUser() user: AuthUser, @Body() dto: LinkedInImportDto) {
-    return this.ai.linkedInImport(user.id, dto);
+  linkedInImport(): never {
+    return unavailable('linkedin-import');
   }
 
   @Post('parse-pdf')
   @RequireEntitlement('ai:generate')
   @ApiOperation({ summary: 'PDF OCR + structure extraction' })
-  parsePdf(@CurrentUser() user: AuthUser, @Body() dto: ParsePdfDto) {
-    return this.ai.parsePdf(user.id, dto);
+  parsePdf(): never {
+    return unavailable('parse-pdf');
   }
 }

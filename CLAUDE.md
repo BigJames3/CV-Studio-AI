@@ -33,19 +33,15 @@ pnpm --filter @cvstudio/<paquet> <script>   # cibler un paquet
 - Tests à côté du code (`*.spec.ts` côté API) ; ne jamais désactiver un test pour obtenir du vert.
 - Aucun secret dans le dépôt ; aucune donnée personnelle de CV dans les logs.
 
-## Sous-agents (`.claude/agents/`)
+## Agents
 
-Délègue selon le domaine touché :
+La gouvernance des agents existe déjà et fait foi :
 
-| Agent              | Quand l'utiliser                                                   |
-| ------------------ | ------------------------------------------------------------------ |
-| `backend-api`      | Endpoints NestJS, Prisma/migrations, jobs, guards (hors paiements) |
-| `frontend-web`     | Pages Next.js, éditeur, templates CV, `packages/ui`                |
-| `mobile`           | App Expo, hors-ligne, navigation                                   |
-| `ai-engineer`      | `packages/ai-service`, `modules/ai`, prompts et routage de modèles |
-| `payments-billing` | Stripe, CinetPay, plans, entitlements, factures, commissions       |
-| `devops-infra`     | Docker, k8s, Terraform, GitHub Actions                             |
-| `qa-tester`        | Écrire/réparer des tests Jest, Vitest, Playwright ; CI rouge       |
-| `code-reviewer`    | Relecture en lecture seule avant commit / PR                       |
+- `AGENTS.md` — charte commune (priorités P0→P4, Definition of Done, sécurité, git, format de rapport)
+- `docs/agents/00-README.md` — carte du dépôt, matrice features/plans, règle anti-conflit
+- `docs/agents/01-architect.md` … `08-devops.md` — fiche de chaque agent (ownership, fichiers autorisés/interdits)
+- `docs/agents/TASK_BOARD.md` et `DECISIONS.md` — tâches confirmées et décisions humaines ouvertes
 
-Flux type pour une fonctionnalité transverse : `backend-api` (contrat + endpoint) → `frontend-web` / `mobile` (consommation) → `qa-tester` (tests) → `code-reviewer` (relecture).
+`.claude/agents/` expose ces 8 agents comme sous-agents Claude Code (`architect`, `security`, `qa`, `backend`, `frontend`, `ai`, `billing`, `devops`). Chaque fichier y renvoie à sa fiche `docs/agents/` : modifier la fiche, pas le wrapper.
+
+Tâche qui touche plusieurs zones : `architect` découpe → `security` confirme le risque (lecture) → le propriétaire implémente → `qa` teste → `architect` vérifie le diff.

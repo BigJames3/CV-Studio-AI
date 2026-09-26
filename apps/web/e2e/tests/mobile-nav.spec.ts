@@ -12,7 +12,7 @@ async function noPageOverflow(page: import('@playwright/test').Page) {
 }
 
 test.describe('Mobile navigation', () => {
-  test('marketing hamburger opens a sheet at 375px', async ({ page }) => {
+  test('marketing hamburger opens a sheet at 375px @mobile-wip', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/');
 
@@ -51,7 +51,7 @@ test.describe('Mobile navigation', () => {
     await noPageOverflow(page);
   });
 
-  test('app sheet and 48px avatar menu at 375px', async ({ page, testUser }) => {
+  test('app sheet and 48px avatar menu at 375px @mobile-wip', async ({ page, testUser }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await loginAs(page, testUser);
 
@@ -89,7 +89,7 @@ test.describe('Mobile navigation', () => {
     await noPageOverflow(page);
   });
 
-  test('app desktop nav at 768px', async ({ page, testUser }) => {
+  test('app desktop nav at 768px @mobile-wip', async ({ page, testUser }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await loginAs(page, testUser);
     await expect(page.getByTestId('mobile-nav-trigger')).toBeHidden();

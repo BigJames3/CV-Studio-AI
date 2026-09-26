@@ -1,5 +1,6 @@
 import { test, expect, loginAs } from '../fixtures/auth.fixture';
-import { checkout, getSubscription } from '../utils/api';
+import { getSubscription } from '../utils/api';
+import { grantPlan } from '../utils/db';
 import { expectSubscriptionTier } from '../utils/assertions';
 
 test.describe('Pro → Business upgrade', () => {
@@ -9,7 +10,7 @@ test.describe('Pro → Business upgrade', () => {
     testUser,
     billingPage,
   }) => {
-    await checkout(request, testUser.accessToken, 'pro');
+    await grantPlan(testUser.id, 'pro');
     await expectSubscriptionTier(request, testUser.accessToken, 'pro');
 
     await loginAs(page, testUser);

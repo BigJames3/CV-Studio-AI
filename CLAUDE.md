@@ -85,7 +85,7 @@ App Router with route groups `(marketing)`, `(auth)` and `(app)`, plus public sh
 ## Git / CI
 
 - Branches: `main` = production, `staging` = pre-production, `feature/*` or technical branches for work. Commits follow Conventional Commits (`feat:`, `fix:`, `ci:`, `chore:` ...).
-- Workflows are in `.github/workflows/` (`ci.yml`, `lint.yml`, `test.yml`, `build.yml`, `pr-checks.yml`, `e2e-tests.yml`, `cd-staging.yml`, `cd-prod.yml`, `deploy.yml`, `terraform.yml`). Several overlap. `ci.yml` currently installs with `--no-frozen-lockfile` and triggers on `main`/`develop`.
+- Workflows are in `.github/workflows/`. `ci.yml` is the single CI entrypoint (push/PR, `v*` tags, manual `workflow_dispatch`): quality, build, `e2e-tests.yml` (reusable), Lighthouse, then `cd-staging.yml` / `cd-prod.yml`. Also `pr-checks.yml` (PR title), `deploy.yml` (manual prod deploy of an existing image) and `terraform.yml`.
 - The maintainer develops on **Windows** (PowerShell, path with spaces); CI runs on Ubuntu. Account for junction vs. symlink and path differences when an issue reproduces in only one environment.
 
 ## Working conventions requested by the maintainer

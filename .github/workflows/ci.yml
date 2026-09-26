@@ -8,6 +8,9 @@ on:
     branches: [main, develop, staging, ci-cd-hardening]
     tags: ['v*']
 
+  # Manual full run (replaces the former lint.yml / test.yml / build.yml).
+  workflow_dispatch:
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

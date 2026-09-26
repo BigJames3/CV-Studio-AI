@@ -87,8 +87,7 @@ excluded by default; run them with `E2E_MOBILE_WIP=1` and drop the tag once the 
 
 | Workflow                                 | What runs                                                                       |
 | ---------------------------------------- | ------------------------------------------------------------------------------- |
-| `.github/workflows/ci.yml` job `quality` | Unit tests + **API Jest e2e**                                                   |
-| `.github/workflows/test.yml`             | Coverage + **API Jest e2e**                                                     |
+| `.github/workflows/ci.yml` job `quality` | Unit tests + coverage gates + **API Jest e2e**                                  |
 | `.github/workflows/e2e-tests.yml`        | Playwright (after quality). Artifacts on failure: `apps/web/playwright-report/` |
 
 Postgres 16 + Redis 7 are GitHub Actions services. Playwright `webServer` waits on `http://localhost:3001/api/v1/health` then runs `e2e/health.setup.ts`.

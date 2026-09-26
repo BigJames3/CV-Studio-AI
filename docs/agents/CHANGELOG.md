@@ -2,6 +2,12 @@
 
 Journal limité à `docs/agents/`. Pas un changelog produit.
 
+## 2026-09-26 — Merge de la PR #18
+
+- HUMAN-UPGRADE et HUMAN-PAST-DUE tranchées par le propriétaire du produit : retirées des décisions requises, ajoutées aux décisions acceptées de `DECISIONS.md`.
+- PR #18 mergée (`e175772`) : SEC-001, BILL-001, BILL-002, BILL-003, API-001, API-002, SEC-003 → `DONE`.
+- CI rouge au merge pour des causes préexistantes sur `main`, corrigées par la PR #17 : placée en tête de l'ordre recommandé.
+
 ## 2026-09-26 — Mise à jour du task board
 
 Relecture de `claude/dreamy-johnson-ef2lkk` (PR #18, ouverte, non mergée ; contenue dans la PR #19) et exécution des tests ciblés sur cette branche : 18 suites, 216 tests verts.

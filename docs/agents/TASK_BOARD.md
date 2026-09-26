@@ -8,6 +8,12 @@ Statuts :
 - `FIX_ON_BRANCH` : correctif écrit et tests ciblés verts sur une branche, **pas encore dans `main`**. Reste ouvert tant que la PR n'est pas mergée.
 - `DONE` : correctif mergé dans `main`.
 
+## Suivi — 2026-09-26, merge de la PR #18
+
+PR [#18](https://github.com/BigJames3/CV-Studio-AI/pull/18) mergée dans `main` (commit de merge `e175772`). Règles HUMAN-PAST-DUE et HUMAN-UPGRADE validées par le propriétaire du produit avant le merge. SEC-001, BILL-001, BILL-002, BILL-003, API-001, API-002 et SEC-003 passent à `DONE`.
+
+CI rouge au moment du merge, pour trois causes **préexistantes sur `main`** et étrangères à la PR : lint `packages/ui/src/components/input.tsx`, build API sans `prisma generate`, script `jest` mobile. Les correctifs sont dans la PR [#17](https://github.com/BigJames3/CV-Studio-AI/pull/17) (`ci-cd-hardening`).
+
 ## Suivi — 2026-09-26 (Architect)
 
 Branche `claude/dreamy-johnson-ef2lkk` (5 commits) relue commit par commit. Elle est portée par la PR [#18](https://github.com/BigJames3/CV-Studio-AI/pull/18), ouverte et non mergée. La PR [#19](https://github.com/BigJames3/CV-Studio-AI/pull/19) (`claude/logic-quick-fixes`) empile ces 5 commits plus 3 autres (brouillon local, taux EUR/XOF CinetPay, réactivation et mensuel/annuel) qui ne changent le statut d'aucune tâche. Tests ciblés exécutés sur cette branche : 18 suites, **216 tests verts** (`cvs/export`, `cvs.service`, `subscriptions`, `payments.service`, `ai`, `templates`, `common/guards`).
@@ -15,8 +21,8 @@ Branche `claude/dreamy-johnson-ef2lkk` (5 commits) relue commit par commit. Elle
 | ID       | Avant | Après          | Commit    | Réserve                                                                                                 |
 | -------- | ----- | -------------- | --------- | ------------------------------------------------------------------------------------------------------- |
 | SEC-001  | OPEN  | FIX_ON_BRANCH  | `05e4a8e` | —                                                                                                       |
-| BILL-001 | OPEN  | FIX_ON_BRANCH  | `a8fadb2` | Grâces 72 h / 7 j choisies par le correctif : à valider (HUMAN-PAST-DUE)                                |
-| BILL-002 | OPEN  | FIX_ON_BRANCH  | `8a992bb` | Changement de plan sur place avec proratisation : à valider (HUMAN-UPGRADE)                             |
+| BILL-001 | OPEN  | FIX_ON_BRANCH  | `a8fadb2` | Grâces 72 h / 7 j validées (HUMAN-PAST-DUE)                                                             |
+| BILL-002 | OPEN  | FIX_ON_BRANCH  | `8a992bb` | Changement sur place avec proratisation validé (HUMAN-UPGRADE)                                          |
 | BILL-003 | OPEN  | FIX_ON_BRANCH  | `a8fadb2` | Corrigé par le même commit que BILL-001 (`past_due` → free après 7 j)                                   |
 | BILL-004 | OPEN  | OPEN (partiel) | `8a992bb` | Le changement de prix passe par checkout ; `PATCH /subscriptions/me` ignore toujours le DTO             |
 | API-001  | OPEN  | FIX_ON_BRANCH  | `2a8daef` | Tests parallèles sur lock mocké ; preuve Postgres réelle seulement dans le message de commit, pas d'e2e |
@@ -42,7 +48,7 @@ Priorité produit du dépôt : P0 sécurité, P1 argent / intégrité, P2 foncti
 | Risk           | Fuite du contenu de CV.                                                                                                                                                                                                                                                                                                                             |
 | Owner          | Backend                                                                                                                                                                                                                                                                                                                                             |
 | Dependencies   | Security (relecture), QA (test cross-user)                                                                                                                                                                                                                                                                                                          |
-| Status         | FIX_ON_BRANCH — `05e4a8e` sur `claude/dreamy-johnson-ef2lkk`. `ownerId` stocké sur le job, même 404 pour job inconnu et job d'un autre, `jobId` en `randomUUID()`, `@FeatureGate('downloadPDF')` sur poll/download. Tests : `pdf-export-jobs.spec.ts` (cross-user, restauration Redis, jobs legacy sans propriétaire).                              |
+| Status         | DONE (PR #18, `e175772`) — `05e4a8e`. `ownerId` stocké sur le job, même 404 pour job inconnu et job d'un autre, `jobId` en `randomUUID()`, `@FeatureGate('downloadPDF')` sur poll/download. Tests : `pdf-export-jobs.spec.ts` (cross-user, restauration Redis, jobs legacy sans propriétaire).                                                      |
 | Files          | `apps/api/src/modules/cvs/export/export.controller.ts`, `apps/api/src/modules/cvs/export/pdf-export.service.ts`                                                                                                                                                                                                                                     |
 | Tests required | Utilisateur B ne peut ni poll ni download le job de A. Le cas « pas encore prêt » et « job inconnu » restent couverts. Étendre `pdf-export-auth.spec.ts`, qui ne vérifie aujourd'hui que l'absence de `@Public()` sur le rendu.                                                                                                                     |
 
@@ -74,24 +80,24 @@ Priorité produit du dépôt : P0 sécurité, P1 argent / intégrité, P2 foncti
 | Risk           | Droits Pro/Business après la fin de période.                                                                                                                                                                                                                                                                                            |
 | Owner          | Billing                                                                                                                                                                                                                                                                                                                                 |
 | Dependencies   | QA, Security (lecture)                                                                                                                                                                                                                                                                                                                  |
-| Status         | FIX_ON_BRANCH — `a8fadb2` sur `claude/dreamy-johnson-ef2lkk`. `resolveEffectiveTier()` (statut + `currentPeriodEnd` + 72 h de grâce) dans `EntitlementsService` et `FeatureGateGuard` ; `ExpireSubscriptionsJob` horaire repasse le tier stocké à `free`. Règle de grâce à valider (HUMAN-PAST-DUE).                                    |
+| Status         | DONE (PR #18, `e175772`) — `a8fadb2`. `resolveEffectiveTier()` (statut + `currentPeriodEnd` + 72 h de grâce) dans `EntitlementsService` et `FeatureGateGuard` ; `ExpireSubscriptionsJob` horaire repasse le tier stocké à `free`. Règle de grâce validée (HUMAN-PAST-DUE).                                                              |
 | Files          | `apps/api/src/modules/subscriptions/entitlements.service.ts`, `apps/api/src/modules/subscriptions/subscriptions.service.ts`, `apps/api/src/modules/payments/jobs/expire-pending-payments.job.ts`                                                                                                                                        |
 | Tests required | Date de fin passée → tier `free` et `can()` faux pour `cv:export:pdf`. Stripe `cancel_at_period_end` encore honoré jusqu'à l'event ou la date, selon la règle écrite dans la tâche (ne pas inventer la règle : proposer, faire valider).                                                                                                |
 
 ### BILL-002
 
-| Champ          | Valeur                                                                                                                                                                                                                                                                                                                              |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ID             | BILL-002                                                                                                                                                                                                                                                                                                                            |
-| Priority       | P1                                                                                                                                                                                                                                                                                                                                  |
-| Domain         | Billing                                                                                                                                                                                                                                                                                                                             |
-| Description    | `Subscription.userId` est unique (une ligne locale). `createCheckout` ouvre une session Stripe sans refuser un `stripeSubscriptionId` déjà actif. Deux abonnements Stripe peuvent exister ; la ligne locale n'en reflète qu'un.                                                                                                     |
-| Risk           | Double facturation, tier écrasé par le dernier webhook.                                                                                                                                                                                                                                                                             |
-| Owner          | Billing                                                                                                                                                                                                                                                                                                                             |
-| Dependencies   | Architect si le comportement « portail client vs refus » est ambigu — `HUMAN_DECISION_REQUIRED` sur l'UX de changement de plan, pas sur le fait du trou                                                                                                                                                                             |
-| Status         | FIX_ON_BRANCH — `8a992bb` sur `claude/dreamy-johnson-ef2lkk`. Abonné Stripe actif : changement de plan sur place (upgrade facturé immédiatement, downgrade crédité), même plan → 409 `ALREADY_SUBSCRIBED`, 503 si Stripe injoignable ; le webhook annule un abonnement précédent encore actif. Politique à valider (HUMAN-UPGRADE). |
-| Files          | `apps/api/src/modules/subscriptions/subscriptions.service.ts`                                                                                                                                                                                                                                                                       |
-| Tests required | Second checkout alors qu'une subscription Stripe active est enregistrée : refus ou mise à jour explicite, pas une seconde souscription silencieuse.                                                                                                                                                                                 |
+| Champ          | Valeur                                                                                                                                                                                                                                                                                                    |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ID             | BILL-002                                                                                                                                                                                                                                                                                                  |
+| Priority       | P1                                                                                                                                                                                                                                                                                                        |
+| Domain         | Billing                                                                                                                                                                                                                                                                                                   |
+| Description    | `Subscription.userId` est unique (une ligne locale). `createCheckout` ouvre une session Stripe sans refuser un `stripeSubscriptionId` déjà actif. Deux abonnements Stripe peuvent exister ; la ligne locale n'en reflète qu'un.                                                                           |
+| Risk           | Double facturation, tier écrasé par le dernier webhook.                                                                                                                                                                                                                                                   |
+| Owner          | Billing                                                                                                                                                                                                                                                                                                   |
+| Dependencies   | Architect si le comportement « portail client vs refus » est ambigu — `HUMAN_DECISION_REQUIRED` sur l'UX de changement de plan, pas sur le fait du trou                                                                                                                                                   |
+| Status         | DONE (PR #18, `e175772`) — `8a992bb`. Abonné Stripe actif : changement de plan sur place (upgrade facturé immédiatement, downgrade crédité), même plan → 409 `ALREADY_SUBSCRIBED`, 503 si Stripe injoignable ; le webhook annule un abonnement précédent encore actif. Politique validée (HUMAN-UPGRADE). |
+| Files          | `apps/api/src/modules/subscriptions/subscriptions.service.ts`                                                                                                                                                                                                                                             |
+| Tests required | Second checkout alors qu'une subscription Stripe active est enregistrée : refus ou mise à jour explicite, pas une seconde souscription silencieuse.                                                                                                                                                       |
 
 ### BILL-003
 
@@ -104,7 +110,7 @@ Priorité produit du dépôt : P0 sécurité, P1 argent / intégrité, P2 foncti
 | Risk           | Service payant après échec de paiement, tant que Stripe n'envoie pas une révocation.                                                                                                                                 |
 | Owner          | Billing                                                                                                                                                                                                              |
 | Dependencies   | QA. Règle exacte (garder l'accès en past_due ou non) : `HUMAN_DECISION_REQUIRED` si le produit veut une grâce. Le ticket peut au minimum aligner la lecture des droits sur `status` pour ne plus ignorer `past_due`. |
-| Status         | FIX_ON_BRANCH — `a8fadb2` (même correctif que BILL-001). `past_due` garde le tier payant 7 jours après l'échec du renouvellement, puis `free`. Durée à valider (HUMAN-PAST-DUE).                                     |
+| Status         | DONE (PR #18, `e175772`) — `a8fadb2` (même correctif que BILL-001). `past_due` garde le tier payant 7 jours après l'échec du renouvellement, puis `free`. Durée validée (HUMAN-PAST-DUE).                            |
 | Files          | `apps/api/src/modules/payments/payments.service.ts` (`onInvoiceFailed`), `entitlements.service.ts`                                                                                                                   |
 | Tests required | Après `invoice.payment_failed`, le snapshot d'entitlements correspond à la règle choisie. Replay du webhook toujours idempotent.                                                                                     |
 
@@ -125,33 +131,33 @@ Priorité produit du dépôt : P0 sécurité, P1 argent / intégrité, P2 foncti
 
 ### API-001
 
-| Champ          | Valeur                                                                                                                                                                                                                                                                             |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ID             | API-001                                                                                                                                                                                                                                                                            |
-| Priority       | P1                                                                                                                                                                                                                                                                                 |
-| Domain         | Quotas CV                                                                                                                                                                                                                                                                          |
-| Description    | `EntitlementsService.can('cv:create')` compte les CV puis `CvsService` crée la ligne, sans transaction ni contrainte qui borne le nombre. Deux créations parallèles peuvent dépasser 1/5/20.                                                                                       |
-| Risk           | Dépassement de quota.                                                                                                                                                                                                                                                              |
-| Owner          | Backend                                                                                                                                                                                                                                                                            |
-| Dependencies   | Billing si la contrainte doit vivre dans `EntitlementsService` — Architect séquence. QA                                                                                                                                                                                            |
-| Status         | FIX_ON_BRANCH — `2a8daef` sur `claude/dreamy-johnson-ef2lkk`. `lockUserScope()` (advisory lock Postgres par utilisateur) ; count + create dans une transaction pour create et duplicate. Tests parallèles (10 requêtes FREE → 1 CV) sur lock mocké ; ajouter un e2e Postgres (QA). |
-| Files          | `apps/api/src/modules/cvs/cvs.service.ts`, `apps/api/src/modules/subscriptions/entitlements.service.ts`                                                                                                                                                                            |
-| Tests required | Deux creates concurrents au plafond : un seul succès.                                                                                                                                                                                                                              |
+| Champ          | Valeur                                                                                                                                                                                                                                                     |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ID             | API-001                                                                                                                                                                                                                                                    |
+| Priority       | P1                                                                                                                                                                                                                                                         |
+| Domain         | Quotas CV                                                                                                                                                                                                                                                  |
+| Description    | `EntitlementsService.can('cv:create')` compte les CV puis `CvsService` crée la ligne, sans transaction ni contrainte qui borne le nombre. Deux créations parallèles peuvent dépasser 1/5/20.                                                               |
+| Risk           | Dépassement de quota.                                                                                                                                                                                                                                      |
+| Owner          | Backend                                                                                                                                                                                                                                                    |
+| Dependencies   | Billing si la contrainte doit vivre dans `EntitlementsService` — Architect séquence. QA                                                                                                                                                                    |
+| Status         | DONE (PR #18, `e175772`) — `2a8daef`. `lockUserScope()` (advisory lock Postgres par utilisateur) ; count + create dans une transaction pour create et duplicate. Tests parallèles (10 requêtes FREE → 1 CV) sur lock mocké ; ajouter un e2e Postgres (QA). |
+| Files          | `apps/api/src/modules/cvs/cvs.service.ts`, `apps/api/src/modules/subscriptions/entitlements.service.ts`                                                                                                                                                    |
+| Tests required | Deux creates concurrents au plafond : un seul succès.                                                                                                                                                                                                      |
 
 ### API-002
 
-| Champ          | Valeur                                                                                                                                                                                                                                              |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ID             | API-002                                                                                                                                                                                                                                             |
-| Priority       | P1                                                                                                                                                                                                                                                  |
-| Domain         | Quotas AI                                                                                                                                                                                                                                           |
-| Description    | `AiQuotaService` compte les lignes `aiHistory` du jour, puis `ai.service` insère plus tard, sans verrou. Le bucket ATS réutilise `actionType: jd_match`.                                                                                            |
-| Risk           | Dépassement des quotas journaliers.                                                                                                                                                                                                                 |
-| Owner          | AI                                                                                                                                                                                                                                                  |
-| Dependencies   | QA. Ne pas changer les chiffres 0/50/200 sans décision produit.                                                                                                                                                                                     |
-| Status         | FIX_ON_BRANCH — `2a8daef` sur `claude/dreamy-johnson-ef2lkk`. Réservation d'un slot `AiHistory` sous verrou avant l'appel provider, libéré en cas d'échec ; throttle `/ai/*` 30 req/min. Test : Pro 49/50 + 10 parallèles → 1 accepté (lock mocké). |
-| Files          | `apps/api/src/modules/ai/ai-quota.service.ts`, `apps/api/src/modules/ai/ai.service.ts`                                                                                                                                                              |
-| Tests required | Deux optimize concurrents à la limite : un seul accepté.                                                                                                                                                                                            |
+| Champ          | Valeur                                                                                                                                                                                                                      |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ID             | API-002                                                                                                                                                                                                                     |
+| Priority       | P1                                                                                                                                                                                                                          |
+| Domain         | Quotas AI                                                                                                                                                                                                                   |
+| Description    | `AiQuotaService` compte les lignes `aiHistory` du jour, puis `ai.service` insère plus tard, sans verrou. Le bucket ATS réutilise `actionType: jd_match`.                                                                    |
+| Risk           | Dépassement des quotas journaliers.                                                                                                                                                                                         |
+| Owner          | AI                                                                                                                                                                                                                          |
+| Dependencies   | QA. Ne pas changer les chiffres 0/50/200 sans décision produit.                                                                                                                                                             |
+| Status         | DONE (PR #18, `e175772`) — `2a8daef`. Réservation d'un slot `AiHistory` sous verrou avant l'appel provider, libéré en cas d'échec ; throttle `/ai/*` 30 req/min. Test : Pro 49/50 + 10 parallèles → 1 accepté (lock mocké). |
+| Files          | `apps/api/src/modules/ai/ai-quota.service.ts`, `apps/api/src/modules/ai/ai.service.ts`                                                                                                                                      |
+| Tests required | Deux optimize concurrents à la limite : un seul accepté.                                                                                                                                                                    |
 
 ### FE-001
 
@@ -294,18 +300,18 @@ Priorité produit du dépôt : P0 sécurité, P1 argent / intégrité, P2 foncti
 
 ### SEC-003
 
-| Champ          | Valeur                                                                                                                                                                                         |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ID             | SEC-003                                                                                                                                                                                        |
-| Priority       | P3                                                                                                                                                                                             |
-| Domain         | Templates                                                                                                                                                                                      |
-| Description    | `POST /templates/seed` exige un JWT, refuse `NODE_ENV=production`, et n'a pas de rôle. Tout compte hors production peut upsert les templates officiels.                                        |
-| Risk           | Dev/staging seulement.                                                                                                                                                                         |
-| Owner          | Backend                                                                                                                                                                                        |
-| Dependencies   | Security                                                                                                                                                                                       |
-| Status         | FIX_ON_BRANCH — `53a5657` sur `claude/dreamy-johnson-ef2lkk`. `POST /templates/seed` supprimé (aucun appelant, `pnpm db:seed` fait le même upsert). Test : le contrôleur n'expose que des GET. |
-| Files          | `apps/api/src/modules/templates/templates.controller.ts`                                                                                                                                       |
-| Tests required | Appel non admin hors prod → 403. Prod inchangé (403).                                                                                                                                          |
+| Champ          | Valeur                                                                                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ID             | SEC-003                                                                                                                                                                |
+| Priority       | P3                                                                                                                                                                     |
+| Domain         | Templates                                                                                                                                                              |
+| Description    | `POST /templates/seed` exige un JWT, refuse `NODE_ENV=production`, et n'a pas de rôle. Tout compte hors production peut upsert les templates officiels.                |
+| Risk           | Dev/staging seulement.                                                                                                                                                 |
+| Owner          | Backend                                                                                                                                                                |
+| Dependencies   | Security                                                                                                                                                               |
+| Status         | DONE (PR #18, `e175772`) — `53a5657`. `POST /templates/seed` supprimé (aucun appelant, `pnpm db:seed` fait le même upsert). Test : le contrôleur n'expose que des GET. |
+| Files          | `apps/api/src/modules/templates/templates.controller.ts`                                                                                                               |
+| Tests required | Appel non admin hors prod → 403. Prod inchangé (403).                                                                                                                  |
 
 ### DOC-001
 
@@ -363,14 +369,11 @@ Priorité produit du dépôt : P0 sécurité, P1 argent / intégrité, P2 foncti
 
 ## Ordre recommandé
 
-Mis à jour le 2026-09-26 après la relecture de `claude/dreamy-johnson-ef2lkk`.
+Mis à jour le 2026-09-26 après le merge de la PR #18.
 
 ```text
-Trancher HUMAN-UPGRADE et HUMAN-PAST-DUE (règles choisies par le correctif)
-→ PR #18 (claude/dreamy-johnson-ef2lkk) : relecture Security + Billing, puis merge
-  (ou PR #19, qui la contient)
-  (SEC-001, BILL-001/002/003, API-001/002, SEC-003 → DONE)
-→ QA : e2e Postgres pour les verrous API-001 / API-002
+PR #17 (ci-cd-hardening) : remettre la CI de main au vert
+→ QA : e2e Postgres pour les verrous API-001 / API-002 (maintenant dans main)
 → SEC-005 (Backend) et BILL-005 (Billing), en parallèle : fichiers disjoints
 → BILL-004 (Billing) : contrat explicite de PATCH /subscriptions/me
 → FE-001 DTO (Billing) puis libellé pricing (Frontend)

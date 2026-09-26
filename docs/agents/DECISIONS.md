@@ -149,6 +149,21 @@ Statuts utilisés : `ACCEPTED` (ADR ou code cohérent), `PARTIAL` (ADR accepté,
 - Statut : ACCEPTED comme heuristiques, pas comme LLM
 - Ne pas les documenter comme modèles distants tant que `gateway.ts` ne les appelle pas
 
+### Changement de plan Stripe (ex HUMAN-UPGRADE)
+
+- Statut : ACCEPTED le 2026-09-26 par le propriétaire du produit, mergé via la PR #18
+- Abonné Stripe actif : changement sur l'abonnement existant. Upgrade facturé immédiatement (`pending_if_incomplete`), downgrade crédité sur la prochaine facture, changement sans frais pendant l'essai
+- Même plan : 409 `ALREADY_SUBSCRIBED` (ou reprise d'une annulation programmée) ; `past_due` : 409 `SUBSCRIPTION_PAYMENT_ISSUE`
+- Code : `apps/api/src/modules/subscriptions/subscriptions.service.ts`
+
+### Grâce d'expiration et `past_due` (ex HUMAN-PAST-DUE)
+
+- Statut : ACCEPTED le 2026-09-26 par le propriétaire du produit, mergé via la PR #18
+- `active` / `trialing` : accès payant jusqu'à `currentPeriodEnd` + 72 h
+- `past_due` : 7 jours après l'échec du renouvellement, puis `free`
+- `canceled`, `suspended`, statut inconnu : `free`
+- Code : `EXPIRY_GRACE_MS` et `PAST_DUE_GRACE_MS` dans `apps/api/src/modules/subscriptions/effective-tier.ts`
+
 ### Gouvernance des 8 agents
 
 - Statut : ACCEPTED
@@ -165,20 +180,18 @@ Statuts utilisés : `ACCEPTED` (ADR ou code cohérent), `PARTIAL` (ADR accepté,
 
 Ne pas coder ces choix dans une tâche technique.
 
-| ID                    | Sujet                                                     | Options observées, pas un choix                                                                                                                                                                                                                             |
-| --------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| HUMAN-PRICING-PDF     | PDF et partage Free                                       | Runtime refuse. Catalogue et pricing accordent. Watermark absent des deux côtés du code.                                                                                                                                                                    |
-| HUMAN-CV-CAP          | Caps CV                                                   | Code 1/5/20. PRD illimité en Pro/Business.                                                                                                                                                                                                                  |
-| HUMAN-TEMPLATES       | Templates du plan Pro                                     | Runtime = Business seulement. Catalogue = illimité.                                                                                                                                                                                                         |
-| HUMAN-CURRENCY        | Devise                                                    | EUR dans l'API. USD dans le PRD.                                                                                                                                                                                                                            |
-| HUMAN-AI-QUOTA        | Unité des quotas AI                                       | Journalier dans le code. Mensuel dans le PRD.                                                                                                                                                                                                               |
-| HUMAN-AI-SCOPE        | Neuf routes scaffold/mock                                 | Les garder visibles, répondre non implémenté, ou les construire. Pas les trois à la fois.                                                                                                                                                                   |
-| HUMAN-ANALYTICS       | Outil produit                                             | ADR Amplitude. Code PostHog.                                                                                                                                                                                                                                |
-| HUMAN-STORAGE         | Tables de sections et Teams/Collab/Notification/Portfolio | Les laisser, les implémenter, ou planifier un retrait. Pas de DROP dans cet audit.                                                                                                                                                                          |
-| HUMAN-UPGRADE         | Changement de plan                                        | PATCH no-op. Checkout crée une nouvelle session. Risque de second abonnement Stripe (BILL-002). **Le correctif `8a992bb` (non mergé) a choisi : changement sur place, upgrade facturé immédiatement, downgrade crédité. À valider ou refuser avant merge.** |
-| HUMAN-PAST-DUE        | Accès pendant `past_due`                                  | Aujourd'hui le tier payant reste. Faut-il une grâce ? **Le correctif `a8fadb2` (non mergé) a choisi : 7 jours en `past_due`, 72 h après `currentPeriodEnd`. À valider ou ajuster avant merge.**                                                             |
-| HUMAN-TERRAFORM       | Appliquer le scaffold                                     | Les modules ne créent pas EKS/RDS. L'apply CI est en `continue-on-error`. Ne pas lancer un apply réel sur cette base sans revue.                                                                                                                            |
-| HUMAN-TEMPLATE-PUBLIC | `designData` public                                       | SEC-006. Aperçu marketing ou refus.                                                                                                                                                                                                                         |
+| ID                    | Sujet                                                     | Options observées, pas un choix                                                                                                  |
+| --------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| HUMAN-PRICING-PDF     | PDF et partage Free                                       | Runtime refuse. Catalogue et pricing accordent. Watermark absent des deux côtés du code.                                         |
+| HUMAN-CV-CAP          | Caps CV                                                   | Code 1/5/20. PRD illimité en Pro/Business.                                                                                       |
+| HUMAN-TEMPLATES       | Templates du plan Pro                                     | Runtime = Business seulement. Catalogue = illimité.                                                                              |
+| HUMAN-CURRENCY        | Devise                                                    | EUR dans l'API. USD dans le PRD.                                                                                                 |
+| HUMAN-AI-QUOTA        | Unité des quotas AI                                       | Journalier dans le code. Mensuel dans le PRD.                                                                                    |
+| HUMAN-AI-SCOPE        | Neuf routes scaffold/mock                                 | Les garder visibles, répondre non implémenté, ou les construire. Pas les trois à la fois.                                        |
+| HUMAN-ANALYTICS       | Outil produit                                             | ADR Amplitude. Code PostHog.                                                                                                     |
+| HUMAN-STORAGE         | Tables de sections et Teams/Collab/Notification/Portfolio | Les laisser, les implémenter, ou planifier un retrait. Pas de DROP dans cet audit.                                               |
+| HUMAN-TERRAFORM       | Appliquer le scaffold                                     | Les modules ne créent pas EKS/RDS. L'apply CI est en `continue-on-error`. Ne pas lancer un apply réel sur cette base sans revue. |
+| HUMAN-TEMPLATE-PUBLIC | `designData` public                                       | SEC-006. Aperçu marketing ou refus.                                                                                              |
 
 ## Ce qui n'est pas une décision
 

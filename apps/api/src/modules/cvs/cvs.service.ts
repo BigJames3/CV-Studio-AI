@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.module';
 import { EntitlementsService } from '../subscriptions/entitlements.service';
+import { lockUserScope, USER_LOCK_TX_OPTIONS } from '../../common/utils/user-lock';
 import { CreateCvDto, UpdateCvDto, PublishCvDto, ListCvsQueryDto } from './dto/cv.dto';
 import { PdfExportService } from './export/pdf-export.service';
 import { EMPTY_CV_CONTENT, normalizeCvContent } from './cv-content.util';
@@ -64,17 +65,14 @@ export class CvsService {
   }
 
   async create(userId: string, dto: CreateCvDto) {
-    await this.entitlements.assertCan(userId, 'cv:create', CV_CREATE_LIMIT_MESSAGE);
     await this.assertTemplateAccess(userId, dto.templateId);
 
-    return this.prisma.cv.create({
-      data: {
-        userId,
-        title: dto.title,
-        templateId: dto.templateId,
-        content: (dto.content as Prisma.InputJsonValue | undefined) ?? EMPTY_CONTENT,
-        locale: dto.locale ?? 'fr-FR',
-      },
+    return this.createWithinQuota(userId, {
+      userId,
+      title: dto.title,
+      templateId: dto.templateId,
+      content: (dto.content as Prisma.InputJsonValue | undefined) ?? EMPTY_CONTENT,
+      locale: dto.locale ?? 'fr-FR',
     });
   }
 
@@ -167,18 +165,27 @@ export class CvsService {
 
   async duplicate(userId: string, id: string) {
     const source = await this.get(userId, id);
-    await this.entitlements.assertCan(userId, 'cv:create', CV_CREATE_LIMIT_MESSAGE);
 
-    return this.prisma.cv.create({
-      data: {
-        userId,
-        title: `${source.title} (copie)`,
-        templateId: source.templateId,
-        content: source.content as Prisma.InputJsonValue,
-        locale: source.locale,
-        paper: source.paper,
-      },
+    return this.createWithinQuota(userId, {
+      userId,
+      title: `${source.title} (copie)`,
+      templateId: source.templateId,
+      content: source.content as Prisma.InputJsonValue,
+      locale: source.locale,
+      paper: source.paper,
     });
+  }
+
+  /**
+   * Count-then-create under a per-user lock, so parallel requests cannot all pass the
+   * quota check before any of them has written (e.g. 10 simultaneous creates on FREE).
+   */
+  private createWithinQuota(userId: string, data: Prisma.CvUncheckedCreateInput) {
+    return this.prisma.$transaction(async (tx) => {
+      await lockUserScope(tx, userId, 'cv:create');
+      await this.entitlements.assertCan(userId, 'cv:create', CV_CREATE_LIMIT_MESSAGE, tx);
+      return tx.cv.create({ data });
+    }, USER_LOCK_TX_OPTIONS);
   }
 
   async shareMeta(userId: string, id: string) {

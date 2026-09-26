@@ -13,6 +13,10 @@ import { PrismaService } from '../../database/prisma.module';
 import { FeatureGateService } from '../services/feature-gate.service';
 import { AuditLogService } from '../services/audit-log.service';
 import type { AuthUser } from '../decorators';
+import {
+  resolveEffectiveTier,
+  TIER_SOURCE_SELECT,
+} from '../../modules/subscriptions/effective-tier';
 
 export const FEATURE_GATE_KEY = 'featureGate';
 
@@ -49,13 +53,14 @@ export class FeatureGateGuard implements CanActivate {
       throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Not authenticated' });
     }
 
+    // Never trust the JWT tier: it can be stale, and an expired subscription must not count.
     const dbUser = await this.prisma.user.findUnique({
       where: { id: user.id },
-      select: { subscriptionTier: true },
+      select: TIER_SOURCE_SELECT,
     });
     const gatedUser = {
       id: user.id,
-      subscriptionTier: dbUser?.subscriptionTier ?? user.subscriptionTier ?? 'free',
+      subscriptionTier: dbUser ? resolveEffectiveTier(dbUser) : 'free',
     };
 
     const hasAccess = this.checkFeature(gatedUser, feature);

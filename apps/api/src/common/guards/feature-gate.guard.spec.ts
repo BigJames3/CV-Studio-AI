@@ -107,4 +107,28 @@ describe('FeatureGateGuard', () => {
     }
     expect(Reflect.getMetadata(FEATURE_GATE_KEY, Demo.prototype.handler)).toBe('share');
   });
+
+  it('denies PDF download once the paid period has expired', async () => {
+    (reflector.getAllAndOverride as jest.Mock).mockReturnValue('downloadPDF');
+    prisma.user.findUnique.mockResolvedValue({
+      subscriptionTier: 'pro',
+      subscriptionEndDate: null,
+      subscription: {
+        status: 'active',
+        currentPeriodStart: new Date('2026-01-01T00:00:00Z'),
+        currentPeriodEnd: new Date('2026-02-01T00:00:00Z'),
+      },
+    });
+    await expect(
+      guard.canActivate(httpContext({ id: 'u1', subscriptionTier: 'pro' }))
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('does not fall back to the JWT tier when the user is missing from the DB', async () => {
+    (reflector.getAllAndOverride as jest.Mock).mockReturnValue('downloadPDF');
+    prisma.user.findUnique.mockResolvedValue(null);
+    await expect(
+      guard.canActivate(httpContext({ id: 'u1', subscriptionTier: 'business' }))
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });

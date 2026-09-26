@@ -513,6 +513,90 @@ describe('PaymentsService webhook fail-closed', () => {
       );
     });
   });
+  describe('one live Stripe subscription per user', () => {
+    beforeEach(() => {
+      prisma.subscription.findUnique.mockReset().mockResolvedValue(null);
+    });
+
+    function attachStripe(previous: Record<string, unknown> | Error) {
+      const current = {
+        id: 'sub_1',
+        customer: 'cus_1',
+        status: 'active',
+        cancel_at_period_end: false,
+        current_period_start: 1_700_000_000,
+        current_period_end: 1_700_086_400,
+        metadata: {},
+        items: { data: [{ price: { id: 'price_biz_month' } }] },
+      };
+      const retrieve = jest.fn(async (id: string) => {
+        if (id === 'sub_1') return current;
+        if (previous instanceof Error) throw previous;
+        return previous;
+      });
+      const cancel = jest.fn().mockResolvedValue({ id: 'sub_old', status: 'canceled' });
+      (service as unknown as { stripe: unknown }).stripe = { subscriptions: { retrieve, cancel } };
+      return { retrieve, cancel };
+    }
+
+    it('cancels the previous live subscription when a second checkout completes', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({ stripeSubscriptionId: 'sub_old' });
+      const { cancel } = attachStripe({ id: 'sub_old', status: 'active' });
+
+      await service.processEventWithRetry(mockCheckoutEvent({ plan: 'business' }));
+
+      expect(cancel).toHaveBeenCalledWith('sub_old', { prorate: true });
+      expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(
+        subscriptions.applyPaidEntitlement.mock.invocationCallOrder[0]
+      );
+      expect(subscriptions.applyPaidEntitlement).toHaveBeenCalledWith(
+        expect.objectContaining({ stripeSubscriptionId: 'sub_1', plan: 'business' })
+      );
+    });
+
+    it('leaves an already ended previous subscription alone', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({ stripeSubscriptionId: 'sub_old' });
+      const { cancel } = attachStripe({ id: 'sub_old', status: 'canceled' });
+
+      await service.processEventWithRetry(mockCheckoutEvent({ plan: 'business' }));
+
+      expect(cancel).not.toHaveBeenCalled();
+      expect(subscriptions.applyPaidEntitlement).toHaveBeenCalled();
+    });
+
+    it('does not cancel anything when the checkout is for the current subscription', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({ stripeSubscriptionId: 'sub_1' });
+      const { cancel } = attachStripe({ id: 'sub_old', status: 'active' });
+
+      await service.processEventWithRetry(mockCheckoutEvent({ plan: 'business' }));
+
+      expect(cancel).not.toHaveBeenCalled();
+    });
+
+    it('ignores events for a replaced subscription so the user is not downgraded', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({ stripeSubscriptionId: 'sub_new' });
+
+      await service.processEventWithRetry(
+        mockSubscriptionEvent({ cancelAtPeriodEnd: false, status: 'canceled', plan: 'pro' })
+      );
+
+      expect(subscriptions.applyPaidEntitlement).not.toHaveBeenCalled();
+      expect(webhookStore.markProcessed).toHaveBeenCalled();
+    });
+
+    it('resolves the plan from the billed price before stale metadata', async () => {
+      const event = mockSubscriptionEvent({ cancelAtPeriodEnd: false, plan: 'pro' });
+      (event.data.object as { items: unknown }).items = {
+        data: [{ price: { id: 'price_biz_month' } }],
+      };
+
+      await service.processEventWithRetry(event);
+
+      expect(subscriptions.applyPaidEntitlement).toHaveBeenCalledWith(
+        expect.objectContaining({ plan: 'business' })
+      );
+    });
+  });
 });
 
 describe('StripeWebhookStoreService helpers', () => {

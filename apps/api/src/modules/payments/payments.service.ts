@@ -338,6 +338,8 @@ export class PaymentsService {
     const stripeCustomerId =
       expandableStripeId(session.customer) ?? expandableStripeId(stripeSub.customer);
 
+    await this.cancelSupersededSubscription(userId, stripeSub.id);
+
     await this.subscriptions.applyPaidEntitlement({
       userId,
       plan,
@@ -365,6 +367,17 @@ export class PaymentsService {
         throw new Error(`Subscription not found for Stripe ID: ${stripeSub.id}`);
       }
       userId = local.userId;
+    }
+
+    const local = await this.prisma.subscription.findUnique({ where: { userId } });
+    if (local?.stripeSubscriptionId && local.stripeSubscriptionId !== stripeSub.id) {
+      // Events for a replaced subscription (e.g. its cancellation) must not overwrite the
+      // user's current one. A new subscription is synced by checkout.session.completed.
+      this.logger.warn(
+        `Ignoring ${stripeSub.status} event for Stripe subscription ${stripeSub.id}: ` +
+          `user ${userId} is on ${local.stripeSubscriptionId}`
+      );
+      return;
     }
 
     const isFullyCanceled = stripeSub.status === 'canceled' || stripeSub.status === 'unpaid';
@@ -406,6 +419,32 @@ export class PaymentsService {
 
     this.logger.log(
       `Subscription ${stripeSub.id} status=${stripeSub.status} cancelAtPeriodEnd=${cancelAtPeriodEnd} for user ${userId}`
+    );
+  }
+
+  /**
+   * If the user already had another live Stripe subscription (two Checkout tabs completed),
+   * cancel it with a prorated credit so the customer is never billed twice.
+   * Runs before the new subscription is recorded, so a retry still sees the previous id.
+   */
+  private async cancelSupersededSubscription(userId: string, newStripeSubId: string) {
+    const local = await this.prisma.subscription.findUnique({ where: { userId } });
+    const previousId = local?.stripeSubscriptionId;
+    if (!previousId || previousId === newStripeSubId) return;
+
+    let previous: Stripe.Subscription;
+    try {
+      previous = await this.stripe!.subscriptions.retrieve(previousId);
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code === 'resource_missing') return;
+      throw error;
+    }
+    if (previous.status === 'canceled' || previous.status === 'incomplete_expired') return;
+
+    await this.stripe!.subscriptions.cancel(previousId, { prorate: true });
+    this.logger.warn(
+      `Canceled superseded Stripe subscription ${previousId} for user ${userId} ` +
+        `(replaced by ${newStripeSubId})`
     );
   }
 
@@ -551,11 +590,13 @@ export function mapStripePriceToPlan(priceId: string | undefined | null): PaidPl
 export function tryResolvePaidPlanFromSubscription(
   stripeSub: Stripe.Subscription
 ): PaidPlan | null {
-  const fromMeta = stripeSub.metadata?.plan;
-  if (isPaidPlan(fromMeta)) return fromMeta;
+  // The billed price is the truth: metadata can be stale after an in-place plan change.
   const price = stripeSub.items?.data?.[0]?.price;
   const priceId = typeof price === 'string' ? price : price?.id;
-  return mapStripePriceToPlan(priceId);
+  const fromPrice = mapStripePriceToPlan(priceId);
+  if (fromPrice) return fromPrice;
+  const fromMeta = stripeSub.metadata?.plan;
+  return isPaidPlan(fromMeta) ? fromMeta : null;
 }
 
 export function resolvePaidPlan(

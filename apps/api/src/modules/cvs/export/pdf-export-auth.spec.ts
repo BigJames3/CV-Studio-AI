@@ -1,6 +1,7 @@
 import { shouldAllowPdfNetworkRequest } from './pdf-generator.service';
 import { IS_PUBLIC_KEY } from '../../../common/decorators';
 import { CvExportController } from './export.controller';
+import { FEATURE_GATE_KEY } from '../../../common/guards/feature-gate.guard';
 
 describe('shouldAllowPdfNetworkRequest', () => {
   it('allows data, about, and blob URLs', () => {
@@ -21,5 +22,17 @@ describe('CvExportController auth', () => {
     const isPublic = Reflect.getMetadata(IS_PUBLIC_KEY, CvExportController.prototype.renderPdf) as
       boolean | undefined;
     expect(isPublic).toBeFalsy();
+  });
+});
+
+describe('CvExportController async job routes', () => {
+  it('gates job status and download behind downloadPDF', () => {
+    for (const handler of ['getExportJob', 'downloadExport'] as const) {
+      const feature = Reflect.getMetadata(
+        FEATURE_GATE_KEY,
+        CvExportController.prototype[handler]
+      ) as string | undefined;
+      expect(feature).toBe('downloadPDF');
+    }
   });
 });

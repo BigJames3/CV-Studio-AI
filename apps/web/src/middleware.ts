@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { isAppRoute } from './lib/auth-routes';
 
 const AUTH_PAGES = ['/login', '/register'];
 
@@ -16,8 +17,7 @@ export function middleware(request: NextRequest) {
     request.cookies.get('cv_session')?.value === '1' ||
     Boolean(request.cookies.get('access_token')?.value);
 
-  const appOnly = ['/dashboard', '/editor', '/account', '/analytics'];
-  const mustAuth = appOnly.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  const mustAuth = isAppRoute(pathname);
 
   if (mustAuth && !hasSession) {
     const url = request.nextUrl.clone();
@@ -45,6 +45,7 @@ export const config = {
     '/editor/:path*',
     '/account/:path*',
     '/analytics/:path*',
+    '/seller/:path*',
     '/login',
     '/register',
   ],

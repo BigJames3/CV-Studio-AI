@@ -1,4 +1,5 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { getCvLimit } from '@cvstudio/shared-utils';
 import { PrismaService } from '../../database/prisma.module';
 import { FeatureGateService } from '../../common/services/feature-gate.service';
@@ -31,11 +32,16 @@ export class EntitlementsService {
     return { id: userId, subscriptionTier };
   }
 
-  async can(userId: string, feature: string): Promise<boolean> {
+  /** `db` lets callers count inside their own transaction (see CvsService quota lock). */
+  async can(
+    userId: string,
+    feature: string,
+    db: Prisma.TransactionClient = this.prisma
+  ): Promise<boolean> {
     const user = await this.gatedUser(userId);
 
     if (feature === 'cv:create') {
-      const count = await this.prisma.cv.count({
+      const count = await db.cv.count({
         where: { userId, deletedAt: null },
       });
       return this.featureGate.canCreateCV(user, count);
@@ -102,8 +108,13 @@ export class EntitlementsService {
     };
   }
 
-  async assertCan(userId: string, feature: string, message: string): Promise<void> {
-    const allowed = await this.can(userId, feature);
+  async assertCan(
+    userId: string,
+    feature: string,
+    message: string,
+    db?: Prisma.TransactionClient
+  ): Promise<void> {
+    const allowed = await this.can(userId, feature, db);
     if (allowed) return;
     const tier = await this.getTier(userId);
     void this.auditLog.logFeatureDenial(userId, feature, tier);

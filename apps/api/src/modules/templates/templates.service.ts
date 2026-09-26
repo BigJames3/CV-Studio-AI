@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, TemplateCategory } from '@prisma/client';
+import { TemplateCategory } from '@prisma/client';
 import { templateAccessType, type TemplateAccessType } from '@cvstudio/shared-utils';
 import { PrismaService } from '../../database/prisma.module';
 import { TEMPLATE_SEEDS } from './template-seeds';
@@ -127,35 +127,5 @@ export class TemplatesService {
       /* fallthrough */
     }
     return TEMPLATE_SEEDS.filter((t) => t.category === category).map((s) => this.mapSeed(s));
-  }
-
-  /** Idempotent upsert of official templates (call from bootstrap / migration job). */
-  async ensureSeeded() {
-    for (const seed of TEMPLATE_SEEDS) {
-      await this.prisma.template.upsert({
-        where: { id: seed.id },
-        create: {
-          id: seed.id,
-          name: seed.name,
-          description: seed.description,
-          category: seed.category,
-          previewImageUrl: seed.previewImageUrl,
-          isPremium: seed.isPremium,
-          price: seed.price ?? undefined,
-          designData: seed.designData as Prisma.InputJsonValue,
-          isPublished: true,
-          downloadCount: seed.downloadCount,
-          rating: seed.rating,
-        },
-        update: {
-          name: seed.name,
-          description: seed.description,
-          designData: seed.designData as Prisma.InputJsonValue,
-          isPublished: true,
-          previewImageUrl: seed.previewImageUrl,
-        },
-      });
-    }
-    return { seeded: TEMPLATE_SEEDS.length };
   }
 }

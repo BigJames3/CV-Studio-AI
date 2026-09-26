@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   BadRequestException,
+  ConflictException,
   NotFoundException,
   Optional,
   Inject,
@@ -22,6 +23,31 @@ import {
 } from '../payments/payment-env';
 import { TRIAL_PERIOD_DAYS } from '../plans/plans.service';
 import { appOriginFromEnv, safeReturnUrl } from '../../common/utils/url.utils';
+
+type PaidPlan = 'pro' | 'business';
+type BillingInterval = 'month' | 'year';
+
+/** Stripe statuses that still bill (or will bill) the customer. */
+const LIVE_STRIPE_STATUSES = new Set<Stripe.Subscription.Status>([
+  'active',
+  'trialing',
+  'past_due',
+  'unpaid',
+  'incomplete',
+]);
+
+const PLAN_RANK: Record<PaidPlan, number> = { pro: 1, business: 2 };
+
+/** An upgrade costs more right away: higher tier, or same tier from monthly to yearly. */
+function isUpgrade(
+  from: { plan: PaidPlan; interval: BillingInterval },
+  to: { plan: PaidPlan; interval: BillingInterval }
+): boolean {
+  if (PLAN_RANK[to.plan] !== PLAN_RANK[from.plan]) {
+    return PLAN_RANK[to.plan] > PLAN_RANK[from.plan];
+  }
+  return from.interval === 'month' && to.interval === 'year';
+}
 
 @Injectable()
 export class SubscriptionsService {
@@ -195,11 +221,20 @@ export class SubscriptionsService {
     }
 
     const existingSub = await this.prisma.subscription.findUnique({ where: { userId } });
+    const priceId = this.requirePriceId(dto.plan, dto.interval);
+
+    // One Stripe subscription per user: a subscriber changes plan in place instead of
+    // opening a second Checkout (which would bill both subscriptions).
+    const liveSub = await this.findLiveStripeSubscription(existingSub?.stripeSubscriptionId);
+    if (liveSub) {
+      return this.changeStripePlan(userId, liveSub, dto, priceId, successUrl);
+    }
+
     const grantTrial =
       (user.subscriptionTier ?? 'free') === 'free' && !existingSub?.stripeSubscriptionId;
 
-    const priceId = this.requirePriceId(dto.plan, dto.interval);
     const stripeCustomerId = await this.ensureStripeCustomerId(userId, user.email, existingSub);
+    await this.expireOpenCheckoutSessions(stripeCustomerId, userId);
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: 'subscription',
@@ -368,6 +403,15 @@ export class SubscriptionsService {
       });
     }
 
+    const existing = await this.prisma.subscription.findUnique({ where: { userId } });
+    if (await this.findLiveStripeSubscription(existing?.stripeSubscriptionId)) {
+      throw new ConflictException({
+        code: 'STRIPE_SUBSCRIPTION_ACTIVE',
+        message:
+          'You already have an active card subscription. Change plan with your card, or cancel it first.',
+      });
+    }
+
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
     });
@@ -397,6 +441,158 @@ export class SubscriptionsService {
       subscriptionId: subscription.id,
       returnUrl: dto.successUrl,
     });
+  }
+
+  /** The user's Stripe subscription if it still bills; `null` if there is none or it ended. */
+  private async findLiveStripeSubscription(
+    stripeSubscriptionId?: string | null
+  ): Promise<Stripe.Subscription | null> {
+    if (!stripeSubscriptionId || !this.stripe) return null;
+    let sub: Stripe.Subscription | undefined;
+    try {
+      sub = await this.stripe.subscriptions.retrieve(stripeSubscriptionId);
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code === 'resource_missing') return null;
+      this.logger.error(
+        `Could not load Stripe subscription ${stripeSubscriptionId}`,
+        error instanceof Error ? error.stack : error
+      );
+      // Fail closed: without knowing the current subscription we could bill twice.
+      throw new ServiceUnavailableException({
+        code: 'STRIPE_UNAVAILABLE',
+        message: 'Could not verify your current subscription. Please try again later.',
+      });
+    }
+    return sub && LIVE_STRIPE_STATUSES.has(sub.status) ? sub : null;
+  }
+
+  /**
+   * Switch an existing Stripe subscription to another price. Upgrades are invoiced now and
+   * only applied once paid (`pending_if_incomplete`); downgrades credit the difference on the
+   * next invoice. Re-selecting the current plan resumes a scheduled cancellation.
+   */
+  private async changeStripePlan(
+    userId: string,
+    current: Stripe.Subscription,
+    dto: CheckoutDto,
+    priceId: string,
+    successUrl: string
+  ) {
+    if (current.status !== 'active' && current.status !== 'trialing') {
+      throw new ConflictException({
+        code: 'SUBSCRIPTION_PAYMENT_ISSUE',
+        message:
+          'Your current subscription has an unpaid invoice. Update your payment method before changing plan.',
+      });
+    }
+
+    const stripe = this.stripe!;
+    const item = current.items?.data?.[0];
+    if (!item) {
+      throw new ServiceUnavailableException({
+        code: 'STRIPE_SUBSCRIPTION_INVALID',
+        message: 'Your current subscription could not be updated. Contact support.',
+      });
+    }
+    const result = {
+      plan: dto.plan,
+      interval: dto.interval,
+      userId,
+      subscriptionId: current.id,
+    };
+
+    if (item.price?.id === priceId) {
+      if (!current.cancel_at_period_end) {
+        throw new ConflictException({
+          code: 'ALREADY_SUBSCRIBED',
+          message: 'You are already subscribed to this plan.',
+        });
+      }
+      const resumed = await stripe.subscriptions.update(current.id, {
+        cancel_at_period_end: false,
+      });
+      await this.syncStripeSubscription(userId, dto.plan, resumed);
+      return { ...result, url: successUrl, mode: 'resumed' };
+    }
+
+    const from = this.planFromPriceId(item.price?.id);
+    const upgrade = !from || isUpgrade(from, { plan: dto.plan, interval: dto.interval });
+    const trialing = current.status === 'trialing';
+    const updated = await stripe.subscriptions.update(current.id, {
+      items: [{ id: item.id, price: priceId }],
+      proration_behavior: trialing ? 'none' : upgrade ? 'always_invoice' : 'create_prorations',
+      ...(upgrade && !trialing ? { payment_behavior: 'pending_if_incomplete' as const } : {}),
+      expand: ['latest_invoice'],
+    });
+
+    if (updated.pending_update) {
+      // Payment needs the customer (3-D Secure, declined card): Stripe keeps the old plan
+      // until the invoice is paid, then sends customer.subscription.updated.
+      const invoice =
+        updated.latest_invoice && typeof updated.latest_invoice === 'object'
+          ? updated.latest_invoice
+          : null;
+      return {
+        ...result,
+        url: invoice?.hosted_invoice_url ?? successUrl,
+        mode: 'payment_required',
+      };
+    }
+
+    // Changing plan means staying: keep metadata in line and drop a scheduled cancellation.
+    const final = await stripe.subscriptions.update(current.id, {
+      metadata: { ...updated.metadata, plan: dto.plan },
+      ...(updated.cancel_at_period_end ? { cancel_at_period_end: false } : {}),
+    });
+    await this.syncStripeSubscription(userId, dto.plan, final);
+    return { ...result, url: successUrl, mode: 'updated' };
+  }
+
+  private async syncStripeSubscription(userId: string, plan: PaidPlan, sub: Stripe.Subscription) {
+    await this.applyPaidEntitlement({
+      userId,
+      plan,
+      provider: 'stripe',
+      status: sub.status,
+      periodStart: new Date(sub.current_period_start * 1000),
+      periodEnd: new Date(sub.current_period_end * 1000),
+      stripeSubscriptionId: sub.id,
+      stripeCustomerId: expandableStripeId(sub.customer),
+      cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end),
+    });
+  }
+
+  private planFromPriceId(
+    priceId?: string | null
+  ): { plan: PaidPlan; interval: BillingInterval } | null {
+    if (!priceId) return null;
+    for (const plan of ['pro', 'business'] as const) {
+      for (const interval of ['month', 'year'] as const) {
+        if (this.resolvePriceId(plan, interval) === priceId) return { plan, interval };
+      }
+    }
+    return null;
+  }
+
+  /** Two open Checkout tabs could each create a subscription: keep only the newest one. */
+  private async expireOpenCheckoutSessions(customerId: string, userId: string): Promise<void> {
+    try {
+      const open = await this.stripe!.checkout.sessions.list({
+        customer: customerId,
+        status: 'open',
+        limit: 10,
+      });
+      await Promise.all(
+        open.data
+          .filter((session) => session.mode === 'subscription')
+          .map((session) => this.stripe!.checkout.sessions.expire(session.id))
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not expire open Checkout sessions for user ${userId}`,
+        error instanceof Error ? error.stack : error
+      );
+    }
   }
 
   private requirePriceId(plan: string, interval: string): string {

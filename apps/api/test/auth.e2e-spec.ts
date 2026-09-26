@@ -91,8 +91,13 @@ describe('Auth (e2e)', () => {
       .post('/api/v1/auth/refresh')
       .send({ refreshToken: oldRefresh })
       .expect(200);
-    const newRefresh = refreshFromCookie(first);
+    const second = await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: refreshFromCookie(first) })
+      .expect(200);
+    const latestRefresh = refreshFromCookie(second);
 
+    // Two rotations back: outside the previous-token grace window → theft.
     await request(app.getHttpServer())
       .post('/api/v1/auth/refresh')
       .send({ refreshToken: oldRefresh })
@@ -100,7 +105,39 @@ describe('Auth (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/refresh')
-      .send({ refreshToken: newRefresh })
+      .send({ refreshToken: latestRefresh })
+      .expect(401);
+  });
+
+  it('accepts the previous refresh token once right after rotation', async () => {
+    const email = uniqueEmail();
+    const reg = await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({ email, password, firstName: 'Grace', lastName: 'Test' })
+      .expect(201);
+
+    const oldRefresh = refreshFromCookie(reg);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: oldRefresh })
+      .expect(200);
+
+    // e.g. a navigation aborted the response carrying the new cookie
+    const replay = await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: oldRefresh })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: refreshFromCookie(replay) })
+      .expect(200);
+
+    // A second replay of the same old token is theft.
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: oldRefresh })
       .expect(401);
   });
 

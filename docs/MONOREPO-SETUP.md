@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node **20.11+** (see `.nvmrc`)
+- Node **24+** (see `.nvmrc`)
 - **pnpm 9.15+** (`corepack enable && corepack prepare pnpm@9.15.0 --activate`)
 - Docker (Postgres 16 + Redis 7)
 

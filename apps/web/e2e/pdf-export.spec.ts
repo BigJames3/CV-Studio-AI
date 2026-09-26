@@ -46,6 +46,7 @@ test.describe('PDF Export', () => {
     await page.route('**/api/v1/cvs/export/pdf**', (route) => route.abort());
     await page.getByTestId('export-pdf-open').click();
     await page.getByTestId('export-pdf-confirm').click();
-    await expect(page.getByRole('alert')).toBeVisible({ timeout: 10_000 });
+    // Scope to the export dialog: the editor form and Next's route announcer also use role=alert.
+    await expect(page.getByRole('dialog').getByRole('alert')).toBeVisible({ timeout: 10_000 });
   });
 });

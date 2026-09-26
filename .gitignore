@@ -82,7 +82,7 @@ infrastructure/terraform/**/crash.log
 *.local
 .vercel
 .sentryclirc
-.claude
-.claude
+.claude/*
+!.claude/agents/
 .cursor/*
 !.cursor/rules/

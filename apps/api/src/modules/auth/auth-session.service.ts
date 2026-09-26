@@ -9,6 +9,13 @@ export type SessionMeta = {
   ip?: string;
 };
 
+/**
+ * How long the immediately previous refresh jti is still accepted after a
+ * rotation. Covers a navigation aborting the response that carried the new
+ * cookie: the browser then replays the old token, which is not theft.
+ */
+export const REFRESH_REUSE_GRACE_SECONDS = 10;
+
 type AccessSessionCache = {
   userId: string;
   familyId: string;
@@ -30,6 +37,11 @@ export class AuthSessionService {
 
   private familyKey(familyId: string) {
     return `refresh:family:${familyId}`;
+  }
+
+  /** `<previousJti>:<jtiItWasRotatedTo>`, kept for REFRESH_REUSE_GRACE_SECONDS */
+  private graceKey(familyId: string) {
+    return `refresh:grace:${familyId}`;
   }
 
   private userFamiliesKey(userId: string) {
@@ -106,25 +118,37 @@ export class AuthSessionService {
       return 'invalid';
     }
 
+    let rotateFrom = presentedJti;
     if (currentJti !== presentedJti) {
-      await this.revokeFamily(userId, familyId);
-      return 'reuse';
+      const grace = await this.redis.get(this.graceKey(familyId));
+      if (grace !== `${presentedJti}:${currentJti}`) {
+        await this.revokeFamily(userId, familyId);
+        return 'reuse';
+      }
+      // The previous token came back within the grace window: rotate the
+      // current one instead of treating it as theft.
+      rotateFrom = currentJti;
     }
 
-    const jtiRecord = await this.redis.get(this.jtiKey(presentedJti));
+    const jtiRecord = await this.redis.get(this.jtiKey(rotateFrom));
     if (!jtiRecord) {
       await this.revokeFamily(userId, familyId);
       return 'reuse';
     }
 
     const parsed = JSON.parse(jtiRecord) as { sessionId?: string };
-    await this.redis.del(this.jtiKey(presentedJti));
+    await this.redis.del(this.jtiKey(rotateFrom));
     await this.redis.set(
       this.jtiKey(newJti),
       JSON.stringify({ userId, familyId, sessionId: parsed.sessionId }),
       this.refreshTtlSeconds
     );
     await this.redis.set(this.familyKey(familyId), newJti, this.refreshTtlSeconds);
+    await this.redis.set(
+      this.graceKey(familyId),
+      `${rotateFrom}:${newJti}`,
+      REFRESH_REUSE_GRACE_SECONDS
+    );
 
     await this.prisma.authSession.updateMany({
       where: { familyId, revokedAt: null },
@@ -202,7 +226,7 @@ export class AuthSessionService {
     await this.redis.connect();
     const currentJti = await this.redis.get(this.familyKey(familyId));
     if (currentJti) await this.redis.del(this.jtiKey(currentJti));
-    await this.redis.del(this.familyKey(familyId));
+    await this.redis.del(this.familyKey(familyId), this.graceKey(familyId));
     await this.redis.client.srem(this.userFamiliesKey(userId), familyId);
 
     const session = await this.prisma.authSession.findFirst({

@@ -15,8 +15,9 @@ import { logPayment } from '../payment-log';
 import { safeReturnUrl } from '../../../common/utils/url.utils';
 
 const CINETPAY_API_URL = 'https://api-checkout.cinetpay.com';
-const DEFAULT_USD_XOF_RATE = 656;
-const FALLBACK_USD_PRICES = {
+/** XOF is pegged to the euro: 1 EUR = 655.957 XOF. Plan prices are stored in EUR. */
+export const DEFAULT_EUR_XOF_RATE = 655.957;
+const FALLBACK_EUR_PRICES = {
   pro: { month: 9.99, year: 99 },
   business: { month: 29.99, year: 299 },
 } as const;
@@ -386,12 +387,27 @@ export class CinetpayGateway {
       priceYearly: Prisma.Decimal | number | string;
     }
   ) {
-    const rate = Number(this.config.get('CINETPAY_USD_XOF_RATE') ?? DEFAULT_USD_XOF_RATE);
-    const usdFromDb =
+    const rate = this.eurToXofRate();
+    const eurFromDb =
       interval === 'year' ? Number(dbPlan?.priceYearly) : Number(dbPlan?.priceMonthly);
-    const usd =
-      Number.isFinite(usdFromDb) && usdFromDb > 0 ? usdFromDb : FALLBACK_USD_PRICES[plan][interval];
-    return Math.max(1, Math.round(usd * rate));
+    const eur =
+      Number.isFinite(eurFromDb) && eurFromDb > 0 ? eurFromDb : FALLBACK_EUR_PRICES[plan][interval];
+    return Math.max(1, Math.round(eur * rate));
+  }
+
+  /**
+   * Plan prices are in EUR. `CINETPAY_USD_XOF_RATE` was a misnomer (its 656 default is the EUR
+   * peg); it is still honoured when the new variable is unset so live amounts do not change.
+   */
+  private eurToXofRate(): number {
+    const eur = Number(this.config.get('CINETPAY_EUR_XOF_RATE'));
+    if (Number.isFinite(eur) && eur > 0) return eur;
+    const legacy = Number(this.config.get('CINETPAY_USD_XOF_RATE'));
+    if (Number.isFinite(legacy) && legacy > 0) {
+      this.logger.warn('CINETPAY_USD_XOF_RATE is deprecated: rename it to CINETPAY_EUR_XOF_RATE');
+      return legacy;
+    }
+    return DEFAULT_EUR_XOF_RATE;
   }
 
   private appBaseUrl() {

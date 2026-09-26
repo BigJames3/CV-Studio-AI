@@ -314,7 +314,11 @@ export const subscriptionsApi = {
         cancelAtPeriodEnd: boolean;
         currentPeriodEnd: string;
         currentPeriodStart: string;
+        provider?: 'stripe' | 'cinetpay' | null;
+        stripeSubscriptionId?: string | null;
       } | null;
+      /** Billing interval of the current paid subscription (null on free). */
+      interval?: 'month' | 'year' | null;
       tier: 'free' | 'pro' | 'business';
       entitlements: {
         cvCreate: boolean;

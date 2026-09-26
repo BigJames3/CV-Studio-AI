@@ -49,6 +49,20 @@ function isUpgrade(
   return from.interval === 'month' && to.interval === 'year';
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Billing interval of a paid subscription, inferred from its current period (the table stores
+ * no interval). A yearly period is ~365 days, a monthly one 28–31; trials are reported as month.
+ */
+export function billingInterval(
+  sub: { currentPeriodStart: Date; currentPeriodEnd: Date; plan?: { name: string } | null } | null
+): BillingInterval | null {
+  if (!sub || sub.plan?.name === 'Free') return null;
+  const days = (sub.currentPeriodEnd.getTime() - sub.currentPeriodStart.getTime()) / DAY_MS;
+  return days > 45 ? 'year' : 'month';
+}
+
 @Injectable()
 export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
@@ -75,6 +89,7 @@ export class SubscriptionsService {
     const snap = await this.entitlements.snapshot(userId);
     return {
       subscription: sub,
+      interval: billingInterval(sub),
       tier: snap.tier,
       entitlements: snap.entitlements,
       cvCount: snap.cvCount,

@@ -21,11 +21,20 @@ export function PlanGrid({
   checkoutPending,
   onPeriodChange,
   onCheckout,
+  currentInterval = null,
+  cancelAtPeriodEnd = false,
+  canManageInPlace = false,
 }: {
   plans: BillingPlan[];
   currentTier: string;
   billingPeriod: 'month' | 'year';
   checkoutPending: 'pro' | 'business' | null;
+  /** Interval of the current paid subscription, when known. */
+  currentInterval?: 'month' | 'year' | null;
+  /** The current subscription is scheduled to end at period end. */
+  cancelAtPeriodEnd?: boolean;
+  /** A card (Stripe) subscription can be resumed or switched in place; CinetPay cannot. */
+  canManageInPlace?: boolean;
   onPeriodChange: (period: 'month' | 'year') => void;
   onCheckout: (plan: 'pro' | 'business', interval: 'month' | 'year') => void;
 }) {
@@ -164,7 +173,36 @@ export function PlanGrid({
               </ul>
 
               <div className="mt-5">
-                {isCurrent ? (
+                {isCurrent && isPaid && canManageInPlace && cancelAtPeriodEnd ? (
+                  <Button
+                    className="w-full"
+                    data-testid="resume-subscription"
+                    disabled={checkoutPending !== null}
+                    onClick={() =>
+                      onCheckout(plan.id as 'pro' | 'business', currentInterval ?? billingPeriod)
+                    }
+                  >
+                    {pending ? 'Réactivation…' : "Réactiver l'abonnement"}
+                  </Button>
+                ) : isCurrent &&
+                  isPaid &&
+                  canManageInPlace &&
+                  currentInterval &&
+                  currentInterval !== billingPeriod ? (
+                  <Button
+                    className="w-full"
+                    variant="secondary"
+                    data-testid={`switch-interval-${plan.id}-${billingPeriod}`}
+                    disabled={checkoutPending !== null}
+                    onClick={() => onCheckout(plan.id as 'pro' | 'business', billingPeriod)}
+                  >
+                    {pending
+                      ? 'Redirection…'
+                      : billingPeriod === 'year'
+                        ? "Passer à l'annuel"
+                        : 'Passer au mensuel'}
+                  </Button>
+                ) : isCurrent ? (
                   <Button className="w-full" variant="secondary" disabled>
                     Plan actuel
                   </Button>

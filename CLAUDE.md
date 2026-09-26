@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Monorepo overview
 
-pnpm 9.15.0 workspaces (`apps/*`, `packages/*`) orchestrated by Turborepo 2. Node `>=20.11.0` (`.nvmrc`: 20.11.0). All internal packages are scoped `@cvstudio/*` and consumed via `workspace:*`.
+pnpm 9.15.0 workspaces (`apps/*`, `packages/*`) orchestrated by Turborepo 2. Node `>=24.0.0` (`.nvmrc`: 24.18.0). All internal packages are scoped `@cvstudio/*` and consumed via `workspace:*`.
 
 | Package                                       | Role                                                                             |
 | --------------------------------------------- | -------------------------------------------------------------------------------- |

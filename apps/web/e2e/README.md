@@ -7,7 +7,7 @@ Playwright lives in `apps/web/e2e`. API Jest e2e lives in `apps/api/test/*.e2e-s
 1. **API** on `localhost:3001` with `GET /api/v1/health` returning 200
 2. **PostgreSQL** on `localhost:5432`
 3. **Redis** on `localhost:6379`
-4. Node `>=20.11`, pnpm `9.15` (see `.nvmrc`)
+4. Node `>=24`, pnpm `9.15` (see `.nvmrc`)
 
 `NEXT_PUBLIC_API_URL` must be `http://localhost:3001/api/v1` (the web client does not prefix `/api/v1`).
 

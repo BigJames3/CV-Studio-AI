@@ -4,7 +4,7 @@
 
 ## 1. Prérequis
 
-- Node `>=20.11` (`.nvmrc`), pnpm `9.15`
+- Node `>=24` (`.nvmrc`), pnpm `9.15`
 - Docker : Postgres 16 + Redis 7 (`pnpm docker:up`)
 - `apps/api/.env` + `apps/web/.env` depuis les `.env.example`
 - `JWT_*_SECRET` ≥ 32 caractères

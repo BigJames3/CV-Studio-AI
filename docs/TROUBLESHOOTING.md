@@ -2,7 +2,7 @@
 
 ## `pnpm` / `node` not found
 
-Install Node 20 LTS, then:
+Install Node 24 LTS, then:
 
 ```bash
 corepack enable

@@ -1,5 +1,6 @@
 import { test, expect, loginAs } from '../fixtures/auth.fixture';
-import { cancelSubscription, checkout, getSubscription } from '../utils/api';
+import { cancelSubscription, getSubscription } from '../utils/api';
+import { grantPlan } from '../utils/db';
 import { expectSubscriptionTier } from '../utils/assertions';
 
 test.describe('Downgrade (cancel at period end)', () => {
@@ -9,7 +10,7 @@ test.describe('Downgrade (cancel at period end)', () => {
     testUser,
     billingPage,
   }) => {
-    await checkout(request, testUser.accessToken, 'pro');
+    await grantPlan(testUser.id, 'pro');
     await loginAs(page, testUser);
     await billingPage.goto();
     await billingPage.expectPlan('pro');
@@ -23,7 +24,7 @@ test.describe('Downgrade (cancel at period end)', () => {
   });
 
   test('API cancel is consistent with UI @payment @downgrade', async ({ request, testUser }) => {
-    await checkout(request, testUser.accessToken, 'pro');
+    await grantPlan(testUser.id, 'pro');
     const canceled = await cancelSubscription(request, testUser.accessToken);
     expect(canceled.cancelAtPeriodEnd).toBe(true);
     const sub = await expectSubscriptionTier(request, testUser.accessToken, 'pro');

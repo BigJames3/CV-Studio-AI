@@ -5,7 +5,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { RedisService } from '../../../redis/redis.module';
 import { PrismaService } from '../../../database/prisma.module';
 import { EntitlementsService } from '../../subscriptions/entitlements.service';
@@ -30,10 +30,13 @@ export type PdfJobStatus = {
   updatedAt: string;
 };
 
+/** Stored job record. `ownerId` is server-side only and never returned to clients. */
+type StoredPdfJob = PdfJobStatus & { ownerId?: string; buffer?: Buffer };
+
 @Injectable()
 export class PdfExportService {
   private readonly logger = new Logger(PdfExportService.name);
-  private readonly memoryJobs = new Map<string, PdfJobStatus & { buffer?: Buffer }>();
+  private readonly memoryJobs = new Map<string, StoredPdfJob>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -149,10 +152,12 @@ export class PdfExportService {
       throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Not your CV' });
     }
 
-    const jobId = `pdf_${cvId}_${Date.now()}`;
-    const job: PdfJobStatus = {
+    // Unguessable id: must not be derivable from the (publicly exposed) CV id.
+    const jobId = `pdf_${randomUUID()}`;
+    const job: StoredPdfJob = {
       status: 'queued',
       jobId,
+      ownerId: userId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -187,9 +192,7 @@ export class PdfExportService {
       });
       const existing = await this.getJob(jobId);
       if (existing) {
-        await this.saveJob({ ...existing, buffer: result.buffer } as PdfJobStatus & {
-          buffer?: Buffer;
-        });
+        await this.saveJob({ ...existing, buffer: result.buffer });
       }
     } catch (error) {
       await this.patchJob(jobId, {
@@ -200,30 +203,36 @@ export class PdfExportService {
     }
   }
 
-  async getJobStatus(jobId: string): Promise<PdfJobStatus> {
-    const job = await this.getJob(jobId);
-    if (!job) {
-      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Export job not found' });
-    }
-    const { buffer: _b, ...publicJob } = job as PdfJobStatus & { buffer?: Buffer };
+  async getJobStatus(jobId: string, userId: string): Promise<PdfJobStatus> {
+    const job = await this.getOwnedJob(jobId, userId);
+    const { buffer: _b, ownerId: _o, ...publicJob } = job;
     return publicJob;
   }
 
-  async getJobBuffer(jobId: string): Promise<{ buffer: Buffer; filename: string }> {
-    const job = await this.getJob(jobId);
-    if (!job) {
-      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Export job not found' });
-    }
-    if (job.status !== 'completed' || !(job as { buffer?: Buffer }).buffer) {
+  async getJobBuffer(jobId: string, userId: string): Promise<{ buffer: Buffer; filename: string }> {
+    const job = await this.getOwnedJob(jobId, userId);
+    if (job.status !== 'completed' || !job.buffer) {
       throw new BadRequestException({
         code: 'NOT_READY',
         message: job.status === 'failed' ? (job.error ?? 'Export failed') : 'PDF is not ready yet',
       });
     }
     return {
-      buffer: (job as { buffer: Buffer }).buffer,
+      buffer: job.buffer,
       filename: job.filename ?? 'cv.pdf',
     };
+  }
+
+  /**
+   * Same 404 for "missing" and "not yours" so job ids cannot be probed.
+   * Jobs without an owner (legacy records) are treated as not found.
+   */
+  private async getOwnedJob(jobId: string, userId: string): Promise<StoredPdfJob> {
+    const job = await this.getJob(jobId);
+    if (!job || !job.ownerId || job.ownerId !== userId) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Export job not found' });
+    }
+    return job;
   }
 
   async renderBatch(
@@ -270,7 +279,7 @@ export class PdfExportService {
     }
   }
 
-  private async saveJob(job: PdfJobStatus & { buffer?: Buffer }): Promise<void> {
+  private async saveJob(job: StoredPdfJob): Promise<void> {
     this.memoryJobs.set(job.jobId, job);
     try {
       const { buffer, ...rest } = job;
@@ -287,15 +296,16 @@ export class PdfExportService {
     }
   }
 
-  private async getJob(jobId: string): Promise<(PdfJobStatus & { buffer?: Buffer }) | null> {
+  private async getJob(jobId: string): Promise<StoredPdfJob | null> {
     const mem = this.memoryJobs.get(jobId);
     if (mem) return mem;
     try {
       const raw = await this.redis.get(`pdf:job:${jobId}`);
       if (!raw) return null;
-      const parsed = JSON.parse(raw) as PdfJobStatus & { bufferB64?: string };
-      const job = {
-        ...parsed,
+      const parsed = JSON.parse(raw) as StoredPdfJob & { bufferB64?: string };
+      const { bufferB64: _b64, ...rest } = parsed;
+      const job: StoredPdfJob = {
+        ...rest,
         buffer: parsed.bufferB64 ? Buffer.from(parsed.bufferB64, 'base64') : undefined,
       };
       this.memoryJobs.set(jobId, job);

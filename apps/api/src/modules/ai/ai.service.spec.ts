@@ -48,9 +48,17 @@ describe('AiService', () => {
     };
 
     const quotas = {
-      assertOptimizeQuota: jest.fn().mockResolvedValue({ used: quotaUsed, limit: 50 }),
-      assertCoverLetterQuota: jest.fn().mockResolvedValue({ used: quotaUsed, limit: 20 }),
-      assertAtsExplainQuota: jest.fn().mockResolvedValue({ used: quotaUsed, limit: 20 }),
+      reserveOptimizeQuota: jest
+        .fn()
+        .mockResolvedValue({ id: 'res-1', used: quotaUsed, limit: 50 }),
+      reserveCoverLetterQuota: jest
+        .fn()
+        .mockResolvedValue({ id: 'res-1', used: quotaUsed, limit: 20 }),
+      reserveAtsExplainQuota: jest
+        .fn()
+        .mockResolvedValue({ id: 'res-1', used: quotaUsed, limit: 20 }),
+      commit: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
     };
 
     return {
@@ -102,7 +110,7 @@ describe('AiService', () => {
   });
 
   it('optimizes resume via gateway heuristic and persists AiHistory', async () => {
-    const { service, prisma, quotas } = createService();
+    const { service, quotas } = createService();
 
     const result = await service.optimizeResume(userId, {
       cvId,
@@ -110,15 +118,12 @@ describe('AiService', () => {
       tone: 'factual',
     });
 
-    expect(quotas.assertOptimizeQuota).toHaveBeenCalledWith(userId);
-    expect(prisma.aiHistory.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        userId,
-        cvId,
-        actionType: 'resume_optimization',
-        tokensUsed: 0,
-      }),
-    });
+    expect(quotas.reserveOptimizeQuota).toHaveBeenCalledWith(userId, cvId);
+    expect(quotas.commit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'res-1' }),
+      expect.objectContaining({ tokensUsed: 0 })
+    );
+    expect(quotas.release).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       status: 'completed',
       feature: 'optimize-resume',
@@ -146,6 +151,39 @@ describe('AiService', () => {
         bulletText: 'Built APIs',
       })
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('gives the reserved quota slot back when the AI call fails', async () => {
+    const { service, quotas } = createService();
+    runAiFeatureMock.mockResolvedValueOnce({ ok: false, error: 'provider down' });
+
+    await expect(
+      service.optimizeResume(userId, { cvId, bulletText: 'Built APIs' })
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(quotas.release).toHaveBeenCalledWith(expect.objectContaining({ id: 'res-1' }));
+    expect(quotas.commit).not.toHaveBeenCalled();
+  });
+
+  it('gives the slot back when the cover letter is refused', async () => {
+    const { service, quotas } = createService();
+    runAiFeatureMock.mockResolvedValueOnce({
+      ok: true,
+      data: { ok: false, refusals: ['no facts'], warnings: [] },
+    });
+
+    await expect(
+      service.generateCoverLetter(userId, { cvId, jobDescription: 'Senior engineer' })
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(quotas.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reserve quota when the CV is not owned by the caller', async () => {
+    const { service, quotas, prisma } = createService();
+    prisma.cv.findFirst.mockResolvedValueOnce({ ...defaultCv(), userId: 'someone-else' });
+
+    await expect(service.checkAts(userId, { cvId, jobDescription: 'x' })).rejects.toBeDefined();
+    expect(quotas.reserveAtsExplainQuota).not.toHaveBeenCalled();
   });
 
   it('uses default provider error message when gateway error is empty', async () => {
@@ -209,7 +247,7 @@ describe('AiService', () => {
   });
 
   it('persists optimize history with default tone when omitted', async () => {
-    const { service, prisma } = createService();
+    const { service, quotas } = createService();
     runAiFeatureMock.mockResolvedValueOnce({
       ok: true,
       tokensUsed: 12,
@@ -228,12 +266,13 @@ describe('AiService', () => {
       bulletText: 'Worked on payment webhooks',
     });
 
-    expect(prisma.aiHistory.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    expect(quotas.commit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'res-1' }),
+      expect.objectContaining({
         prompt: expect.stringContaining('tone=factual'),
         tokensUsed: 12,
-      }),
-    });
+      })
+    );
     expect(result.provider).toBe('heuristic');
     expect(result.model).toBe('gpt-4o');
   });
@@ -254,9 +293,9 @@ describe('AiService', () => {
       jobDescription: 'TypeScript React Node.js GraphQL leadership collaboration',
     });
 
-    expect(quotas.assertAtsExplainQuota).toHaveBeenCalledWith(userId);
+    expect(quotas.reserveAtsExplainQuota).toHaveBeenCalledWith(userId, cvId);
     expect(prisma.atsReport.create).toHaveBeenCalledTimes(1);
-    expect(prisma.aiHistory.create).toHaveBeenCalled();
+    expect(quotas.commit).toHaveBeenCalled();
     expect(result).toMatchObject({
       id: 'ats-1',
       feature: 'ats',
@@ -309,7 +348,7 @@ describe('AiService', () => {
   });
 
   it('generates cover letter via gateway and queues portfolio jobs', async () => {
-    const { service, prisma, quotas } = createService();
+    const { service, quotas } = createService();
 
     await expect(
       service.generateCoverLetter(userId, {
@@ -324,14 +363,11 @@ describe('AiService', () => {
         body: expect.stringContaining('Dear Hiring Manager'),
       }),
     });
-    expect(quotas.assertCoverLetterQuota).toHaveBeenCalledWith(userId);
-    expect(prisma.aiHistory.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        actionType: 'cover_letter',
-        userId,
-        cvId,
-      }),
-    });
+    expect(quotas.reserveCoverLetterQuota).toHaveBeenCalledWith(userId, cvId);
+    expect(quotas.commit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'res-1' }),
+      expect.objectContaining({ prompt: expect.stringContaining('company=Acme') })
+    );
 
     await expect(
       service.generatePortfolio(userId, {

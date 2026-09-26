@@ -106,6 +106,18 @@ describe('CvsService feature gates', () => {
     expect(prisma.cv.update).toHaveBeenCalled();
   });
 
+  it('keeps an already public CV online after the owner drops to free', async () => {
+    // Product rule: a downgrade blocks new publications, but links already sent stay valid.
+    prisma.cv.findFirst.mockResolvedValue({ id: 'cv-1', title: 'CV', publicUrl: 'cv-abc' });
+    entitlements.can.mockResolvedValue(false);
+    entitlements.getTier.mockResolvedValue('free');
+
+    await expect(service.getPublicBySlug('cv-abc')).resolves.toMatchObject({ id: 'cv-1' });
+    expect(entitlements.can).not.toHaveBeenCalled();
+    expect(entitlements.assertCan).not.toHaveBeenCalled();
+    expect(entitlements.getTier).not.toHaveBeenCalled();
+  });
+
   describe('quota under concurrent requests', () => {
     function realQuota(limit: number) {
       let stored = 0;

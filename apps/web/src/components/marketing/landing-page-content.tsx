@@ -11,7 +11,7 @@ const features = [
     body: 'Formulaire à gauche, aperçu live à droite. Autosave toutes les 5 secondes.',
   },
   {
-    title: '5 templates pro',
+    title: '5 templates',
     body: 'Modern, Creative, Executive, Startup et ATS — personnalisables couleurs et polices.',
   },
   {
@@ -32,7 +32,7 @@ const testimonials = [
     role: 'Product Designer',
   },
   {
-    quote: 'On a migrés l’équipe careers dessus. Templates ATS + export sans watermark Free.',
+    quote: 'On a migrés l’équipe careers dessus. Templates ATS + export PDF fidèle.',
     name: 'Jonas M.',
     role: 'Talent Lead',
   },
@@ -46,7 +46,7 @@ const testimonials = [
 const faqs = [
   {
     q: 'Le plan Free est-il vraiment utilisable ?',
-    a: 'Oui : 1 CV, 5 templates, export PDF sans watermark. L’IA est sur Pro.',
+    a: 'Oui : 1 CV et 4 templates, avec l’éditeur complet. L’export PDF, le partage et l’IA sont sur Pro.',
   },
   {
     q: 'Mes données sont-elles sécurisées ?',

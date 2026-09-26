@@ -9,7 +9,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
   {
     id: 'free',
     name: 'Gratuit',
-    description: '1 CV, 5 templates, PDF export, no AI',
+    description: '1 CV, 4 templates, sans export PDF, partage ni IA',
     position: 0,
     priceMonthly: 0,
     priceAnnual: null,
@@ -20,10 +20,10 @@ export const FALLBACK_PLANS: BillingPlan[] = [
     stripePriceAnnualId: null,
     entitlements: [
       { feature: 'cvLimit', value: '1', included: true },
-      { feature: 'downloadPdf', value: 'true', included: true },
-      { feature: 'share', value: 'true', included: true },
+      { feature: 'downloadPdf', value: 'false', included: false },
+      { feature: 'share', value: 'false', included: false },
       { feature: 'aiFeatures', value: 'false', included: false },
-      { feature: 'templates', value: '5', included: true },
+      { feature: 'templates', value: '4', included: true },
       { feature: 'collaborate', value: 'false', included: false },
       { feature: 'apiAccess', value: 'false', included: false },
     ],
@@ -31,7 +31,8 @@ export const FALLBACK_PLANS: BillingPlan[] = [
   {
     id: 'pro',
     name: 'Pro',
-    description: '5 CVs, 50+ templates, all AI features, ATS, portfolio',
+    description:
+      '5 CVs, tous les templates, export PDF et partage, IA : optimisation, lettre de motivation, analyse ATS',
     position: 1,
     priceMonthly: 9.99,
     priceAnnual: 99,
@@ -45,7 +46,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
       { feature: 'downloadPdf', value: 'true', included: true },
       { feature: 'share', value: 'true', included: true },
       { feature: 'aiFeatures', value: 'true', included: true },
-      { feature: 'templates', value: 'unlimited', included: true },
+      { feature: 'templates', value: 'all', included: true },
       { feature: 'collaborate', value: 'false', included: false },
       { feature: 'apiAccess', value: 'false', included: false },
     ],
@@ -53,7 +54,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
   {
     id: 'business',
     name: 'Business',
-    description: '20 CVs, everything in Pro + team collab, analytics, API, branding',
+    description: "20 CVs, tout Pro + collaboration d'équipe, analytics, API, marque personnalisée",
     position: 2,
     priceMonthly: 29.99,
     priceAnnual: 299,
@@ -67,7 +68,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
       { feature: 'downloadPdf', value: 'true', included: true },
       { feature: 'share', value: 'true', included: true },
       { feature: 'aiFeatures', value: 'true', included: true },
-      { feature: 'templates', value: 'unlimited', included: true },
+      { feature: 'templates', value: 'all', included: true },
       { feature: 'collaborate', value: 'true', included: true },
       { feature: 'apiAccess', value: 'true', included: true },
     ],
@@ -91,8 +92,11 @@ export function formatFeatureName(ent: BillingPlan['entitlements'][number]): str
         : `Créer ${ent.value} CV${ent.value === '1' ? '' : 's'}`,
     downloadPdf: 'Télécharger en PDF',
     share: 'Partager des CV',
-    aiFeatures: 'Optimisation IA',
-    templates: ent.value === 'unlimited' ? 'Templates illimités' : `${ent.value} templates`,
+    aiFeatures: 'IA : optimisation, lettre de motivation, analyse ATS',
+    templates:
+      ent.value === 'all' || ent.value === 'unlimited'
+        ? 'Tous les templates, premium inclus'
+        : `${ent.value} templates`,
     collaborate: "Collaboration d'équipe",
     prioritySupport: 'Support prioritaire',
     customDomain: 'Domaine personnalisé',

@@ -1,10 +1,11 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { BillingCatalogEntitlement, PublicBillingPlan } from '@cvstudio/shared-types';
-import { getCvLimit } from '@cvstudio/shared-utils';
+import { canDownloadPDF, canShare, getCvLimit } from '@cvstudio/shared-utils';
 import { PrismaService } from '../../database/prisma.module';
 import { RedisService } from '../../redis/redis.module';
 import { isNonPlaceholderSecret } from '../payments/payment-env';
+import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 
 export const PLAN_CACHE_KEY = 'plans:all';
 export const PLAN_CACHE_TTL_SECONDS = 3600;
@@ -19,6 +20,19 @@ const DISPLAY_NAME: Record<string, string> = {
   Pro: 'Pro',
   Business: 'Business',
 };
+
+/**
+ * Plan copy lives here rather than in `plans.description`, so what the pricing page promises
+ * follows the code on deploy instead of whatever an older seed wrote to the database.
+ */
+export const PLAN_DESCRIPTION: Record<PlanSlug, string> = {
+  free: '1 CV, 4 templates, sans export PDF, partage ni IA',
+  pro: '5 CVs, tous les templates, export PDF et partage, IA : optimisation, lettre de motivation, analyse ATS',
+  business: "20 CVs, tout Pro + collaboration d'équipe, analytics, API, marque personnalisée",
+};
+
+/** Templates a Free user can pick (non-premium ones); paid plans get the whole catalog. */
+export const FREE_TEMPLATE_COUNT = TEMPLATE_SEEDS.filter((t) => !t.isPremium).length;
 
 const POSITION: Record<string, number> = {
   Free: 0,
@@ -43,19 +57,20 @@ type PlanRow = {
 export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   {
     name: 'Free',
-    description: '1 CV, 5 templates, PDF export, no AI',
+    description: '1 CV, 4 templates, sans export PDF, partage ni IA',
     priceMonthly: 0,
     priceYearly: 0,
     cvLimit: 1,
     aiFeatures: false,
     prioritySupport: false,
     customDomain: false,
-    marketplaceAccess: false,
+    marketplaceAccess: true,
     apiAccess: false,
   },
   {
     name: 'Pro',
-    description: '5 CVs, 50+ templates, all AI features, ATS, portfolio',
+    description:
+      '5 CVs, tous les templates, export PDF et partage, IA : optimisation, lettre de motivation, analyse ATS',
     priceMonthly: 9.99,
     priceYearly: 99,
     cvLimit: 5,
@@ -67,7 +82,7 @@ export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   },
   {
     name: 'Business',
-    description: '20 CVs, everything in Pro + team collab, analytics, API, branding',
+    description: "20 CVs, tout Pro + collaboration d'équipe, analytics, API, marque personnalisée",
     priceMonthly: 29.99,
     priceYearly: 299,
     cvLimit: 20,
@@ -107,12 +122,20 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
       value: String(cvLimit),
       included: true,
     },
-    { feature: 'downloadPdf', value: 'true', included: true },
-    { feature: 'share', value: 'true', included: true },
+    {
+      feature: 'downloadPdf',
+      value: String(canDownloadPDF({ subscriptionTier: id })),
+      included: canDownloadPDF({ subscriptionTier: id }),
+    },
+    {
+      feature: 'share',
+      value: String(canShare({ subscriptionTier: id })),
+      included: canShare({ subscriptionTier: id }),
+    },
     { feature: 'aiFeatures', value: String(plan.aiFeatures), included: plan.aiFeatures },
     {
       feature: 'templates',
-      value: id === 'free' ? '5' : 'unlimited',
+      value: id === 'free' ? String(FREE_TEMPLATE_COUNT) : 'all',
       included: true,
     },
     {
@@ -126,18 +149,15 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
       included: plan.prioritySupport,
     },
     { feature: 'customDomain', value: String(plan.customDomain), included: plan.customDomain },
-    {
-      feature: 'marketplaceAccess',
-      value: String(plan.marketplaceAccess),
-      included: plan.marketplaceAccess,
-    },
+    // Marketplace purchases are one-off payments open to every plan (`marketplace:buy`).
+    { feature: 'marketplaceAccess', value: 'true', included: true },
     { feature: 'apiAccess', value: String(plan.apiAccess), included: plan.apiAccess },
   ];
 
   return {
     id,
     name: DISPLAY_NAME[plan.name] ?? plan.name,
-    description: plan.description,
+    description: PLAN_DESCRIPTION[id],
     position: POSITION[plan.name] ?? 99,
     priceMonthly,
     priceAnnual: paid && priceYearly > 0 ? priceYearly : null,

@@ -1,6 +1,7 @@
 import {
   mapPlanToPublicDto,
   PLAN_CACHE_KEY,
+  PLAN_DESCRIPTION,
   PlansService,
   TRIAL_PERIOD_DAYS,
 } from './plans.service';
@@ -63,13 +64,18 @@ describe('mapPlanToPublicDto', () => {
       included: true,
     });
     expect(dto.currency).toBe('EUR');
-    expect(dto.entitlements.find((e) => e.feature === 'downloadPdf')?.included).toBe(true);
+    expect(dto.entitlements.find((e) => e.feature === 'downloadPdf')?.included).toBe(false);
+    expect(dto.entitlements.find((e) => e.feature === 'share')?.included).toBe(false);
+    expect(dto.entitlements.find((e) => e.feature === 'marketplaceAccess')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(false);
     expect(dto.entitlements.find((e) => e.feature === 'templates')).toEqual({
       feature: 'templates',
-      value: '5',
+      value: '4',
       included: true,
     });
+    // Copy comes from code, not from the (possibly stale) seeded `plans.description`.
+    expect(dto.description).toBe(PLAN_DESCRIPTION.free);
+    expect(dto.description).not.toContain('PDF export');
     expect(dto.entitlements.find((e) => e.feature === 'collaborate')?.included).toBe(false);
     expect(dto.entitlements.some((e) => /docx/i.test(e.feature))).toBe(false);
   });
@@ -90,7 +96,9 @@ describe('mapPlanToPublicDto', () => {
     expect(dto.currency).toBe('EUR');
     expect(dto.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('5');
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(true);
-    expect(dto.entitlements.find((e) => e.feature === 'templates')?.value).toBe('unlimited');
+    expect(dto.entitlements.find((e) => e.feature === 'downloadPdf')?.included).toBe(true);
+    expect(dto.entitlements.find((e) => e.feature === 'share')?.included).toBe(true);
+    expect(dto.entitlements.find((e) => e.feature === 'templates')?.value).toBe('all');
     expect(dto.entitlements.find((e) => e.feature === 'collaborate')?.included).toBe(false);
   });
 

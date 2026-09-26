@@ -48,12 +48,13 @@ export function canShare(user: FeatureGateUser): boolean {
   return canDownloadPDF(user);
 }
 
+/** Every paid plan unlocks the whole template catalog. */
 export function canAccessProTemplates(user: FeatureGateUser): boolean {
-  return normalizeTier(user.subscriptionTier) === 'business';
+  return normalizeTier(user.subscriptionTier) !== 'free';
 }
 
 export function canAccessBusinessTemplates(user: FeatureGateUser): boolean {
-  return normalizeTier(user.subscriptionTier) === 'business';
+  return normalizeTier(user.subscriptionTier) !== 'free';
 }
 
 export function canAccessAdvancedFeatures(user: FeatureGateUser): boolean {
@@ -61,7 +62,7 @@ export function canAccessAdvancedFeatures(user: FeatureGateUser): boolean {
 }
 
 export function getAvailableTemplateTypes(user: FeatureGateUser): TemplateAccessType[] {
-  if (normalizeTier(user.subscriptionTier) === 'business') {
+  if (normalizeTier(user.subscriptionTier) !== 'free') {
     return ['free', 'pro', 'business'];
   }
   return ['free'];

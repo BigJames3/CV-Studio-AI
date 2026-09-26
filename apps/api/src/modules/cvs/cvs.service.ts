@@ -288,10 +288,6 @@ export class CvsService {
       select: { isPremium: true },
     });
     if (!template?.isPremium) return;
-    await this.entitlements.assertCan(
-      userId,
-      'templates:pro',
-      'This template requires a Business plan'
-    );
+    await this.entitlements.assertCan(userId, 'templates:pro', 'This template requires a Pro plan');
   }
 }

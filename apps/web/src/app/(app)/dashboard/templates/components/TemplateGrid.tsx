@@ -27,7 +27,7 @@ export function TemplateGrid({
             template={t}
             selected={t.id === selectedId}
             locked={!hasAccess}
-            lockLabel="Business only"
+            lockLabel="Pro"
             onSelect={() => {
               if (!hasAccess) {
                 showUpgrade('templates:pro');

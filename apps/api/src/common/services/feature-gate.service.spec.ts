@@ -87,8 +87,8 @@ describe('FeatureGateService', () => {
       expect(service.canAccessProTemplates(free)).toBe(false);
     });
 
-    it('should deny pro user (pro templates are Business-only)', () => {
-      expect(service.canAccessProTemplates(pro)).toBe(false);
+    it('should allow pro user', () => {
+      expect(service.canAccessProTemplates(pro)).toBe(true);
     });
 
     it('should allow business user', () => {
@@ -101,8 +101,8 @@ describe('FeatureGateService', () => {
       expect(service.canAccessBusinessTemplates(free)).toBe(false);
     });
 
-    it('should deny pro user', () => {
-      expect(service.canAccessBusinessTemplates(pro)).toBe(false);
+    it('should allow pro user', () => {
+      expect(service.canAccessBusinessTemplates(pro)).toBe(true);
     });
 
     it('should allow business user', () => {
@@ -129,8 +129,8 @@ describe('FeatureGateService', () => {
       expect(service.getAvailableTemplateTypes(free)).toEqual(['free']);
     });
 
-    it('should return free templates for pro tier', () => {
-      expect(service.getAvailableTemplateTypes(pro)).toEqual(['free']);
+    it('should return every template type for pro tier', () => {
+      expect(service.getAvailableTemplateTypes(pro)).toEqual(['free', 'pro', 'business']);
     });
 
     it('should return all templates for business tier', () => {

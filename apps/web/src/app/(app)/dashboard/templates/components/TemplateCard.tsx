@@ -8,7 +8,7 @@ export function TemplateCard({
   selected,
   onSelect,
   locked = false,
-  lockLabel = 'Business only',
+  lockLabel = 'Pro',
 }: {
   template: TemplateListItem;
   selected?: boolean;

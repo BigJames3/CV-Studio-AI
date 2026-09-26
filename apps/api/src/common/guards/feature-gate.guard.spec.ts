@@ -78,11 +78,15 @@ describe('FeatureGateGuard', () => {
     ).resolves.toBe(true);
   });
 
-  it('denies pro user business templates', async () => {
+  it('allows pro user business templates, denies free', async () => {
     (reflector.getAllAndOverride as jest.Mock).mockReturnValue('businessTemplates');
     prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'pro' });
     await expect(
       guard.canActivate(httpContext({ id: 'u1', subscriptionTier: 'pro' }))
+    ).resolves.toBe(true);
+    prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'free' });
+    await expect(
+      guard.canActivate(httpContext({ id: 'u1', subscriptionTier: 'free' }))
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 

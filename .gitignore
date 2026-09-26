@@ -89,3 +89,6 @@ infrastructure/terraform/**/crash.log
 
 # Local directory-tree dumps (generated, not source)
 project-tree.txt
+
+# Local PDF export smoke tests (generated, not source)
+tmp-*.pdf

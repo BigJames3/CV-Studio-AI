@@ -2,6 +2,7 @@ import { test, expect } from '../fixtures/auth.fixture';
 import { mockPdfExport } from '../utils/wait-helpers';
 import { expectSubscriptionTier } from '../utils/assertions';
 import { stripeEnabled } from '../env';
+import { grantPlan } from '../utils/db';
 
 /**
  * AC 1–8: login → create CV → export PDF → billing.
@@ -53,6 +54,18 @@ test.describe('Full payment flow (Free → Pro)', () => {
     await dashboardPage.expectCvListed('Nouveau CV');
     await page.getByRole('link', { name: 'Éditer' }).first().click();
     await editorPage.expectLoaded();
+
+    if (!stripeEnabled) {
+      // Still Free: PDF export is a Pro/Business feature and opens the paywall.
+      await page.getByTestId('export-pdf-open').click();
+      await expect(page.getByTestId('paywall-modal')).toContainText(
+        /réservé aux plans Pro et Business/
+      );
+      // Grant Pro the way a verified payment would, then check export works.
+      await grantPlan(testUser.id, 'pro');
+      await page.reload();
+      await editorPage.expectLoaded();
+    }
     await editorPage.exportPdf();
   });
 

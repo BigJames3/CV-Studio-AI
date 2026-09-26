@@ -119,17 +119,22 @@ export class CvExportController {
 
   @Get('exports/:jobId')
   @ApiBearerAuth('JWT')
-  @ApiOperation({ summary: 'Poll async PDF export job status' })
-  getExportJob(@Param('jobId') jobId: string) {
-    return this.exportService.getJobStatus(jobId);
+  @FeatureGate('downloadPDF')
+  @ApiOperation({ summary: 'Poll async PDF export job status (owner only)' })
+  getExportJob(@CurrentUser() user: AuthUser, @Param('jobId') jobId: string) {
+    return this.exportService.getJobStatus(jobId, user.id);
   }
 
   @Get('exports/:jobId/download')
   @ApiBearerAuth('JWT')
-  @ApiOperation({ summary: 'Download completed async PDF export' })
+  @FeatureGate('downloadPDF')
+  @ApiOperation({ summary: 'Download completed async PDF export (owner only)' })
   @Header('Content-Type', 'application/pdf')
-  async downloadExport(@Param('jobId') jobId: string): Promise<StreamableFile> {
-    const { buffer, filename } = await this.exportService.getJobBuffer(jobId);
+  async downloadExport(
+    @CurrentUser() user: AuthUser,
+    @Param('jobId') jobId: string
+  ): Promise<StreamableFile> {
+    const { buffer, filename } = await this.exportService.getJobBuffer(jobId, user.id);
     return new StreamableFile(buffer, {
       type: 'application/pdf',
       disposition: `attachment; filename="${filename}"`,

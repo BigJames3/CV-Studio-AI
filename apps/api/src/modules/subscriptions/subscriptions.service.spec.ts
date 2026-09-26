@@ -1,6 +1,6 @@
 import { validate } from 'class-validator';
 import { suggestPaymentMethod } from '@cvstudio/shared-utils';
-import { SubscriptionsService } from './subscriptions.service';
+import { SubscriptionsService, billingInterval } from './subscriptions.service';
 import { CheckoutDto } from './dto/subscription.dto';
 
 describe('SubscriptionsService.applyStripeSubscription', () => {
@@ -1015,5 +1015,31 @@ describe('SubscriptionsService.cancelImmediately', () => {
         data: expect.objectContaining({ subscriptionTier: 'free' }),
       })
     );
+  });
+});
+
+describe('billingInterval', () => {
+  const start = new Date('2026-01-01T00:00:00Z');
+  const plus = (days: number) => new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
+
+  it('reports month for a ~30 day period and year for a ~365 day period', () => {
+    const plan = { name: 'Pro' };
+    expect(billingInterval({ currentPeriodStart: start, currentPeriodEnd: plus(31), plan })).toBe(
+      'month'
+    );
+    expect(billingInterval({ currentPeriodStart: start, currentPeriodEnd: plus(365), plan })).toBe(
+      'year'
+    );
+  });
+
+  it('returns null without a paid subscription', () => {
+    expect(billingInterval(null)).toBeNull();
+    expect(
+      billingInterval({
+        currentPeriodStart: start,
+        currentPeriodEnd: plus(36_500),
+        plan: { name: 'Free' },
+      })
+    ).toBeNull();
   });
 });

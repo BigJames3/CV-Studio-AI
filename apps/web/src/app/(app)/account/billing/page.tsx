@@ -9,6 +9,7 @@ import { PaymentMethodSelector } from '@/components/billing/payment-selector';
 import { InvoiceHistory } from '@/components/billing/invoice-history';
 import { BillingPlansSkeleton, PlanGrid } from '@/components/billing/plan-grid';
 import { queryKeys, subscriptionsApi, paymentsApi, plansApi, invoicesApi } from '@/lib/api';
+import { ApiError } from '@/lib/api/client';
 import { FALLBACK_PLANS } from '@/lib/billing/plans-catalog';
 import { useMe, useSubscription, useUserPlan } from '@/hooks';
 import { cn, suggestPaymentMethod, type PaymentProvider } from '@/lib/utils';
@@ -61,6 +62,24 @@ function CheckoutBanner({
       <p className="font-semibold">{title}</p>
       {children}
     </div>
+  );
+}
+
+const CHECKOUT_ERROR_MESSAGES: Record<string, string> = {
+  ALREADY_SUBSCRIBED: 'Vous êtes déjà abonné à ce plan.',
+  SUBSCRIPTION_PAYMENT_ISSUE:
+    'Votre abonnement a une facture impayée. Mettez à jour votre moyen de paiement avant de changer de plan.',
+  STRIPE_SUBSCRIPTION_ACTIVE:
+    'Vous avez déjà un abonnement par carte. Changez de plan avec votre carte ou annulez-le d’abord.',
+  STRIPE_UNAVAILABLE:
+    'Impossible de vérifier votre abonnement pour le moment. Réessayez dans quelques minutes.',
+};
+
+function checkoutErrorMessage(error: unknown): string {
+  const code = error instanceof ApiError ? error.code : undefined;
+  return (
+    (code && CHECKOUT_ERROR_MESSAGES[code]) ||
+    'Le paiement a échoué. Réessayez ou utilisez une autre carte.'
   );
 }
 
@@ -166,6 +185,9 @@ function BillingPageContent() {
 
   const subscription = subData?.subscription ?? null;
   const cancelAtPeriodEnd = Boolean(subscription?.cancelAtPeriodEnd);
+  // Card subscriptions renew and can be resumed/switched in place; CinetPay is a one-off payment.
+  const isCardSubscription =
+    subscription?.provider === 'stripe' || Boolean(subscription?.stripeSubscriptionId);
   const periodEnd = subscription?.currentPeriodEnd
     ? new Date(subscription.currentPeriodEnd).toLocaleDateString('fr-FR')
     : null;
@@ -311,20 +333,23 @@ function BillingPageContent() {
   );
 
   async function checkout(plan: 'pro' | 'business', interval: 'month' | 'year') {
+    // Resuming or switching the interval of the current card plan is done in place on Stripe.
+    const inPlace = isCardSubscription && plan === displayTier;
+    const method: PaymentProvider = inPlace ? 'stripe' : selectedMethod;
     setCheckoutPending(plan);
     setCheckoutError(null);
-    track('checkout_started', { plan, interval, payment_method: selectedMethod });
-    persistPaymentMethod(selectedMethod);
+    track('checkout_started', { plan, interval, payment_method: method });
+    if (!inPlace) persistPaymentMethod(method);
     try {
       const { url } = await subscriptionsApi.checkout({
         plan,
         interval,
-        paymentMethod: selectedMethod,
+        paymentMethod: method,
       });
       window.location.href = url;
-    } catch {
-      track('checkout_failed', { plan, interval, payment_method: selectedMethod });
-      setCheckoutError('Le paiement a échoué. Réessayez ou utilisez une autre carte.');
+    } catch (error) {
+      track('checkout_failed', { plan, interval, payment_method: method });
+      setCheckoutError(checkoutErrorMessage(error));
       setCheckoutPending(null);
     }
   }
@@ -439,11 +464,15 @@ function BillingPageContent() {
           {displayIsFree
             ? 'Créez jusqu’à 1 CV. Passez à un plan supérieur pour débloquer plus de fonctionnalités.'
             : periodEnd
-              ? `Renouvellement le ${periodEnd}`
+              ? isCardSubscription
+                ? cancelAtPeriodEnd
+                  ? null
+                  : `Renouvellement le ${periodEnd}`
+                : `Accès jusqu’au ${periodEnd} (paiement unique, sans renouvellement automatique)`
               : null}
         </p>
 
-        {cancelAtPeriodEnd && periodEnd ? (
+        {cancelAtPeriodEnd && periodEnd && isCardSubscription ? (
           <p className="mt-3 text-sm text-warning" data-testid="cancel-pending">
             L&apos;abonnement se terminera le {periodEnd}. Vous conservez l&apos;accès jusqu&apos;à
             cette date.
@@ -467,6 +496,9 @@ function BillingPageContent() {
             checkoutPending={checkoutPending}
             onPeriodChange={setBillingPeriod}
             onCheckout={(plan, interval) => void checkout(plan, interval)}
+            currentInterval={subData?.interval ?? null}
+            cancelAtPeriodEnd={cancelAtPeriodEnd}
+            canManageInPlace={isCardSubscription}
           />
         )}
 
@@ -498,7 +530,7 @@ function BillingPageContent() {
           </p>
         ) : null}
 
-        {(displayIsPro || displayIsBusiness) && !cancelAtPeriodEnd ? (
+        {(displayIsPro || displayIsBusiness) && isCardSubscription && !cancelAtPeriodEnd ? (
           <div className="mt-6 flex flex-wrap gap-3">
             {cancelConfirm ? (
               <div

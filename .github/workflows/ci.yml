@@ -176,6 +176,10 @@ jobs:
 
       - name: Install
         run: pnpm install --no-frozen-lockfile
+        env:
+          # The job runs with NODE_ENV=production, which would skip devDependencies
+          # (husky, TypeScript, Nest CLI) needed to build.
+          NODE_ENV: development
 
       - name: Prisma generate + migrate + seed
         run: |
@@ -185,6 +189,11 @@ jobs:
 
       - name: Build API + Web
         run: pnpm build --filter=@cvstudio/api --filter=@cvstudio/web --filter=@cvstudio/ui --filter=@cvstudio/shared-types --filter=@cvstudio/shared-utils --filter=@cvstudio/ai-service
+
+      - name: Point workspace packages at compiled output
+        # The built API runs on plain Node, which cannot load the TypeScript sources the
+        # packages export; same rewrite as apps/api/Dockerfile.
+        run: node scripts/use-compiled-workspace-packages.cjs
 
       - name: Start API
         run: |

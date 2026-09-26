@@ -765,6 +765,211 @@ describe('SubscriptionsService.checkout', () => {
       );
     });
   });
+
+  describe('existing Stripe subscriber (no second subscription)', () => {
+    let updateSubscription: jest.Mock;
+    let listSessions: jest.Mock;
+    let expireSession: jest.Mock;
+
+    function liveSub(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'sub_live',
+        customer: 'cus_existing',
+        status: 'active',
+        cancel_at_period_end: false,
+        current_period_start: 1_780_000_000,
+        current_period_end: 1_782_592_000,
+        metadata: { userId, plan: 'pro' },
+        items: { data: [{ id: 'si_1', price: { id: 'price_pro_month' } }] },
+        pending_update: null,
+        latest_invoice: null,
+        ...overrides,
+      };
+    }
+
+    beforeEach(() => {
+      prisma.user.findFirst.mockResolvedValue({
+        id: userId,
+        email: 'user@example.com',
+        subscriptionTier: 'pro',
+        deletedAt: null,
+      });
+      prisma.subscription.findUnique.mockResolvedValue({
+        stripeSubscriptionId: 'sub_live',
+        stripeCustomerId: 'cus_existing',
+      });
+      retrieveSubscription.mockResolvedValue(liveSub());
+      updateSubscription = jest.fn(async (_id: string, params: Record<string, unknown>) =>
+        liveSub({
+          metadata: (params.metadata as Record<string, string>) ?? { userId, plan: 'pro' },
+          items: { data: [{ id: 'si_1', price: { id: 'price_biz_month' } }] },
+        })
+      );
+      listSessions = jest.fn().mockResolvedValue({ data: [] });
+      expireSession = jest.fn().mockResolvedValue({});
+      (service as unknown as { stripe: unknown }).stripe = {
+        checkout: {
+          sessions: { create: createCheckoutSession, list: listSessions, expire: expireSession },
+        },
+        customers: { create: createCustomer, list: listCustomers, update: updateCustomer },
+        subscriptions: { retrieve: retrieveSubscription, update: updateSubscription },
+      };
+    });
+
+    it('upgrades Pro -> Business in place instead of opening a new Checkout', async () => {
+      const result = await service.checkout(userId, { plan: 'business', interval: 'month' });
+
+      expect(createCheckoutSession).not.toHaveBeenCalled();
+      expect(updateSubscription).toHaveBeenNthCalledWith(
+        1,
+        'sub_live',
+        expect.objectContaining({
+          items: [{ id: 'si_1', price: 'price_biz_month' }],
+          proration_behavior: 'always_invoice',
+          payment_behavior: 'pending_if_incomplete',
+        })
+      );
+      expect(updateSubscription).toHaveBeenNthCalledWith(
+        2,
+        'sub_live',
+        expect.objectContaining({ metadata: expect.objectContaining({ plan: 'business' }) })
+      );
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ subscriptionTier: 'business' }) })
+      );
+      expect(result).toMatchObject({
+        mode: 'updated',
+        plan: 'business',
+        subscriptionId: 'sub_live',
+      });
+      expect(result.url).toContain('/account/billing?checkout=success');
+    });
+
+    it('treats monthly -> yearly on the same plan as an upgrade', async () => {
+      await service.checkout(userId, { plan: 'pro', interval: 'year' });
+      expect(updateSubscription.mock.calls[0][1]).toMatchObject({
+        items: [{ id: 'si_1', price: 'price_pro_year' }],
+        proration_behavior: 'always_invoice',
+      });
+      expect(createCheckoutSession).not.toHaveBeenCalled();
+    });
+
+    it('downgrades Business -> Pro with a credit and no immediate charge', async () => {
+      retrieveSubscription.mockResolvedValue(
+        liveSub({ items: { data: [{ id: 'si_1', price: { id: 'price_biz_month' } }] } })
+      );
+      await service.checkout(userId, { plan: 'pro', interval: 'month' });
+
+      const params = updateSubscription.mock.calls[0][1] as Record<string, unknown>;
+      expect(params.proration_behavior).toBe('create_prorations');
+      expect(params.payment_behavior).toBeUndefined();
+      expect(createCheckoutSession).not.toHaveBeenCalled();
+    });
+
+    it('changes plan without charging during a trial', async () => {
+      retrieveSubscription.mockResolvedValue(liveSub({ status: 'trialing' }));
+      await service.checkout(userId, { plan: 'business', interval: 'month' });
+
+      const params = updateSubscription.mock.calls[0][1] as Record<string, unknown>;
+      expect(params.proration_behavior).toBe('none');
+      expect(params.payment_behavior).toBeUndefined();
+    });
+
+    it('sends the customer to the invoice when the upgrade payment needs action', async () => {
+      updateSubscription.mockResolvedValueOnce(
+        liveSub({
+          pending_update: { expires_at: 1_780_086_400 },
+          latest_invoice: { hosted_invoice_url: 'https://invoice.stripe.com/i/test' },
+        })
+      );
+
+      const result = await service.checkout(userId, { plan: 'business', interval: 'month' });
+
+      expect(result).toMatchObject({
+        mode: 'payment_required',
+        url: 'https://invoice.stripe.com/i/test',
+      });
+      expect(updateSubscription).toHaveBeenCalledTimes(1);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects re-subscribing to the current plan', async () => {
+      await expect(
+        service.checkout(userId, { plan: 'pro', interval: 'month' })
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'ALREADY_SUBSCRIBED' }),
+      });
+      expect(createCheckoutSession).not.toHaveBeenCalled();
+      expect(updateSubscription).not.toHaveBeenCalled();
+    });
+
+    it('resumes a scheduled cancellation when the current plan is chosen again', async () => {
+      retrieveSubscription.mockResolvedValue(liveSub({ cancel_at_period_end: true }));
+      updateSubscription.mockResolvedValueOnce(liveSub({ cancel_at_period_end: false }));
+
+      const result = await service.checkout(userId, { plan: 'pro', interval: 'month' });
+
+      expect(updateSubscription).toHaveBeenCalledWith('sub_live', { cancel_at_period_end: false });
+      expect(result).toMatchObject({ mode: 'resumed' });
+      expect(createCheckoutSession).not.toHaveBeenCalled();
+    });
+
+    it('asks to fix the payment method before changing a past_due subscription', async () => {
+      retrieveSubscription.mockResolvedValue(liveSub({ status: 'past_due' }));
+      await expect(
+        service.checkout(userId, { plan: 'business', interval: 'month' })
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'SUBSCRIPTION_PAYMENT_ISSUE' }),
+      });
+      expect(createCheckoutSession).not.toHaveBeenCalled();
+      expect(updateSubscription).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when Stripe cannot confirm the current subscription', async () => {
+      retrieveSubscription.mockRejectedValue(new Error('Stripe down'));
+      await expect(
+        service.checkout(userId, { plan: 'business', interval: 'month' })
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'STRIPE_UNAVAILABLE' }),
+      });
+      expect(createCheckoutSession).not.toHaveBeenCalled();
+    });
+
+    it('opens a new Checkout when the previous subscription has ended', async () => {
+      retrieveSubscription.mockResolvedValue(liveSub({ status: 'canceled' }));
+      await service.checkout(userId, { plan: 'business', interval: 'month' });
+      expect(createCheckoutSession).toHaveBeenCalledTimes(1);
+      expect(updateSubscription).not.toHaveBeenCalled();
+    });
+
+    it('expires older open Checkout sessions before creating a new one', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({
+        stripeSubscriptionId: null,
+        stripeCustomerId: 'cus_existing',
+      });
+      listSessions.mockResolvedValue({
+        data: [
+          { id: 'cs_old_sub', mode: 'subscription' },
+          { id: 'cs_marketplace', mode: 'payment' },
+        ],
+      });
+
+      await service.checkout(userId, { plan: 'pro', interval: 'month' });
+
+      expect(expireSession).toHaveBeenCalledTimes(1);
+      expect(expireSession).toHaveBeenCalledWith('cs_old_sub');
+      expect(createCheckoutSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('blocks CinetPay checkout while a card subscription is active', async () => {
+      await expect(
+        service.checkout(userId, { plan: 'business', interval: 'month', paymentMethod: 'cinetpay' })
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'STRIPE_SUBSCRIPTION_ACTIVE' }),
+      });
+      expect(cinetpayGateway.createPayment).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('geo-based payment suggestion (v2)', () => {

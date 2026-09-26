@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, loginAs } from '../fixtures/auth.fixture';
+import type { TestUser } from '../utils/api';
 
 const SECTIONS = [
   'identity',
@@ -35,17 +36,9 @@ async function noPageOverflow(page: import('@playwright/test').Page) {
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
 }
 
-async function openLocalEditor(
-  context: import('@playwright/test').BrowserContext,
-  page: import('@playwright/test').Page
-) {
-  await context.addCookies([
-    {
-      name: 'cv_session',
-      value: '1',
-      url: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000',
-    },
-  ]);
+async function openLocalEditor(page: import('@playwright/test').Page, user: TestUser) {
+  // Real session: the app shell calls /users/me and a 401 redirects to /login.
+  await loginAs(page, user);
   await page.goto('/editor/local-e2e-tabs');
   await expect(page.getByTestId('cv-editor')).toBeVisible({ timeout: 20_000 });
   await page.waitForFunction(() => {
@@ -57,9 +50,9 @@ async function openLocalEditor(
 }
 
 test.describe('Editor mobile section tabs', () => {
-  test('all sections reachable at 375px without page overflow', async ({ context, page }) => {
+  test('all sections reachable at 375px without page overflow', async ({ page, testUser }) => {
     await page.setViewportSize({ width: 375, height: 812 });
-    await openLocalEditor(context, page);
+    await openLocalEditor(page, testUser);
 
     const tabs = page.getByTestId('editor-section-tabs');
     await expect(tabs).toBeVisible();
@@ -82,9 +75,9 @@ test.describe('Editor mobile section tabs', () => {
     await noPageOverflow(page);
   });
 
-  test('tabs hidden and rail visible at 768px', async ({ context, page }) => {
+  test('tabs hidden and rail visible at 768px', async ({ page, testUser }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
-    await openLocalEditor(context, page);
+    await openLocalEditor(page, testUser);
 
     await expect(page.getByTestId('editor-section-tabs')).toBeHidden();
     const rail = page.getByTestId('editor-section-rail');
@@ -96,9 +89,9 @@ test.describe('Editor mobile section tabs', () => {
     await noPageOverflow(page);
   });
 
-  test('keyboard arrows switch sections at 375px', async ({ context, page }) => {
+  test('keyboard arrows switch sections at 375px', async ({ page, testUser }) => {
     await page.setViewportSize({ width: 375, height: 812 });
-    await openLocalEditor(context, page);
+    await openLocalEditor(page, testUser);
 
     const profileTab = page.getByTestId('editor-section-identity');
     await profileTab.focus();

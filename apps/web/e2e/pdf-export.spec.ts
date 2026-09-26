@@ -1,20 +1,15 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, loginAs } from './fixtures/auth.fixture';
 import { mkdir } from 'fs/promises';
 import path from 'path';
 
 /**
- * PDF export UI contract on the local editor (no API CV required).
+ * PDF export UI contract on the local editor (no API CV required, but a real
+ * session: the app shell calls /users/me and a 401 redirects to /login).
  * Full authenticated export is covered by tests/full-payment-flow.spec.ts.
  */
 test.describe('PDF Export', () => {
-  test.beforeEach(async ({ context, page }) => {
-    await context.addCookies([
-      {
-        name: 'cv_session',
-        value: '1',
-        url: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000',
-      },
-    ]);
+  test.beforeEach(async ({ page, testUser }) => {
+    await loginAs(page, testUser);
     await page.goto('/editor/local-e2e-pdf');
   });
 

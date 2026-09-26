@@ -84,11 +84,11 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Typecheck
-        run: pnpm typecheck
-
       - name: Prisma generate
         run: pnpm --filter @cvstudio/api exec prisma generate
+
+      - name: Typecheck
+        run: pnpm typecheck
 
       - name: Test
         run: pnpm test
@@ -154,6 +154,7 @@ jobs:
       PORT: '3001'
       JWT_ACCESS_SECRET: lh-access-secret-min-32-characters!!!!
       JWT_REFRESH_SECRET: lh-refresh-secret-min-32-characters!!!
+      ENCRYPTION_KEY: lh-encryption-key-min-32-characters!!!
       CORS_ORIGINS: http://localhost:3000
       APP_URL: http://localhost:3000
       NEXT_PUBLIC_API_URL: http://localhost:3001/api/v1
@@ -176,6 +177,10 @@ jobs:
 
       - name: Install
         run: pnpm install --no-frozen-lockfile
+        env:
+          # The job runs with NODE_ENV=production, which would skip devDependencies
+          # (husky, TypeScript, Nest CLI) needed to build.
+          NODE_ENV: development
 
       - name: Prisma generate + migrate + seed
         run: |
@@ -185,6 +190,11 @@ jobs:
 
       - name: Build API + Web
         run: pnpm build --filter=@cvstudio/api --filter=@cvstudio/web --filter=@cvstudio/ui --filter=@cvstudio/shared-types --filter=@cvstudio/shared-utils --filter=@cvstudio/ai-service
+
+      - name: Point workspace packages at compiled output
+        # The built API runs on plain Node, which cannot load the TypeScript sources the
+        # packages export; same rewrite as apps/api/Dockerfile.
+        run: node scripts/use-compiled-workspace-packages.cjs
 
       - name: Start API
         run: |
@@ -236,6 +246,9 @@ jobs:
 
       - name: Install
         run: pnpm install --no-frozen-lockfile
+
+      - name: Prisma generate
+        run: pnpm --filter @cvstudio/api exec prisma generate
 
       - name: Build
         run: pnpm build --filter=@cvstudio/api --filter=@cvstudio/web --filter=@cvstudio/ui --filter=@cvstudio/shared-types --filter=@cvstudio/shared-utils --filter=@cvstudio/ai-service

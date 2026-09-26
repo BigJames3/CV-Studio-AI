@@ -2,6 +2,16 @@
 
 Journal limité à `docs/agents/`. Pas un changelog produit.
 
+## 2026-09-26 — Mise à jour du task board
+
+Relecture de `claude/dreamy-johnson-ef2lkk` (PR #18, ouverte, non mergée ; contenue dans la PR #19) et exécution des tests ciblés sur cette branche : 18 suites, 216 tests verts.
+
+- Nouveau statut `FIX_ON_BRANCH` (corrigé sur une branche, pas dans `main`) et `DONE` (mergé).
+- `FIX_ON_BRANCH` : SEC-001, BILL-001, BILL-002, BILL-003, API-001, API-002, SEC-003.
+- BILL-004 reste `OPEN` (partiel).
+- `DECISIONS.md` : HUMAN-UPGRADE et HUMAN-PAST-DUE indiquent le choix fait par le correctif, à valider avant merge.
+- Aucun fichier applicatif modifié.
+
 ## 2026-09-26 — Audit Architect initial
 
 Création du pack opérationnel. Aucun fichier hors `docs/agents/` n'a été modifié par cette mission.

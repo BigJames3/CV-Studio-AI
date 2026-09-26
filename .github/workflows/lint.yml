@@ -32,6 +32,9 @@ jobs:
       - name: Run ESLint
         run: pnpm lint
 
+      - name: Prisma generate
+        run: pnpm --filter @cvstudio/api exec prisma generate
+
       - name: Check TypeScript
         run: pnpm type-check
 

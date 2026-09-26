@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js **20.11+** (`.nvmrc`)
+- Node.js **20.19+** (`.nvmrc`)
 - **pnpm 9.15+** (`corepack enable && corepack prepare pnpm@9.15.0 --activate`)
 - Docker Desktop (Postgres + Redis)
 - Git

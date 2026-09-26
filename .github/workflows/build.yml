@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      - name: Prisma generate
+        run: pnpm --filter @cvstudio/api exec prisma generate
+
       - name: Build packages and apps
         run: pnpm build --filter=@cvstudio/api --filter=@cvstudio/web --filter=@cvstudio/ui --filter=@cvstudio/shared-types --filter=@cvstudio/shared-utils --filter=@cvstudio/ai-service
 

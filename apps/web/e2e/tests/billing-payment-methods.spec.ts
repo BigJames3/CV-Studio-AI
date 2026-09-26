@@ -21,7 +21,9 @@ test.describe('Billing payment methods', () => {
     await page.goto('/account/billing?checkout=success');
     await expect(page.getByTestId('billing-page')).toBeVisible();
     await expect(page.getByTestId('checkout-success-banner')).toBeVisible();
-    await expect(page.getByText(/Paiement reçu|Activation en cours/)).toBeVisible();
+    await expect(page.getByTestId('checkout-success-banner')).toContainText(
+      /Paiement reçu|Activation en cours/
+    );
     await billingPage.expectPlan('free');
   });
 
@@ -62,10 +64,12 @@ test.describe('Billing payment methods', () => {
     await expect(page.getByTestId('checkout-activation-status')).toContainText(
       /Activation en cours/
     );
-    await expect(page.getByTestId('plan-badge')).toContainText(/free/i);
+    // The top bar also renders a plan-badge; assert the billing page one.
+    const planBadge = page.getByTestId('billing-page').getByTestId('plan-badge');
+    await expect(planBadge).toContainText(/free/i);
 
     grantPro = true;
-    await expect(page.getByTestId('plan-badge')).toContainText(/pro/i, { timeout: 15_000 });
+    await expect(planBadge).toContainText(/pro/i, { timeout: 15_000 });
     await expect(page.getByText(/Abonnement activé/)).toBeVisible();
   });
 

@@ -71,8 +71,8 @@ jobs:
           REG: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-west-1.amazonaws.com
           TAG: ${{ steps.tag.outputs.sha }}
         run: |
-          docker build -t "$REG/cvstudio/api:$TAG" -f apps/api/Dockerfile apps/api
-          docker build -t "$REG/cvstudio/web:$TAG" -f apps/web/Dockerfile apps/web
+          docker build -t "$REG/cvstudio/api:$TAG" -f apps/api/Dockerfile .
+          docker build -t "$REG/cvstudio/web:$TAG" -f apps/web/Dockerfile .
           docker build -t "$REG/cvstudio/worker:$TAG" -f apps/api/Dockerfile.worker apps/api
           docker push "$REG/cvstudio/api:$TAG"
           docker push "$REG/cvstudio/web:$TAG"

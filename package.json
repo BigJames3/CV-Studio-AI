@@ -6,7 +6,7 @@
   "license": "UNLICENSED",
   "packageManager": "pnpm@9.15.0",
   "engines": {
-    "node": ">=20.11.0",
+    "node": ">=24.0.0",
     "pnpm": ">=9.0.0"
   },
   "scripts": {
@@ -23,7 +23,7 @@
     "start:api": "turbo run start --filter=@cvstudio/api",
     "start:web": "turbo run start --filter=@cvstudio/web",
     "lint": "turbo run lint",
-    "lint:fix": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "typecheck": "turbo run typecheck",
     "type-check": "turbo run typecheck",

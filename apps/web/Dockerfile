@@ -2,7 +2,7 @@
 # Next.js web — build from repo root:
 #   docker build -f apps/web/Dockerfile .
 
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 RUN apk add --no-cache libc6-compat dumb-init curl ca-certificates
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app

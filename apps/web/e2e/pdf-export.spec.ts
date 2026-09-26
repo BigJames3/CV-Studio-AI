@@ -1,20 +1,15 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, loginAs } from './fixtures/auth.fixture';
 import { mkdir } from 'fs/promises';
 import path from 'path';
 
 /**
- * PDF export UI contract on the local editor (no API CV required).
+ * PDF export UI contract on the local editor (no API CV required, but a real
+ * session: the app shell calls /users/me and a 401 redirects to /login).
  * Full authenticated export is covered by tests/full-payment-flow.spec.ts.
  */
 test.describe('PDF Export', () => {
-  test.beforeEach(async ({ context, page }) => {
-    await context.addCookies([
-      {
-        name: 'cv_session',
-        value: '1',
-        url: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000',
-      },
-    ]);
+  test.beforeEach(async ({ page, testUser }) => {
+    await loginAs(page, testUser);
     await page.goto('/editor/local-e2e-pdf');
   });
 
@@ -51,6 +46,7 @@ test.describe('PDF Export', () => {
     await page.route('**/api/v1/cvs/export/pdf**', (route) => route.abort());
     await page.getByTestId('export-pdf-open').click();
     await page.getByTestId('export-pdf-confirm').click();
-    await expect(page.getByRole('alert')).toBeVisible({ timeout: 10_000 });
+    // Scope to the export dialog: the editor form and Next's route announcer also use role=alert.
+    await expect(page.getByRole('dialog').getByRole('alert')).toBeVisible({ timeout: 10_000 });
   });
 });

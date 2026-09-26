@@ -5,7 +5,9 @@
     "types": ["node"],
     "outDir": "dist",
     "rootDir": "src",
-    "composite": true
+    "composite": true,
+    "module": "CommonJS",
+    "moduleResolution": "Node"
   },
   "include": ["src/**/*"],
   "references": [{ "path": "../shared-types" }]

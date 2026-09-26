@@ -1,5 +1,6 @@
 import { test, expect, loginAs } from '../fixtures/auth.fixture';
-import { checkout, listCvs } from '../utils/api';
+import { listCvs } from '../utils/api';
+import { grantPlan } from '../utils/db';
 
 test.describe('Plan limits', () => {
   test('Free: second CV opens paywall @limits @paywall', async ({
@@ -28,7 +29,7 @@ test.describe('Plan limits', () => {
     testUser,
     dashboardPage,
   }) => {
-    await checkout(request, testUser.accessToken, 'pro');
+    await grantPlan(testUser.id, 'pro');
     await loginAs(page, testUser);
     await dashboardPage.createCv();
     await page.goto('/dashboard');
@@ -45,7 +46,7 @@ test.describe('Plan limits', () => {
     testUser,
     dashboardPage,
   }) => {
-    await checkout(request, testUser.accessToken, 'business');
+    await grantPlan(testUser.id, 'business');
     await loginAs(page, testUser);
     await dashboardPage.createCv();
     await page.goto('/dashboard');

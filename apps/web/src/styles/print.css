@@ -36,6 +36,17 @@
     display: none !important;
   }
 
+  /* Free plan: print only the upgrade notice (see EditorShell `data-print-locked`) */
+  .editor-shell[data-print-locked] > *:not(.cv-print-locked-notice) {
+    display: none !important;
+  }
+
+  .editor-shell[data-print-locked] > .cv-print-locked-notice {
+    display: block !important;
+    margin: 2rem !important;
+    font-size: 14pt;
+  }
+
   html,
   body {
     margin: 0 !important;

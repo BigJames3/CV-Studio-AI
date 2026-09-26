@@ -37,15 +37,11 @@ const featureNames: Record<string, { title: string; description: string }> = {
   },
   'templates:pro': {
     title: '🎨 Templates premium',
-    description: 'Les templates Pro et Business sont réservés au plan Business.',
+    description: 'Les templates premium sont réservés aux plans Pro et Business.',
   },
   'ai:generate': {
     title: '✨ Génération IA',
     description: 'La génération de contenu IA est réservée aux utilisateurs Premium.',
-  },
-  'marketplace:buy': {
-    title: 'Marketplace Pro',
-    description: 'L’achat de templates créateurs est réservé aux plans Pro et Business.',
   },
 };
 

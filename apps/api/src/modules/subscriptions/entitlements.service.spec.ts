@@ -66,11 +66,21 @@ describe('EntitlementsService', () => {
     await expect(service.can('u1', 'cv:share')).resolves.toBe(true);
   });
 
-  it('denies pro templates for pro, allows business', async () => {
-    prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'pro' });
+  it('opens premium templates to every paid plan, not free', async () => {
+    prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'free' });
     await expect(service.can('u1', 'templates:pro')).resolves.toBe(false);
+    prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'pro' });
+    await expect(service.can('u1', 'templates:pro')).resolves.toBe(true);
+    await expect(service.can('u1', 'templates:business')).resolves.toBe(true);
     prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'business' });
     await expect(service.can('u1', 'templates:pro')).resolves.toBe(true);
+  });
+
+  it('lets every plan buy on the marketplace (one-off purchase)', async () => {
+    for (const tier of ['free', 'pro', 'business']) {
+      prisma.user.findUnique.mockResolvedValue({ subscriptionTier: tier });
+      await expect(service.can('u1', 'marketplace:buy')).resolves.toBe(true);
+    }
   });
 
   it('keeps AI generate as pro+', async () => {
@@ -136,7 +146,7 @@ describe('EntitlementsService', () => {
     it('treats an expired business period as free for premium templates', async () => {
       prisma.user.findUnique.mockResolvedValue(lapsed('business', 'active', -10));
       await expect(service.can('u1', 'templates:business')).resolves.toBe(false);
-      await expect(service.can('u1', 'marketplace:buy')).resolves.toBe(false);
+      await expect(service.can('u1', 'ai:optimize')).resolves.toBe(false);
     });
 
     it('treats a canceled subscription as free even inside the period', async () => {

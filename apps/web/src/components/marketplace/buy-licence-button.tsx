@@ -5,13 +5,10 @@ import Link from 'next/link';
 import { marketplaceApi } from '@/lib/api';
 import { ApiError } from '@/lib/api/client';
 import { Button } from '@/components/ui/button';
-import { useMe, useUserPlan } from '@/hooks/useMe';
-import { useFeatureGate } from '@/hooks/useFeatureGate';
+import { useMe } from '@/hooks/useMe';
 
 export function BuyLicenceButton({ listingId }: { listingId: string }) {
   const { data: user, isLoading } = useMe();
-  const { isFree } = useUserPlan();
-  const { showUpgrade } = useFeatureGate();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,18 +33,6 @@ export function BuyLicenceButton({ listingId }: { listingId: string }) {
     );
   }
 
-  if (isFree) {
-    return (
-      <Button
-        className="mt-4 w-full sm:w-auto"
-        data-testid="marketplace-buy"
-        onClick={() => showUpgrade('marketplace:buy')}
-      >
-        Passer Pro pour acheter
-      </Button>
-    );
-  }
-
   async function onBuy() {
     setError(null);
     setPending(true);
@@ -57,10 +42,6 @@ export function BuyLicenceButton({ listingId }: { listingId: string }) {
     } catch (err) {
       if (err instanceof ApiError && (err.status === 401 || err.code === 'UNAUTHORIZED')) {
         window.location.assign(`/login?next=/marketplace/${listingId}`);
-        return;
-      }
-      if (err instanceof ApiError && (err.status === 403 || err.code === 'ENTITLEMENT_REQUIRED')) {
-        showUpgrade('marketplace:buy');
         return;
       }
       setError(err instanceof Error ? err.message : 'Paiement indisponible pour le moment.');

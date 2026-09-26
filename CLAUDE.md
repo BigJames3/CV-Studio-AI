@@ -13,7 +13,7 @@ pnpm 9.15.0 workspaces (`apps/*`, `packages/*`) orchestrated by Turborepo 2. Nod
 | `apps/mobile` (`@cvstudio/mobile`)            | Expo app (partial, Phase 4).                                                     |
 | `packages/ai-service`                         | Multi-model AI gateway, built to `dist/` and consumed by the API.                |
 | `packages/ui`                                 | shadcn/Radix design system + Storybook + Vitest. `shared-ui` just re-exports it. |
-| `packages/shared-types`, `shared-utils`       | Shared TS used by api and web (source-exported via `./src/index.ts`).            |
+| `packages/shared-types`, `shared-utils`       | Shared TS used by api and web, built to CommonJS in `dist/`.                     |
 | `packages/eslint-config`, `typescript-config` | Shared configs.                                                                  |
 
 Most docs (`docs/`, README) are written in French. Canonical specs: `docs/ARCHITECTURE-CV-STUDIO-AI.md`, `docs/API-CV-STUDIO-AI.md`, `docs/FRONTEND-CV-STUDIO-AI.md`, `docs/DATABASE-CV-STUDIO-AI.md`, `docs/INFRASTRUCTURE-CV-STUDIO-AI.md`. Architecture decisions live in `docs/adr/`.
@@ -35,7 +35,7 @@ pnpm format                         # prettier --write
 pnpm lint:fix                       # NOTE: actually `prettier --check`, it does not fix anything
 ```
 
-Turbo `lint`, `typecheck`, `test` and `build` all depend on `^build`, so upstream packages (`ai-service`, `shared-*`) get built first.
+Turbo `dev`, `lint`, `typecheck`, `test` and `build` all depend on `^build`, so upstream packages (`ai-service`, `shared-*`) get built first. `pnpm dev` does not watch them: after editing `packages/*`, restart it.
 
 ### Running a single package / test
 

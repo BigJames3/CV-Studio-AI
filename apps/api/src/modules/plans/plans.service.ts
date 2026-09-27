@@ -43,7 +43,7 @@ type PlanRow = {
 export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   {
     name: 'Free',
-    description: '1 CV, 5 templates, PDF export, no AI',
+    description: '1 CV, 5 templates, no PDF export, no AI',
     priceMonthly: 0,
     priceYearly: 0,
     cvLimit: 1,
@@ -107,8 +107,9 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
       value: String(cvLimit),
       included: true,
     },
-    { feature: 'downloadPdf', value: 'true', included: true },
-    { feature: 'share', value: 'true', included: true },
+    // Same rule as canDownloadPDF / canShare: PDF and sharing are paid features.
+    { feature: 'downloadPdf', value: String(id !== 'free'), included: id !== 'free' },
+    { feature: 'share', value: String(id !== 'free'), included: id !== 'free' },
     { feature: 'aiFeatures', value: String(plan.aiFeatures), included: plan.aiFeatures },
     {
       feature: 'templates',

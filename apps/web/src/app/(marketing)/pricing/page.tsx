@@ -14,7 +14,7 @@ export default function PricingPage() {
       <PricingAnalytics />
       <h1 className="text-4xl font-semibold">Tarifs simples</h1>
       <p className="mt-2 text-content-secondary">
-        Sans watermark sur le PDF Free. Annulation self-serve.
+        Export PDF et partage à partir du plan Pro. Annulation self-serve.
       </p>
       <PricingPlanCards />
     </div>

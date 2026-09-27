@@ -9,7 +9,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
   {
     id: 'free',
     name: 'Gratuit',
-    description: '1 CV, 5 templates, PDF export, no AI',
+    description: '1 CV, 5 templates, no PDF export, no AI',
     position: 0,
     priceMonthly: 0,
     priceAnnual: null,
@@ -20,8 +20,8 @@ export const FALLBACK_PLANS: BillingPlan[] = [
     stripePriceAnnualId: null,
     entitlements: [
       { feature: 'cvLimit', value: '1', included: true },
-      { feature: 'downloadPdf', value: 'true', included: true },
-      { feature: 'share', value: 'true', included: true },
+      { feature: 'downloadPdf', value: 'false', included: false },
+      { feature: 'share', value: 'false', included: false },
       { feature: 'aiFeatures', value: 'false', included: false },
       { feature: 'templates', value: '5', included: true },
       { feature: 'collaborate', value: 'false', included: false },

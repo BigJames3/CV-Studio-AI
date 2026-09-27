@@ -1,4 +1,6 @@
+import { canDownloadPDF, canShare } from '@cvstudio/shared-utils';
 import {
+  CATALOG_FALLBACK_ROWS,
   mapPlanToPublicDto,
   PLAN_CACHE_KEY,
   PlansService,
@@ -63,7 +65,8 @@ describe('mapPlanToPublicDto', () => {
       included: true,
     });
     expect(dto.currency).toBe('EUR');
-    expect(dto.entitlements.find((e) => e.feature === 'downloadPdf')?.included).toBe(true);
+    expect(dto.entitlements.find((e) => e.feature === 'downloadPdf')?.included).toBe(false);
+    expect(dto.entitlements.find((e) => e.feature === 'share')?.included).toBe(false);
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(false);
     expect(dto.entitlements.find((e) => e.feature === 'templates')).toEqual({
       feature: 'templates',
@@ -103,6 +106,30 @@ describe('mapPlanToPublicDto', () => {
     expect(dto.entitlements.find((e) => e.feature === 'customDomain')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'collaborate')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('20');
+  });
+});
+
+describe('catalog matches the runtime PDF/share gate (FE-001)', () => {
+  it.each([
+    ['free', FREE],
+    ['pro', PRO],
+    ['business', BUSINESS],
+  ] as const)('%s', (tier, row) => {
+    const dto = mapPlanToPublicDto(row);
+    const user = { subscriptionTier: tier };
+    expect(dto.entitlements.find((e) => e.feature === 'downloadPdf')).toMatchObject({
+      included: canDownloadPDF(user),
+      value: String(canDownloadPDF(user)),
+    });
+    expect(dto.entitlements.find((e) => e.feature === 'share')).toMatchObject({
+      included: canShare(user),
+      value: String(canShare(user)),
+    });
+  });
+
+  it('no catalog description promises a PDF on the Free plan', () => {
+    const free = CATALOG_FALLBACK_ROWS.find((row) => row.name === 'Free');
+    expect(free?.description).not.toMatch(/(?<!no )PDF export/i);
   });
 });
 

@@ -1,4 +1,4 @@
-import { apiClient, setLogoutInProgress } from './client';
+import { apiClient, ensureAccessToken, setLogoutInProgress } from './client';
 import { useAuthStore } from '@/stores/auth-store';
 import type { PublicBillingPlan } from '@cvstudio/shared-types';
 import type { MarketplaceListing } from '@/lib/marketplace/types';
@@ -70,6 +70,21 @@ export const authApi = {
       skipRefresh: true,
     });
     return applyAuth(data);
+  },
+  /**
+   * Account this browser is signed in to, or null. Checked against the API rather than a
+   * cookie (a stale refresh cookie must not count), and never redirects: safe on /login.
+   */
+  currentUser: async (): Promise<{ id: string; email: string } | null> => {
+    if (typeof document !== 'undefined' && !document.cookie.includes('cv_session=1')) {
+      return null;
+    }
+    if (!(await ensureAccessToken())) return null;
+    try {
+      return await apiClient<{ id: string; email: string }>('/users/me', { skipRefresh: true });
+    } catch {
+      return null;
+    }
   },
   logout: async () => {
     setLogoutInProgress(true);

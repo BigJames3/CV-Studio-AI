@@ -37,6 +37,8 @@ export function setLogoutInProgress(value: boolean) {
 }
 
 const LOGOUT_BROADCAST_KEY = 'cv_logout_at';
+/** localStorage key written on every sign-in so other tabs notice an account switch. */
+const ACCOUNT_BROADCAST_KEY = 'cv_account';
 
 function clearClientSessionCookies() {
   if (typeof document === 'undefined') return;
@@ -68,7 +70,7 @@ export function clearClientAuth() {
   clearClientSessionCookies();
 }
 
-export { LOGOUT_BROADCAST_KEY };
+export { ACCOUNT_BROADCAST_KEY, LOGOUT_BROADCAST_KEY };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
 
@@ -97,6 +99,15 @@ async function tryRefresh(): Promise<boolean> {
     }
   })();
   return refreshPromise;
+}
+
+/**
+ * Make sure this tab holds an access token, using the refresh cookie if needed.
+ * Unlike apiClient, never redirects to /login: safe to call from the login page itself.
+ */
+export async function ensureAccessToken(): Promise<boolean> {
+  if (memoryAccessToken) return true;
+  return tryRefresh();
 }
 
 function shouldSkipRefresh(path: string, options: RequestOptions): boolean {

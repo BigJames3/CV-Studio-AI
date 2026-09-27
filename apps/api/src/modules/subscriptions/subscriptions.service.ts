@@ -303,20 +303,27 @@ export class SubscriptionsService {
     stripeCustomerId?: string;
     cancelAtPeriodEnd?: boolean;
   }) {
-    const statusMap: Record<string, 'active' | 'canceled' | 'past_due' | 'trialing'> = {
-      active: 'active',
-      trialing: 'trialing',
-      past_due: 'past_due',
-      canceled: 'canceled',
-      unpaid: 'past_due',
-    };
+    // Stripe status → local status. `incomplete` (first payment not done) and `paused` grant
+    // no access; anything unknown fails closed instead of defaulting to `active`.
+    const statusMap: Record<string, 'active' | 'canceled' | 'past_due' | 'trialing' | 'suspended'> =
+      {
+        active: 'active',
+        trialing: 'trialing',
+        past_due: 'past_due',
+        canceled: 'canceled',
+        unpaid: 'past_due',
+        incomplete: 'suspended',
+        paused: 'suspended',
+        incomplete_expired: 'canceled',
+      };
 
-    const mappedStatus = statusMap[params.status ?? 'active'] ?? 'active';
+    const mappedStatus = statusMap[params.status ?? 'active'] ?? 'suspended';
     const isCanceled = mappedStatus === 'canceled';
+    const grantsAccess = !isCanceled && mappedStatus !== 'suspended';
     const cancelAtPeriodEnd = Boolean(params.cancelAtPeriodEnd) && !isCanceled;
     const periodStart = params.periodStart ?? new Date();
     const tier =
-      isCanceled || params.plan.toLowerCase() === 'free'
+      !grantsAccess || params.plan.toLowerCase() === 'free'
         ? 'free'
         : params.plan.toLowerCase() === 'business'
           ? 'business'

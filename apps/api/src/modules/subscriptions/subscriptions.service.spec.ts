@@ -209,6 +209,45 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
     );
   });
 
+  it.each([
+    ['incomplete', 'suspended'],
+    ['paused', 'suspended'],
+    ['incomplete_expired', 'canceled'],
+    ['some_future_status', 'suspended'],
+  ])('grants no paid access for Stripe status %s (stored as %s)', async (status, stored) => {
+    const result = await service.applyPaidEntitlement({
+      userId,
+      plan: 'pro',
+      provider: 'stripe',
+      status,
+      periodEnd: future,
+      stripeSubscriptionId: 'sub_123',
+    });
+
+    expect(result).toMatchObject({ status: stored });
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ subscriptionTier: 'free' }) })
+    );
+  });
+
+  it.each(['active', 'trialing', 'past_due'])(
+    'keeps the paid tier for status %s',
+    async (status) => {
+      await service.applyPaidEntitlement({
+        userId,
+        plan: 'business',
+        provider: 'stripe',
+        status,
+        periodEnd: future,
+        stripeSubscriptionId: 'sub_123',
+      });
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ subscriptionTier: 'business' }) })
+      );
+    }
+  );
+
   it('should persist currentPeriodEnd on create and update', async () => {
     await service.applyPaidEntitlement({
       userId,

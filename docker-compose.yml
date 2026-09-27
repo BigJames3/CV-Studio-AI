@@ -92,7 +92,6 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: '1025'
       MAIL_FROM: CV Studio AI <noreply@cvstudio.local>
-      CINETPAY_FAIL_CLOSED: 'true'
       STRIPE_FAIL_CLOSED: '1'
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}

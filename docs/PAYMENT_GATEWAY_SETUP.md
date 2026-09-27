@@ -43,6 +43,12 @@ stripe listen --forward-to localhost:3001/api/v1/payments/webhook
 # Copy the printed whsec_… into STRIPE_WEBHOOK_SECRET in apps/api/.env
 ```
 
+## Customer portal
+
+"Gérer mon paiement et mes factures" on the billing page calls `POST /api/v1/subscriptions/me/portal`, which opens a Stripe Customer Portal session (update the card, pay an unpaid invoice, download invoices) and returns to `/account/billing`.
+
+Activate the portal once per mode (test and live): Dashboard → Settings → Billing → Customer portal. Until then the API answers 503 `BILLING_PORTAL_UNAVAILABLE`.
+
 ## Tests
 
 ```bash

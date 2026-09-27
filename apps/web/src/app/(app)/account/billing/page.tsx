@@ -9,7 +9,10 @@ import { InvoiceHistory } from '@/components/billing/invoice-history';
 import { BillingPlansSkeleton, PlanGrid } from '@/components/billing/plan-grid';
 import { queryKeys, subscriptionsApi, paymentsApi, plansApi, invoicesApi } from '@/lib/api';
 import { FALLBACK_PLANS } from '@/lib/billing/plans-catalog';
-import { checkoutErrorMessage } from '@/lib/billing/checkout-error-message';
+import {
+  billingPortalErrorMessage,
+  checkoutErrorMessage,
+} from '@/lib/billing/checkout-error-message';
 import { useMe, useSubscription, useUserPlan } from '@/hooks';
 import { cn } from '@/lib/utils';
 import { track } from '@/lib/analytics';
@@ -85,6 +88,8 @@ function BillingPageContent() {
   const [cancelConfirm, setCancelConfirm] = useState(false);
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [portalPending, setPortalPending] = useState(false);
+  const [portalError, setPortalError] = useState<string | null>(null);
   const [billingPeriod, setBillingPeriod] = useState<'month' | 'year'>('month');
 
   const {
@@ -206,6 +211,18 @@ function BillingPageContent() {
     }
   }
 
+  async function openBillingPortal() {
+    setPortalPending(true);
+    setPortalError(null);
+    try {
+      const { url } = await subscriptionsApi.portal();
+      window.location.href = url;
+    } catch (error) {
+      setPortalError(billingPortalErrorMessage(error));
+      setPortalPending(false);
+    }
+  }
+
   async function confirmCancel() {
     setCancelPending(true);
     setCancelError(null);
@@ -298,6 +315,35 @@ function BillingPageContent() {
             L&apos;abonnement se terminera le {periodEnd}. Vous conservez l&apos;accès jusqu&apos;à
             cette date.
           </p>
+        ) : null}
+
+        {subscription?.status === 'past_due' ? (
+          <p className="mt-3 text-sm text-error" data-testid="payment-issue" role="alert">
+            Le dernier paiement a échoué. Mettez à jour votre carte pour garder votre plan.
+          </p>
+        ) : null}
+
+        {subscription?.stripeCustomerId ? (
+          <div className="mt-4">
+            <Button
+              type="button"
+              variant="outline"
+              data-testid="billing-portal"
+              disabled={portalPending}
+              onClick={() => void openBillingPortal()}
+            >
+              {portalPending ? 'Ouverture…' : 'Gérer mon paiement et mes factures'}
+            </Button>
+            {portalError ? (
+              <p
+                className="mt-2 text-sm text-error"
+                data-testid="billing-portal-error"
+                role="alert"
+              >
+                {portalError}
+              </p>
+            ) : null}
+          </div>
         ) : null}
       </section>
 

@@ -19,6 +19,7 @@ describe('SubscriptionsController', () => {
     me: jest.fn(),
     create: jest.fn(),
     cancel: jest.fn(),
+    billingPortal: jest.fn(),
   };
 
   let controller: SubscriptionsController;
@@ -58,6 +59,20 @@ describe('SubscriptionsController', () => {
     expect(
       Reflect.getMetadata('THROTTLER:TTLdefault', SubscriptionsController.prototype.checkout)
     ).toBe(60_000);
+  });
+
+  it('POST me/portal opens the portal for the signed-in user only', async () => {
+    subscriptions.billingPortal.mockResolvedValue({ url: 'https://billing.stripe.com/p/s' });
+    await expect(controller.billingPortal(user)).resolves.toEqual({
+      url: 'https://billing.stripe.com/p/s',
+    });
+    expect(subscriptions.billingPortal).toHaveBeenCalledWith('user-1');
+    expect(
+      Reflect.getMetadata(IS_PUBLIC_KEY, SubscriptionsController.prototype.billingPortal)
+    ).toBeFalsy();
+    expect(
+      Reflect.getMetadata('THROTTLER:LIMITdefault', SubscriptionsController.prototype.billingPortal)
+    ).toBe(10);
   });
 
   it('POST /subscriptions is forbidden for regular users and does not create', () => {

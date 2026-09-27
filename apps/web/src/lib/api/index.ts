@@ -327,6 +327,7 @@ export const subscriptionsApi = {
         cancelAtPeriodEnd: boolean;
         currentPeriodEnd: string;
         currentPeriodStart: string;
+        stripeCustomerId?: string | null;
       } | null;
       tier: 'free' | 'pro' | 'business';
       entitlements: {
@@ -349,6 +350,7 @@ export const subscriptionsApi = {
       method: 'POST',
       body: params,
     }),
+  portal: () => apiClient<{ url: string }>('/subscriptions/me/portal', { method: 'POST' }),
   cancel: () =>
     apiClient<{
       status: string;

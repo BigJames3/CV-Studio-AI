@@ -903,3 +903,74 @@ describe('SubscriptionsService.cancelImmediately', () => {
     );
   });
 });
+
+describe('SubscriptionsService.billingPortal', () => {
+  const prisma = {
+    plan: { findUnique: jest.fn() },
+    subscription: { findUnique: jest.fn() },
+    user: { findFirst: jest.fn(), update: jest.fn() },
+  };
+  let createPortal: jest.Mock;
+  let service: SubscriptionsService;
+  const prevOrigin = process.env.APP_URL;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.APP_URL = 'https://app.example.com';
+    service = new SubscriptionsService(prisma as never, {} as never);
+    createPortal = jest.fn().mockResolvedValue({ url: 'https://billing.stripe.com/p/session_1' });
+    (service as unknown as { stripe: unknown }).stripe = {
+      billingPortal: { sessions: { create: createPortal } },
+    };
+  });
+
+  afterEach(() => {
+    if (prevOrigin === undefined) delete process.env.APP_URL;
+    else process.env.APP_URL = prevOrigin;
+  });
+
+  it('opens a portal session for the stored Stripe customer, back to billing', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({
+      userId: 'user-1',
+      stripeCustomerId: 'cus_1',
+    });
+
+    await expect(service.billingPortal('user-1')).resolves.toEqual({
+      url: 'https://billing.stripe.com/p/session_1',
+    });
+    expect(prisma.subscription.findUnique).toHaveBeenCalledWith({ where: { userId: 'user-1' } });
+    expect(createPortal).toHaveBeenCalledWith({
+      customer: 'cus_1',
+      return_url: 'https://app.example.com/account/billing',
+    });
+  });
+
+  it('refuses when the user never paid by card (no Stripe customer)', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({ userId: 'user-1', stripeCustomerId: null });
+
+    await expect(service.billingPortal('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'NO_BILLING_ACCOUNT' }),
+    });
+    expect(createPortal).not.toHaveBeenCalled();
+  });
+
+  it('reports the portal as unavailable when Stripe refuses (portal not activated)', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({
+      userId: 'user-1',
+      stripeCustomerId: 'cus_1',
+    });
+    createPortal.mockRejectedValue(new Error('No configuration provided'));
+
+    await expect(service.billingPortal('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'BILLING_PORTAL_UNAVAILABLE' }),
+    });
+  });
+
+  it('fails closed when Stripe is not configured', async () => {
+    (service as unknown as { stripe: unknown }).stripe = null;
+
+    await expect(service.billingPortal('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'STRIPE_NOT_CONFIGURED' }),
+    });
+  });
+});

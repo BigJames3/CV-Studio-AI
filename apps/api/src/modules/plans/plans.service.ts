@@ -67,7 +67,7 @@ export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   },
   {
     name: 'Business',
-    description: '20 CVs, everything in Pro + team collab, analytics, API, branding',
+    description: '20 CVs, everything in Pro',
     priceMonthly: 29.99,
     priceYearly: 299,
     cvLimit: 20,
@@ -94,6 +94,9 @@ function slugFromName(name: string): PlanSlug {
   throw new Error(`Unknown plan name: ${name}`);
 }
 
+/** Plan columns kept in the database but not shipped: the catalog must not list them. */
+export const UNSHIPPED_FEATURES = ['collaborate', 'customDomain', 'apiAccess'] as const;
+
 export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
   const id = slugFromName(plan.name);
   const priceMonthly = toNumber(plan.priceMonthly);
@@ -101,6 +104,8 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
   const cvLimit = getCvLimit(id);
   const paid = priceMonthly > 0;
 
+  // Team collaboration, custom domain and API access have no route yet: never advertise them,
+  // whatever the plan row says (see UNSHIPPED_FEATURES).
   const entitlements: PlanEntitlementDto[] = [
     {
       feature: 'cvLimit',
@@ -117,22 +122,15 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
       included: true,
     },
     {
-      feature: 'collaborate',
-      value: String(id === 'business'),
-      included: id === 'business',
-    },
-    {
       feature: 'prioritySupport',
       value: String(plan.prioritySupport),
       included: plan.prioritySupport,
     },
-    { feature: 'customDomain', value: String(plan.customDomain), included: plan.customDomain },
     {
       feature: 'marketplaceAccess',
       value: String(plan.marketplaceAccess),
       included: plan.marketplaceAccess,
     },
-    { feature: 'apiAccess', value: String(plan.apiAccess), included: plan.apiAccess },
   ];
 
   return {

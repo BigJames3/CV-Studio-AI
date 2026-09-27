@@ -5,6 +5,7 @@ import {
   PLAN_CACHE_KEY,
   PlansService,
   TRIAL_PERIOD_DAYS,
+  UNSHIPPED_FEATURES,
 } from './plans.service';
 
 const FREE = {
@@ -73,7 +74,6 @@ describe('mapPlanToPublicDto', () => {
       value: '5',
       included: true,
     });
-    expect(dto.entitlements.find((e) => e.feature === 'collaborate')?.included).toBe(false);
     expect(dto.entitlements.some((e) => /docx/i.test(e.feature))).toBe(false);
   });
 
@@ -94,19 +94,29 @@ describe('mapPlanToPublicDto', () => {
     expect(dto.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('5');
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'templates')?.value).toBe('unlimited');
-    expect(dto.entitlements.find((e) => e.feature === 'collaborate')?.included).toBe(false);
   });
 
-  it('maps Business entitlements including API', () => {
+  it('maps Business with the Pro features and 20 CVs', () => {
     const dto = mapPlanToPublicDto(BUSINESS);
     expect(dto.id).toBe('business');
     expect(dto.priceMonthly).toBe(29.99);
     expect(dto.priceAnnual).toBe(299);
-    expect(dto.entitlements.find((e) => e.feature === 'apiAccess')?.included).toBe(true);
-    expect(dto.entitlements.find((e) => e.feature === 'customDomain')?.included).toBe(true);
-    expect(dto.entitlements.find((e) => e.feature === 'collaborate')?.included).toBe(true);
+    expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('20');
   });
+
+  it.each([FREE, PRO, BUSINESS, ...CATALOG_FALLBACK_ROWS])(
+    'never advertises unshipped features ($name)',
+    (row) => {
+      // BUSINESS sets customDomain/apiAccess in its row: the catalog must still hide them.
+      const dto = mapPlanToPublicDto(row);
+      const features = dto.entitlements.map((e) => e.feature);
+      for (const unshipped of UNSHIPPED_FEATURES) {
+        expect(features).not.toContain(unshipped);
+      }
+      expect(dto.description).not.toMatch(/collab|\bAPI\b|branding|analytics/i);
+    }
+  );
 });
 
 describe('catalog matches the runtime PDF/share gate (FE-001)', () => {

@@ -24,8 +24,6 @@ export const FALLBACK_PLANS: BillingPlan[] = [
       { feature: 'share', value: 'false', included: false },
       { feature: 'aiFeatures', value: 'false', included: false },
       { feature: 'templates', value: '5', included: true },
-      { feature: 'collaborate', value: 'false', included: false },
-      { feature: 'apiAccess', value: 'false', included: false },
     ],
   },
   {
@@ -46,14 +44,12 @@ export const FALLBACK_PLANS: BillingPlan[] = [
       { feature: 'share', value: 'true', included: true },
       { feature: 'aiFeatures', value: 'true', included: true },
       { feature: 'templates', value: 'unlimited', included: true },
-      { feature: 'collaborate', value: 'false', included: false },
-      { feature: 'apiAccess', value: 'false', included: false },
     ],
   },
   {
     id: 'business',
     name: 'Business',
-    description: '20 CVs, everything in Pro + team collab, analytics, API, branding',
+    description: '20 CVs, everything in Pro',
     position: 2,
     priceMonthly: 29.99,
     priceAnnual: 299,
@@ -68,8 +64,6 @@ export const FALLBACK_PLANS: BillingPlan[] = [
       { feature: 'share', value: 'true', included: true },
       { feature: 'aiFeatures', value: 'true', included: true },
       { feature: 'templates', value: 'unlimited', included: true },
-      { feature: 'collaborate', value: 'true', included: true },
-      { feature: 'apiAccess', value: 'true', included: true },
     ],
   },
 ];
@@ -93,11 +87,8 @@ export function formatFeatureName(ent: BillingPlan['entitlements'][number]): str
     share: 'Partager des CV',
     aiFeatures: 'Optimisation IA',
     templates: ent.value === 'unlimited' ? 'Templates illimités' : `${ent.value} templates`,
-    collaborate: "Collaboration d'équipe",
     prioritySupport: 'Support prioritaire',
-    customDomain: 'Domaine personnalisé',
     marketplaceAccess: 'Accès marketplace',
-    apiAccess: 'Accès API',
   };
   return labels[ent.feature] ?? ent.feature;
 }

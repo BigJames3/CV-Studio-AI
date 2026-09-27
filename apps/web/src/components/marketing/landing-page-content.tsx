@@ -32,7 +32,7 @@ const testimonials = [
     role: 'Product Designer',
   },
   {
-    quote: 'On a migrés l’équipe careers dessus. Templates ATS + export sans watermark Free.',
+    quote: 'On a migrés l’équipe careers dessus. Templates ATS + export PDF fidèle.',
     name: 'Jonas M.',
     role: 'Talent Lead',
   },
@@ -46,7 +46,7 @@ const testimonials = [
 const faqs = [
   {
     q: 'Le plan Free est-il vraiment utilisable ?',
-    a: 'Oui : 1 CV, 5 templates, export PDF sans watermark. L’IA est sur Pro.',
+    a: 'Oui : 1 CV et 5 templates, modifiables en ligne. L’export PDF, le partage et l’IA sont sur Pro.',
   },
   {
     q: 'Mes données sont-elles sécurisées ?',

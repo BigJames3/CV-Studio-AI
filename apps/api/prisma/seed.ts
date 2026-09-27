@@ -10,7 +10,7 @@ const prisma = new PrismaClient();
 const PLAN_SEEDS = [
   {
     name: 'Free',
-    description: '1 CV, 5 templates, PDF export, no AI',
+    description: '1 CV, 5 templates, no PDF export, no AI',
     priceMonthly: 0,
     priceYearly: 0,
     cvLimit: 1,

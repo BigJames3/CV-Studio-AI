@@ -9,7 +9,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
   {
     id: 'free',
     name: 'Gratuit',
-    description: '1 CV, 4 templates, no PDF export, no AI',
+    description: '1 CV, 5 templates, no PDF export, no AI',
     position: 0,
     priceMonthly: 0,
     priceAnnual: null,
@@ -23,13 +23,13 @@ export const FALLBACK_PLANS: BillingPlan[] = [
       { feature: 'downloadPdf', value: 'false', included: false },
       { feature: 'share', value: 'false', included: false },
       { feature: 'aiFeatures', value: 'false', included: false },
-      { feature: 'templates', value: '4', included: true },
+      { feature: 'templates', value: '5', included: true },
     ],
   },
   {
     id: 'pro',
     name: 'Pro',
-    description: '5 CVs, all templates incl. premium, AI optimization, ATS check',
+    description: '5 CVs, unlimited templates, AI optimization, ATS check',
     position: 1,
     priceMonthly: 9.99,
     priceAnnual: 99,
@@ -43,7 +43,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
       { feature: 'downloadPdf', value: 'true', included: true },
       { feature: 'share', value: 'true', included: true },
       { feature: 'aiFeatures', value: 'true', included: true },
-      { feature: 'templates', value: 'all', included: true },
+      { feature: 'templates', value: 'unlimited', included: true },
     ],
   },
   {
@@ -63,7 +63,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
       { feature: 'downloadPdf', value: 'true', included: true },
       { feature: 'share', value: 'true', included: true },
       { feature: 'aiFeatures', value: 'true', included: true },
-      { feature: 'templates', value: 'all', included: true },
+      { feature: 'templates', value: 'unlimited', included: true },
     ],
   },
 ];
@@ -86,8 +86,7 @@ export function formatFeatureName(ent: BillingPlan['entitlements'][number]): str
     downloadPdf: 'Télécharger en PDF',
     share: 'Partager des CV',
     aiFeatures: 'Optimisation IA',
-    templates:
-      ent.value === 'all' ? 'Tous les templates, premium inclus' : `${ent.value} templates`,
+    templates: ent.value === 'unlimited' ? 'Templates illimités' : `${ent.value} templates`,
     prioritySupport: 'Support prioritaire',
     marketplaceAccess: 'Accès marketplace',
   };

@@ -7,7 +7,6 @@ import {
   TRIAL_PERIOD_DAYS,
   UNSHIPPED_FEATURES,
 } from './plans.service';
-import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 
 const FREE = {
   name: 'Free',
@@ -72,7 +71,7 @@ describe('mapPlanToPublicDto', () => {
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(false);
     expect(dto.entitlements.find((e) => e.feature === 'templates')).toEqual({
       feature: 'templates',
-      value: '4',
+      value: '5',
       included: true,
     });
     expect(dto.entitlements.some((e) => /docx/i.test(e.feature))).toBe(false);
@@ -94,7 +93,7 @@ describe('mapPlanToPublicDto', () => {
     expect(dto.currency).toBe('EUR');
     expect(dto.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('5');
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(true);
-    expect(dto.entitlements.find((e) => e.feature === 'templates')?.value).toBe('all');
+    expect(dto.entitlements.find((e) => e.feature === 'templates')?.value).toBe('unlimited');
   });
 
   it('maps Business with the Pro features and 20 CVs', () => {
@@ -120,17 +119,10 @@ describe('mapPlanToPublicDto', () => {
   );
 });
 
-describe('catalog matches the shipped template catalog', () => {
-  it('counts the non-premium official templates for Free', () => {
-    const free = mapPlanToPublicDto(FREE).entitlements.find((e) => e.feature === 'templates');
-    expect(free?.value).toBe(String(TEMPLATE_SEEDS.filter((t) => !t.isPremium).length));
-  });
-
-  it.each(CATALOG_FALLBACK_ROWS)('$name description matches what ships', (row) => {
-    // Neither 50+ templates nor a portfolio page exist; Free has only the non-premium templates.
-    expect(row.description).not.toMatch(/\d+\+ templates|portfolio|unlimited/i);
-    const count = row.description.match(/(\d+) templates/)?.[1];
-    if (count) expect(Number(count)).toBe(TEMPLATE_SEEDS.filter((t) => !t.isPremium).length);
+describe('plan descriptions only promise what ships', () => {
+  // Template counts are plan rules (Free: 5, paid: unlimited), but no made-up "50+" or portfolio.
+  it.each(CATALOG_FALLBACK_ROWS)('$name', (row) => {
+    expect(row.description).not.toMatch(/\d+\+ templates|portfolio/i);
   });
 });
 

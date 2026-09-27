@@ -32,7 +32,7 @@ describe('ExpireSubscriptionsJob', () => {
 
   it('downgrades only users whose effective tier is free', async () => {
     prisma.user.findMany.mockResolvedValueOnce([
-      candidate('expired-cinetpay', 'pro', 'active', -10),
+      candidate('expired-period', 'pro', 'active', -10),
       candidate('canceled', 'business', 'canceled', 5),
       candidate('past-due-in-grace', 'pro', 'past_due', -2),
       candidate('late-webhook-in-grace', 'business', 'active', -1),
@@ -43,7 +43,7 @@ describe('ExpireSubscriptionsJob', () => {
     expect(prisma.user.updateMany).toHaveBeenCalledTimes(1);
     expect(prisma.user.updateMany).toHaveBeenCalledWith({
       where: {
-        id: { in: ['expired-cinetpay', 'canceled'] },
+        id: { in: ['expired-period', 'canceled'] },
         subscriptionTier: { in: ['pro', 'business'] },
       },
       data: { subscriptionTier: 'free' },

@@ -15,12 +15,6 @@ export function checkoutErrorMessage(error: unknown): string {
     case 'STRIPE_PRICE_NOT_CONFIGURED':
     case 'STRIPE_LIVE_KEY_BLOCKED':
       return 'Le paiement par carte n’est pas disponible pour le moment. Réessayez plus tard ou contactez le support.';
-    case 'CINETPAY_NOT_CONFIGURED':
-      return 'Le paiement Mobile Money n’est pas disponible pour le moment. Essayez le paiement par carte.';
-    case 'CINETPAY_API_ERROR':
-      return 'Le service Mobile Money n’a pas pu créer le paiement. Réessayez dans un instant.';
-    case 'STRIPE_SUBSCRIPTION_ACTIVE':
-      return 'Vous avez déjà un abonnement par carte. Changez de plan avec votre carte, ou annulez-le d’abord.';
     case 'ALREADY_SUBSCRIBED':
       return 'Vous êtes déjà abonné à ce plan.';
     case 'SUBSCRIPTION_PAYMENT_ISSUE':

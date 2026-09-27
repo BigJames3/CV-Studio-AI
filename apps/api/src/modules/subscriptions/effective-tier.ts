@@ -1,6 +1,6 @@
 import { normalizeTier, type SubscriptionTierName } from '@cvstudio/shared-utils';
 
-/** Tolerance after `currentPeriodEnd` for late renewal webhooks / CinetPay re-payment. */
+/** Tolerance after `currentPeriodEnd` for late Stripe renewal webhooks. */
 export const EXPIRY_GRACE_MS = 72 * 60 * 60 * 1000;
 
 /** How long a `past_due` subscription keeps paid access after the failed renewal. */
@@ -20,7 +20,7 @@ export type TierSource = {
  * Tier the user is actually entitled to right now.
  *
  * `users.subscription_tier` is only written by checkout webhooks, so on its own it never
- * expires (CinetPay is a one-shot payment, and a missed Stripe webhook leaves it stale).
+ * expires (a missed Stripe webhook leaves it stale).
  * The subscription status and period end are the authority for paid tiers.
  */
 export function resolveEffectiveTier(source: TierSource, now = new Date()): SubscriptionTierName {

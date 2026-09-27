@@ -1,7 +1,7 @@
 # Data Protection Impact Assessment (DPIA) — CV Studio AI
 
 **Assessment date:** 16 August 2026  
-**Scope:** CV Studio AI SaaS (account, CV storage, AI assist, Stripe/CinetPay billing)  
+**Scope:** CV Studio AI SaaS (account, CV storage, AI assist, Stripe billing)  
 **Status:** **Ready for sign-off — not yet legally signed**  
 **Related:** `GDPR-DPIA-OUTLINE.md`, `DPO.md`, privacy page `/privacy`
 
@@ -22,7 +22,7 @@ No special-category data is solicited. Users are asked not to upload health/reli
 | Account      | email, name, phone, location                         | Login and profile   |
 | CV content   | employment, education, skills, references, photo URL | Core product        |
 | Auth secrets | password hash, TOTP ciphertext, sessions             | Security            |
-| Billing      | Stripe/CinetPay ids, amounts, invoices               | Contract + tax      |
+| Billing      | Stripe ids, amounts, invoices                        | Contract + tax      |
 | AI           | prompt snippets, model output                        | Feature; TTL 7 days |
 | Logs         | IP, UA, request id                                   | Abuse detection     |
 
@@ -31,7 +31,6 @@ No special-category data is solicited. Users are asked not to upload health/reli
 | Processor  | Role              | Transfer notes                                           |
 | ---------- | ----------------- | -------------------------------------------------------- |
 | Stripe     | Card payments     | No PAN stored by us                                      |
-| CinetPay   | Mobile money      | Africa corridors                                         |
 | LLM vendor | Generation        | Contract must forbid training; DPA required before EU GA |
 | Sentry     | Errors            | `sendDefaultPii: false`                                  |
 | PostHog    | Product analytics | Property blocklist                                       |

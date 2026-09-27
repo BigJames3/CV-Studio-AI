@@ -42,7 +42,7 @@ export default function SettingsPage() {
           </p>
         </div>
         <div className="flex gap-4 text-sm">
-          <Link href="/account/privacy" className="text-primary">
+          <Link href="/privacy" className="text-primary">
             Confidentialité
           </Link>
           <Link href="/account/profile" className="text-primary">

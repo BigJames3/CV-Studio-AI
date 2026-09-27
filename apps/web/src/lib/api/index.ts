@@ -24,8 +24,6 @@ export const queryKeys = {
   marketplaceListing: (id: string) => ['marketplace', 'listing', id] as const,
   sessions: ['auth', 'sessions'] as const,
   payments: ['payments', 'history'] as const,
-  paymentMethods: ['payments', 'methods'] as const,
-  geoCountry: ['geo', 'country'] as const,
 };
 
 export type AuthResponse = {
@@ -346,18 +344,11 @@ export const subscriptionsApi = {
       cvLimit: number;
       cvRemaining: number;
     }>('/subscriptions/me'),
-  checkout: (params: {
-    plan: 'pro' | 'business';
-    interval: 'month' | 'year';
-    paymentMethod?: 'stripe' | 'cinetpay';
-  }) =>
-    apiClient<{ url: string; mode?: string; transactionId?: string; paymentMethod?: string }>(
-      '/subscriptions/checkout',
-      {
-        method: 'POST',
-        body: params,
-      }
-    ),
+  checkout: (params: { plan: 'pro' | 'business'; interval: 'month' | 'year' }) =>
+    apiClient<{ url: string; mode?: string }>('/subscriptions/checkout', {
+      method: 'POST',
+      body: params,
+    }),
   cancel: () =>
     apiClient<{
       status: string;
@@ -405,20 +396,6 @@ export type PaymentHistoryItem = {
 
 export const paymentsApi = {
   history: () => apiClient<{ items: PaymentHistoryItem[] }>('/payments/history'),
-  methods: () =>
-    apiClient<{ stripe: boolean; cinetpay: boolean; cinetpayFailClosed: boolean }>(
-      '/payments/methods'
-    ),
-  getStatus: (transactionId: string) =>
-    apiClient<{
-      status: string;
-      paymentMethod?: string;
-      transactionId: string;
-    }>(`/payments/status/${encodeURIComponent(transactionId)}`),
-};
-
-export const geoApi = {
-  country: () => apiClient<{ country: string | null; source: 'ip' | 'unknown' }>('/geo/country'),
 };
 
 export const aiApi = {

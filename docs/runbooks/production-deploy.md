@@ -22,9 +22,7 @@ Manual: Actions → **Deploy to Production (manual)** (`deploy.yml`) with `image
 - [ ] Staging smoke green for this SHA
 - [ ] Expand-safe Prisma migration (no destructive expand/contract in the same tag)
 - [ ] `AWS_ROLE_PROD`, `AWS_ACCOUNT_ID`, ECR repos `cvstudio/{api,web,worker}`
-- [ ] Secrets in `api-secrets` (JWT, Stripe live, **CinetPay** `CINETPAY_API_KEY` / `CINETPAY_SITE_ID`, `API_URL`, `APP_URL`, Sentry, PostHog)
-- [ ] CinetPay fail-closed: empty keys hide Mobile Money in billing (`GET /payments/methods`)
-- [ ] Cron: `expire-pending-payments` CronJob in the overlay; check logs after first hour
+- [ ] Secrets in `api-secrets` (JWT, Stripe live, `API_URL`, `APP_URL`, Sentry, PostHog)
 - [ ] Slack webhook optional (`SLACK_WEBHOOK_URL`)
 
 ## Post-deploy verify

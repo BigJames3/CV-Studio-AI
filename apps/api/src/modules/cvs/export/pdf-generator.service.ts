@@ -87,6 +87,9 @@ export class PdfGeneratorService {
 
     try {
       page.setDefaultTimeout(15_000);
+      // Client HTML is static markup. Scripts could open WebSockets, which request
+      // interception does not see, so they never run (SEC-007).
+      await page.setJavaScriptEnabled(false);
       await page.setRequestInterception(true);
       page.on('request', (request) => {
         if (shouldAllowPdfNetworkRequest(request.url())) {

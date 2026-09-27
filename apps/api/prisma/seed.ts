@@ -34,7 +34,7 @@ const PLAN_SEEDS = [
   },
   {
     name: 'Business',
-    description: '20 CVs, everything in Pro + team collab, analytics, API, branding',
+    description: '20 CVs, everything in Pro',
     priceMonthly: 29.99,
     priceYearly: 299,
     cvLimit: 20,

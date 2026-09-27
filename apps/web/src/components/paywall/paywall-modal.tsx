@@ -54,7 +54,7 @@ const PREMIUM_BENEFITS = [
   'Export PDF haute qualité',
   'Optimisation IA du contenu',
   'Templates premium exclusifs',
-  'Partage public & analytics',
+  'Partage public avec lien et QR code',
   '14 jours gratuits',
 ] as const;
 

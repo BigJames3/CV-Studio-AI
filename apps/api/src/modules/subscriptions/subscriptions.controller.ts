@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -41,8 +42,16 @@ export class SubscriptionsController {
   }
 
   @Patch('me')
-  update(@CurrentUser() user: AuthUser, @Body() dto: UpdateSubscriptionDto) {
-    return this.subscriptions.update(user.id, dto);
+  @ApiOperation({
+    deprecated: true,
+    summary: 'Disabled — change plan with POST /subscriptions/checkout',
+  })
+  update(@CurrentUser() user: AuthUser, @Body() _dto: UpdateSubscriptionDto) {
+    this.logger.warn(`Blocked PATCH /subscriptions/me by user ${user.id}`);
+    throw new BadRequestException({
+      code: 'USE_CHECKOUT',
+      message: 'To change plan, use POST /subscriptions/checkout.',
+    });
   }
 
   @Delete('me/cancel')

@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { validate } from 'class-validator';
 import { SubscriptionsController } from './subscriptions.controller';
@@ -18,7 +18,6 @@ describe('SubscriptionsController', () => {
     checkout: jest.fn(),
     me: jest.fn(),
     create: jest.fn(),
-    update: jest.fn(),
     cancel: jest.fn(),
   };
 
@@ -94,6 +93,18 @@ describe('SubscriptionsController', () => {
     const nonAdmin: AuthUser = { ...user, roles: ['pro_user'] };
     expect(() => controller.create(nonAdmin, { plan: 'business' })).toThrow(ForbiddenException);
     expect(subscriptions.create).not.toHaveBeenCalled();
+  });
+
+  it('PATCH /subscriptions/me points to checkout instead of silently doing nothing (BILL-004)', () => {
+    let error: unknown;
+    try {
+      controller.update(user, { plan: 'business', interval: 'month' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as BadRequestException).getResponse()).toMatchObject({ code: 'USE_CHECKOUT' });
+    expect(subscriptions.me).not.toHaveBeenCalled();
   });
 });
 

@@ -33,7 +33,7 @@ pnpm docker:test
 pnpm --filter @cvstudio/api exec prisma migrate deploy
 pnpm --filter @cvstudio/web exec playwright install chromium
 
-# API Jest e2e (CinetPay flow + Stripe route regression)
+# API Jest e2e (auth, CVs, Stripe webhook route)
 pnpm test:e2e:api
 
 # Playwright (starts API + web unless they are already up)
@@ -59,15 +59,14 @@ pnpm test:e2e
 pnpm --filter @cvstudio/web test:e2e:ui
 ```
 
-## Billing / CinetPay specs
+## Billing specs (Stripe only)
 
-- Payment method selector (Stripe + CinetPay)
-- Success / cancel / failed banners from query params
-- Pending checkout polling (`/payments/status/:tx`)
-- Redirect when payment completes or is refused
-- Checkout body sends `paymentMethod=cinetpay`
+- Card payment through Stripe, no payment method choice
+- Success / cancel banners from query params
+- Plan activation polling after `?checkout=success`
+- Checkout body sends only `plan` and `interval`
 
-Auth is required for checkout and status polling (JWT). CinetPay notify is public and always returns 200.
+Checkout requires auth (JWT). The Stripe webhook is public and verified by signature.
 
 ## Debugging
 

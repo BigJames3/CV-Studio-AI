@@ -71,8 +71,6 @@ export default defineConfig({
             PORT: '3001',
             AUTH_RATE_LIMIT_DISABLED: 'true',
             THROTTLE_DISABLED: 'true',
-            CINETPAY_API_KEY: process.env.CINETPAY_API_KEY ?? 'test_api_key',
-            CINETPAY_SITE_ID: process.env.CINETPAY_SITE_ID ?? 'test_site_id',
             JWT_ACCESS_SECRET:
               process.env.JWT_ACCESS_SECRET ?? 'e2e-access-secret-min-32-characters!!',
             JWT_REFRESH_SECRET:

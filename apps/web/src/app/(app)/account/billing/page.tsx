@@ -2,32 +2,22 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { PaymentMethodSelector } from '@/components/billing/payment-selector';
 import { InvoiceHistory } from '@/components/billing/invoice-history';
 import { BillingPlansSkeleton, PlanGrid } from '@/components/billing/plan-grid';
 import { queryKeys, subscriptionsApi, paymentsApi, plansApi, invoicesApi } from '@/lib/api';
 import { FALLBACK_PLANS } from '@/lib/billing/plans-catalog';
 import { useMe, useSubscription, useUserPlan } from '@/hooks';
-import { cn, suggestPaymentMethod, type PaymentProvider } from '@/lib/utils';
-import {
-  detectCountry,
-  persistPaymentMethod,
-  readSavedPaymentMethod,
-  GEO_CONSENT_CHANGED_EVENT,
-  type GeoLocation,
-} from '@/lib/geo';
+import { cn } from '@/lib/utils';
 import { track } from '@/lib/analytics';
 
-const POLL_INTERVAL_MS = 3000;
-const POLL_TIMEOUT_SEC = 300;
 const ACTIVATION_POLL_INTERVAL_MS = 500;
 const ACTIVATION_POLL_MAX_ATTEMPTS = 60;
 
 function parseCheckoutState(value: string | null) {
-  if (value === 'success' || value === 'pending' || value === 'cancel' || value === 'failed') {
+  if (value === 'success' || value === 'cancel') {
     return value;
   }
   return null;
@@ -85,11 +75,7 @@ function BillingPageContent() {
   const { tier } = useUserPlan();
 
   const checkoutState = parseCheckoutState(params.get('checkout'));
-  const provider = params.get('provider');
-  const transactionId = params.get('tx');
-  const checkoutErrorParam = params.get('error');
 
-  const [paymentMethod, setPaymentMethod] = useState<PaymentProvider | null>(null);
   const [polledTier, setPolledTier] = useState<'free' | 'pro' | 'business' | null>(null);
   const [isPollingActivation, setIsPollingActivation] = useState(false);
 
@@ -98,7 +84,6 @@ function BillingPageContent() {
   const [cancelConfirm, setCancelConfirm] = useState(false);
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
-  const [pollingTimeLeft, setPollingTimeLeft] = useState(POLL_TIMEOUT_SEC);
   const [billingPeriod, setBillingPeriod] = useState<'month' | 'year'>('month');
 
   const {
@@ -120,47 +105,6 @@ function BillingPageContent() {
     queryFn: () => paymentsApi.history(),
     enabled: Boolean(user),
   });
-  const { data: paymentMethods } = useQuery({
-    queryKey: queryKeys.paymentMethods,
-    queryFn: () => paymentsApi.methods(),
-    enabled: Boolean(user),
-  });
-  const cinetpayAvailable = paymentMethods?.cinetpay !== false;
-
-  const [geo, setGeo] = useState<GeoLocation>({
-    countryCode: null,
-    source: 'unknown',
-    consentGiven: false,
-  });
-  const [consentEpoch, setConsentEpoch] = useState(0);
-
-  useEffect(() => {
-    const onConsentChange = () => setConsentEpoch((n) => n + 1);
-    window.addEventListener(GEO_CONSENT_CHANGED_EVENT, onConsentChange);
-    return () => window.removeEventListener(GEO_CONSENT_CHANGED_EVENT, onConsentChange);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void detectCountry(user?.countryCode).then((location) => {
-      if (!cancelled) setGeo(location);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.countryCode, consentEpoch]);
-
-  useEffect(() => {
-    const saved = readSavedPaymentMethod();
-    if (saved) setPaymentMethod(saved);
-  }, []);
-
-  const suggestedProvider = suggestPaymentMethod(geo.countryCode ?? user?.countryCode);
-
-  const selectedMethod: PaymentProvider =
-    (paymentMethod ?? suggestedProvider) === 'cinetpay' && !cinetpayAvailable
-      ? 'stripe'
-      : (paymentMethod ?? suggestedProvider);
   const payments = paymentsData?.items ?? [];
   const invoices = invoicesData?.items ?? [];
 
@@ -174,11 +118,10 @@ function BillingPageContent() {
   const displayIsFree = displayTier === 'free';
   const displayIsPro = displayTier === 'pro';
   const displayIsBusiness = displayTier === 'business';
-  const showPaymentSelector = displayIsFree || displayIsPro;
 
   useEffect(() => {
     if (checkoutState === 'success') {
-      track('checkout_succeeded', { provider: provider ?? 'stripe' });
+      track('checkout_succeeded', { provider: 'stripe' });
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
@@ -187,12 +130,9 @@ function BillingPageContent() {
       ]);
     }
     if (checkoutState === 'cancel') {
-      track('checkout_cancelled', { provider: provider ?? undefined });
+      track('checkout_cancelled', { provider: 'stripe' });
     }
-    if (checkoutState === 'failed') {
-      track('checkout_failed', { error: checkoutErrorParam ?? 'declined' });
-    }
-  }, [checkoutState, checkoutErrorParam, provider, queryClient]);
+  }, [checkoutState, queryClient]);
 
   useEffect(() => {
     if (checkoutState !== 'success') {
@@ -251,79 +191,15 @@ function BillingPageContent() {
     };
   }, [checkoutState, queryClient, tier]);
 
-  useEffect(() => {
-    if (checkoutState !== 'pending' || !transactionId) return;
-
-    setPollingTimeLeft(POLL_TIMEOUT_SEC);
-    let cancelled = false;
-    let interval: ReturnType<typeof setInterval> | undefined;
-
-    const poll = async (decrement: boolean) => {
-      if (cancelled) return;
-      try {
-        const result = await paymentsApi.getStatus(transactionId);
-        if (cancelled) return;
-        if (result.status === 'completed') {
-          if (interval) clearInterval(interval);
-          await Promise.all([
-            queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.payments }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.invoices }),
-          ]);
-          window.location.replace(`${window.location.pathname}?checkout=success`);
-          return;
-        }
-        if (result.status === 'failed') {
-          if (interval) clearInterval(interval);
-          window.location.replace(`${window.location.pathname}?checkout=failed`);
-          return;
-        }
-      } catch (error) {
-        console.error('Polling error:', error);
-      }
-
-      if (!decrement || cancelled) return;
-      setPollingTimeLeft((prev) => {
-        if (prev <= POLL_INTERVAL_MS / 1000) {
-          if (interval) clearInterval(interval);
-          window.location.replace(`${window.location.pathname}?checkout=failed&error=timeout`);
-          return 0;
-        }
-        return prev - POLL_INTERVAL_MS / 1000;
-      });
-    };
-
-    void poll(false);
-    interval = setInterval(() => {
-      void poll(true);
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [checkoutState, transactionId, queryClient]);
-
-  const pollingMinutes = useMemo(
-    () => Math.max(0, Math.floor(pollingTimeLeft / 60)),
-    [pollingTimeLeft]
-  );
-
   async function checkout(plan: 'pro' | 'business', interval: 'month' | 'year') {
     setCheckoutPending(plan);
     setCheckoutError(null);
-    track('checkout_started', { plan, interval, payment_method: selectedMethod });
-    persistPaymentMethod(selectedMethod);
+    track('checkout_started', { plan, interval, payment_method: 'stripe' });
     try {
-      const { url } = await subscriptionsApi.checkout({
-        plan,
-        interval,
-        paymentMethod: selectedMethod,
-      });
+      const { url } = await subscriptionsApi.checkout({ plan, interval });
       window.location.href = url;
     } catch {
-      track('checkout_failed', { plan, interval, payment_method: selectedMethod });
+      track('checkout_failed', { plan, interval, payment_method: 'stripe' });
       setCheckoutError('Le paiement a échoué. Réessayez ou utilisez une autre carte.');
       setCheckoutPending(null);
     }
@@ -394,39 +270,12 @@ function BillingPageContent() {
         </CheckoutBanner>
       ) : null}
 
-      {checkoutState === 'pending' ? (
-        <CheckoutBanner
-          variant="info"
-          testId="checkout-pending-banner"
-          title="Confirmation du paiement en cours…"
-        >
-          <p className="mt-1 text-sm">
-            Vérification du statut
-            {provider ? ` via ${provider}` : ''} (délai : {pollingMinutes} min)
-          </p>
-        </CheckoutBanner>
-      ) : null}
-
       {checkoutState === 'cancel' ? (
         <CheckoutBanner
           variant="neutral"
           testId="checkout-cancel-banner"
           title="Paiement annulé. Vous pouvez réessayer à tout moment."
         />
-      ) : null}
-
-      {checkoutState === 'failed' ? (
-        <CheckoutBanner
-          variant="error"
-          testId="checkout-failed-banner"
-          title="Le paiement a échoué"
-        >
-          <p className="mt-1 text-sm">
-            {checkoutErrorParam === 'timeout'
-              ? 'La confirmation du paiement a expiré. Veuillez réessayer.'
-              : 'Le paiement a été refusé. Vérifiez votre moyen de paiement et réessayez.'}
-          </p>
-        </CheckoutBanner>
       ) : null}
 
       <section className="mb-6 rounded-lg border border-border bg-surface-card p-6">
@@ -470,21 +319,9 @@ function BillingPageContent() {
           />
         )}
 
-        {showPaymentSelector ? (
-          <div className="mt-6 rounded-lg border border-border bg-surface-card p-6">
-            <PaymentMethodSelector
-              value={selectedMethod}
-              onChange={(method) => {
-                setPaymentMethod(method);
-                persistPaymentMethod(method);
-              }}
-              suggestedProvider={suggestedProvider}
-              geoSource={geo.source}
-              disabled={checkoutPending !== null}
-              cinetpayAvailable={cinetpayAvailable}
-            />
-          </div>
-        ) : null}
+        <p className="mt-4 text-sm text-content-secondary" data-testid="payment-provider-note">
+          Paiement sécurisé par carte bancaire via Stripe.
+        </p>
 
         {checkoutError ? (
           <p className="mt-4 text-sm text-error" data-testid="checkout-error" role="alert">
@@ -556,25 +393,6 @@ function BillingPageContent() {
       </section>
 
       <InvoiceHistory invoices={invoices} payments={payments} invoicesLoading={invoicesLoading} />
-
-      <details className="mt-6 rounded-lg border border-border bg-surface-card p-4 text-sm">
-        <summary className="cursor-pointer font-medium text-content-primary">
-          Comment nous utilisons votre localisation
-        </summary>
-        <ul className="mt-3 list-disc space-y-1 pl-5 text-content-secondary">
-          <li>Source : en-têtes géo (adresse IP) uniquement avec votre accord.</li>
-          <li>Usage : suggérer Stripe ou CinetPay. Vous pouvez changer de méthode.</li>
-          <li>Stockage : aucun stockage permanent de votre adresse IP.</li>
-          <li>Partage : jamais partagé avec des tiers.</li>
-          <li>
-            Contrôle :{' '}
-            <Link href="/account/privacy" className="text-primary underline">
-              paramètres de confidentialité
-            </Link>
-            .
-          </li>
-        </ul>
-      </details>
 
       <div className="mt-8">
         <Button type="button" variant="outline" onClick={() => router.push('/dashboard')}>

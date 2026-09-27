@@ -13,7 +13,9 @@ function extractName(cvFacts: Record<string, unknown>): string {
 
 function extractEvidence(cvFacts: Record<string, unknown>): string[] {
   const evidence: string[] = [];
-  const experience = Array.isArray(cvFacts.experience) ? cvFacts.experience : [];
+  // CvContent stores roles under `experiences`; older payloads used `experience`.
+  const roles = cvFacts.experiences ?? cvFacts.experience;
+  const experience = Array.isArray(roles) ? roles : [];
   for (const exp of experience.slice(0, 3)) {
     const row = exp as Record<string, unknown>;
     const title = String(row.position ?? row.title ?? '');

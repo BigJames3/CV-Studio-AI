@@ -20,6 +20,10 @@ test.describe('Edge cases', () => {
     await billingPage.goto();
     await billingPage.startProCheckout();
     await expect(page.getByTestId('checkout-error')).toBeVisible();
+    // Nothing was charged: the message must not blame the card.
+    await expect(page.getByTestId('checkout-error')).toContainText(
+      'Impossible de démarrer le paiement'
+    );
     await expect(page).toHaveURL(/account\/billing/);
     await expect(page).not.toHaveURL(/checkout\.stripe\.com/);
   });

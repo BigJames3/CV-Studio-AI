@@ -55,7 +55,7 @@ export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   },
   {
     name: 'Pro',
-    description: '5 CVs, 50+ templates, all AI features, ATS, portfolio',
+    description: '5 CVs, unlimited templates, AI optimization, ATS check',
     priceMonthly: 9.99,
     priceYearly: 99,
     cvLimit: 5,

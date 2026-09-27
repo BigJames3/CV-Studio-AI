@@ -12,7 +12,7 @@ import {
 import Stripe from 'stripe';
 import { PrismaService } from '../../database/prisma.module';
 import { EntitlementsService } from './entitlements.service';
-import { CheckoutDto, UpdateSubscriptionDto, CreateSubscriptionDto } from './dto/subscription.dto';
+import { CheckoutDto, CreateSubscriptionDto } from './dto/subscription.dto';
 import { CinetpayGateway } from '../payments/gateways/cinetpay.gateway';
 import {
   expandableStripeId,
@@ -106,10 +106,6 @@ export class SubscriptionsService {
       },
       update: { planId: plan.id, status: 'active' },
     });
-  }
-
-  async update(userId: string, _dto: UpdateSubscriptionDto) {
-    return this.me(userId);
   }
 
   async cancel(userId: string) {

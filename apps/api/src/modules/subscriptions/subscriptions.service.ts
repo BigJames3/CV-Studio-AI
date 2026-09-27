@@ -4,16 +4,12 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
-  Optional,
-  Inject,
-  forwardRef,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import Stripe from 'stripe';
 import { PrismaService } from '../../database/prisma.module';
 import { EntitlementsService } from './entitlements.service';
 import { CheckoutDto, CreateSubscriptionDto } from './dto/subscription.dto';
-import { CinetpayGateway } from '../payments/gateways/cinetpay.gateway';
 import {
   expandableStripeId,
   isNonPlaceholderSecret,
@@ -56,10 +52,7 @@ export class SubscriptionsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly entitlements: EntitlementsService,
-    @Optional()
-    @Inject(forwardRef(() => CinetpayGateway))
-    private readonly cinetpayGateway?: CinetpayGateway
+    private readonly entitlements: EntitlementsService
   ) {
     const key = stripeSecretForClient();
     if (key) {
@@ -84,7 +77,7 @@ export class SubscriptionsService {
   }
 
   /**
-   * Internal only (Stripe fail-open / CinetPay placeholder). Paid entitlements
+   * Internal only (Stripe fail-open). Paid entitlements
    * must be granted via applyPaidEntitlement after a verified webhook.
    */
   async create(userId: string, dto: CreateSubscriptionDto) {
@@ -170,12 +163,6 @@ export class SubscriptionsService {
   }
 
   async checkout(userId: string, dto: CheckoutDto) {
-    const paymentMethod = dto.paymentMethod ?? 'stripe';
-
-    if (paymentMethod === 'cinetpay') {
-      return this.checkoutCinetpay(userId, dto);
-    }
-
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
     });
@@ -270,13 +257,12 @@ export class SubscriptionsService {
   async applyPaidEntitlement(params: {
     userId: string;
     plan: string;
-    provider: 'stripe' | 'cinetpay';
+    provider: 'stripe';
     status?: string;
     periodEnd: Date;
     periodStart?: Date;
     stripeSubscriptionId?: string;
     stripeCustomerId?: string;
-    cinetpayTransactionId?: string;
     cancelAtPeriodEnd?: boolean;
   }) {
     const statusMap: Record<string, 'active' | 'canceled' | 'past_due' | 'trialing'> = {
@@ -321,9 +307,6 @@ export class SubscriptionsService {
         : {}),
       ...(params.stripeCustomerId !== undefined
         ? { stripeCustomerId: params.stripeCustomerId }
-        : {}),
-      ...(params.cinetpayTransactionId !== undefined
-        ? { cinetpayTransactionId: params.cinetpayTransactionId }
         : {}),
     };
 
@@ -388,54 +371,6 @@ export class SubscriptionsService {
       stripeSubscriptionId: params.stripeSubscriptionId,
       stripeCustomerId: params.stripeCustomerId,
       cancelAtPeriodEnd: params.cancelAtPeriodEnd,
-    });
-  }
-
-  private async checkoutCinetpay(userId: string, dto: CheckoutDto) {
-    if (!this.cinetpayGateway) {
-      throw new BadRequestException({
-        code: 'CINETPAY_NOT_CONFIGURED',
-        message: 'CinetPay is not configured in this environment',
-      });
-    }
-
-    const existing = await this.prisma.subscription.findUnique({ where: { userId } });
-    if (await this.findLiveStripeSubscription(existing?.stripeSubscriptionId)) {
-      throw new ConflictException({
-        code: 'STRIPE_SUBSCRIPTION_ACTIVE',
-        message:
-          'You already have an active card subscription. Change plan with your card, or cancel it first.',
-      });
-    }
-
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId, deletedAt: null },
-    });
-    if (!user) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found' });
-
-    const plan = await this.prisma.plan.findUnique({
-      where: { name: this.planName(dto.plan) },
-    });
-    if (!plan) throw new NotFoundException({ code: 'PLAN_NOT_FOUND', message: 'Plan not found' });
-
-    const now = new Date();
-    const subscription = await this.prisma.subscription.upsert({
-      where: { userId },
-      create: {
-        userId,
-        planId: plan.id,
-        status: 'trialing',
-        currentPeriodStart: now,
-        currentPeriodEnd: now,
-      },
-      update: {},
-    });
-
-    return this.cinetpayGateway.createPayment(userId, {
-      plan: dto.plan,
-      interval: dto.interval,
-      subscriptionId: subscription.id,
-      returnUrl: dto.successUrl,
     });
   }
 

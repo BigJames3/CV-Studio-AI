@@ -32,31 +32,7 @@ describe('SubscriptionsController', () => {
     controller = module.get(SubscriptionsController);
   });
 
-  it('POST checkout accepts plan, interval, paymentMethod', async () => {
-    subscriptions.checkout.mockResolvedValue({
-      url: 'https://checkout.cinetpay.com/payment/tok',
-      transactionId: 'cv_abc_1',
-      paymentMethod: 'cinetpay',
-    });
-
-    const result = await controller.checkout(user, {
-      plan: 'pro',
-      interval: 'month',
-      paymentMethod: 'cinetpay',
-    });
-
-    expect(subscriptions.checkout).toHaveBeenCalledWith(
-      'user-1',
-      expect.objectContaining({ plan: 'pro', interval: 'month', paymentMethod: 'cinetpay' })
-    );
-    expect(result).toMatchObject({
-      url: expect.stringMatching(/cinetpay/),
-      transactionId: 'cv_abc_1',
-      paymentMethod: 'cinetpay',
-    });
-  });
-
-  it('POST checkout works without paymentMethod (backward compatible)', async () => {
+  it('POST checkout forwards plan and interval', async () => {
     subscriptions.checkout.mockResolvedValue({
       url: 'https://checkout.stripe.com/c/pay/cs_test',
     });
@@ -109,7 +85,7 @@ describe('SubscriptionsController', () => {
 });
 
 describe('CheckoutDto validation', () => {
-  it('accepts optional paymentMethod', async () => {
+  it('accepts plan and interval', async () => {
     const dto = Object.assign(new CheckoutDto(), { plan: 'pro', interval: 'year' });
     expect(await validate(dto)).toHaveLength(0);
   });

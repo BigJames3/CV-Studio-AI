@@ -62,7 +62,7 @@ export class SubscriptionsController {
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('checkout')
   @ApiOperation({
-    summary: 'Create checkout session (Stripe default, or CinetPay when paymentMethod=cinetpay)',
+    summary: 'Create a Stripe checkout session, or change plan in place for a Stripe subscriber',
   })
   checkout(@CurrentUser() user: AuthUser, @Body() dto: CheckoutDto) {
     return this.subscriptions.checkout(user.id, dto);

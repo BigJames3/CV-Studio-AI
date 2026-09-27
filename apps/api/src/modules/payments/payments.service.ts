@@ -14,12 +14,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { MailService } from '../../mail/mail.service';
 import { StripeWebhookStoreService } from './stripe-webhook-store.service';
 import { StripeAlertService } from './stripe-alert.service';
-import {
-  availablePaymentMethods,
-  expandableStripeId,
-  isNonPlaceholderSecret,
-  stripeSecretForClient,
-} from './payment-env';
+import { expandableStripeId, isNonPlaceholderSecret, stripeSecretForClient } from './payment-env';
 import { emitSecurityAlert } from '../../observability';
 import { MarketplaceService } from '../marketplace/marketplace.service';
 
@@ -60,55 +55,6 @@ export class PaymentsService {
       take: 50,
     });
     return { items };
-  }
-
-  async getStatus(userId: string, transactionId: string) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { transactionId },
-      include: { subscription: true },
-    });
-
-    if (!payment || payment.subscription.userId !== userId) {
-      return { status: 'not_found' as const, transactionId };
-    }
-
-    return {
-      status: payment.status,
-      paymentMethod: payment.paymentMethod,
-      transactionId,
-    };
-  }
-
-  availableMethods() {
-    return availablePaymentMethods();
-  }
-
-  /**
-   * Mark payments stuck in `pending` for longer than `maxAgeMs` as failed.
-   * Late ACCEPTED notifies still grant (completeAcceptedPayment accepts failed → completed).
-   */
-  async expireStalePending(maxAgeMs = 60 * 60 * 1000) {
-    const cutoff = new Date(Date.now() - maxAgeMs);
-    const expired = await this.prisma.payment.updateMany({
-      where: {
-        status: 'pending',
-        createdAt: { lt: cutoff },
-      },
-      data: {
-        status: 'failed',
-        failedReason: 'Payment confirmation timeout (> 60 minutes)',
-      },
-    });
-    if (expired.count > 0) {
-      this.logger.log(
-        JSON.stringify({
-          message: 'Expired pending payments',
-          count: expired.count,
-          cutoff: cutoff.toISOString(),
-        })
-      );
-    }
-    return { count: expired.count };
   }
 
   async handleStripeWebhook(rawBody: Buffer, signature: string) {

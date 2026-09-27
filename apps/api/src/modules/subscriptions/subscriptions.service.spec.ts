@@ -1,5 +1,4 @@
 import { validate } from 'class-validator';
-import { suggestPaymentMethod } from '@cvstudio/shared-utils';
 import { SubscriptionsService } from './subscriptions.service';
 import { CheckoutDto } from './dto/subscription.dto';
 
@@ -165,26 +164,6 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
     );
   });
 
-  it('should grant pro tier via cinetpay', async () => {
-    const result = await service.applyPaidEntitlement({
-      userId,
-      plan: 'pro',
-      provider: 'cinetpay',
-      periodEnd: future,
-      cinetpayTransactionId: 'cv_abc_123',
-    });
-
-    expect(result).toMatchObject({
-      provider: 'cinetpay',
-      cinetpayTransactionId: 'cv_abc_123',
-    });
-    expect(prisma.user.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ subscriptionTier: 'pro' }),
-      })
-    );
-  });
-
   it('should upgrade from pro to business', async () => {
     await service.applyPaidEntitlement({
       userId,
@@ -214,14 +193,14 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
     await service.applyPaidEntitlement({
       userId,
       plan: 'pro',
-      provider: 'cinetpay',
+      provider: 'stripe',
       periodEnd: future,
-      cinetpayTransactionId: 'cv_ok_123',
+      stripeSubscriptionId: 'sub_ok_123',
     });
 
     expect(prisma.subscription.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        update: expect.objectContaining({ lastPaymentError: null, provider: 'cinetpay' }),
+        update: expect.objectContaining({ lastPaymentError: null, provider: 'stripe' }),
         create: expect.objectContaining({
           currentPeriodEnd: future,
           lastPaymentError: null,
@@ -234,15 +213,15 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
     await service.applyPaidEntitlement({
       userId,
       plan: 'pro',
-      provider: 'cinetpay',
+      provider: 'stripe',
       periodEnd: future,
-      cinetpayTransactionId: 'cv_period_1',
+      stripeSubscriptionId: 'sub_period_1',
     });
 
     expect(prisma.subscription.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ currentPeriodEnd: future, provider: 'cinetpay' }),
-        update: expect.objectContaining({ currentPeriodEnd: future, provider: 'cinetpay' }),
+        create: expect.objectContaining({ currentPeriodEnd: future, provider: 'stripe' }),
+        update: expect.objectContaining({ currentPeriodEnd: future, provider: 'stripe' }),
       })
     );
   });
@@ -267,9 +246,6 @@ describe('SubscriptionsService.checkout', () => {
   let listCustomers: jest.Mock;
   let updateCustomer: jest.Mock;
   let retrieveSubscription: jest.Mock;
-  const cinetpayGateway = {
-    createPayment: jest.fn(),
-  };
   const prevPrices = {
     STRIPE_PRICE_PRO_MONTHLY: process.env.STRIPE_PRICE_PRO_MONTHLY,
     STRIPE_PRICE_PRO_YEARLY: process.env.STRIPE_PRICE_PRO_YEARLY,
@@ -328,18 +304,7 @@ describe('SubscriptionsService.checkout', () => {
     });
     prisma.user.update.mockResolvedValue({});
     prisma.subscription.upsert.mockResolvedValue({ id: 'sub-1', userId });
-    cinetpayGateway.createPayment.mockResolvedValue({
-      url: 'https://checkout.cinetpay.com/payment/tok_test',
-      transactionId: 'cv_user1_1',
-      paymentMethod: 'cinetpay',
-      plan: 'pro',
-      interval: 'month',
-    });
-    service = new SubscriptionsService(
-      prisma as never,
-      entitlements as never,
-      cinetpayGateway as never
-    );
+    service = new SubscriptionsService(prisma as never, entitlements as never);
     createCheckoutSession = jest.fn().mockResolvedValue({
       id: 'cs_test_123',
       url: 'https://checkout.stripe.com/c/pay/cs_test_123',
@@ -363,46 +328,15 @@ describe('SubscriptionsService.checkout', () => {
     });
   });
 
-  describe('paymentMethod routing', () => {
-    it('should default to stripe if paymentMethod not provided', async () => {
+  describe('checkout validation', () => {
+    it('opens a Stripe checkout session', async () => {
       const dto: CheckoutDto = { plan: 'pro', interval: 'month' };
       const result = await service.checkout(userId, dto);
       expect(result.url).toMatch(/checkout.stripe.com/);
       expect(createCheckoutSession).toHaveBeenCalledTimes(1);
     });
 
-    it('should use stripe if paymentMethod=stripe', async () => {
-      const dto: CheckoutDto = {
-        plan: 'pro',
-        interval: 'month',
-        paymentMethod: 'stripe',
-      };
-      const result = await service.checkout(userId, dto);
-      expect(result.url).toMatch(/checkout.stripe.com/);
-      expect(createCheckoutSession).toHaveBeenCalledTimes(1);
-    });
-
-    it('should route to CinetPay gateway if paymentMethod=cinetpay', async () => {
-      const dto: CheckoutDto = {
-        plan: 'pro',
-        interval: 'month',
-        paymentMethod: 'cinetpay',
-      };
-      const result = await service.checkout(userId, dto);
-      expect(result).toMatchObject({
-        url: expect.stringMatching(/checkout.cinetpay.com/),
-        paymentMethod: 'cinetpay',
-      });
-      expect(cinetpayGateway.createPayment).toHaveBeenCalledWith(userId, {
-        plan: 'pro',
-        interval: 'month',
-        subscriptionId: 'sub-1',
-        returnUrl: undefined,
-      });
-      expect(createCheckoutSession).not.toHaveBeenCalled();
-    });
-
-    it('should accept checkout DTO without paymentMethod (backward compatible)', async () => {
+    it('should accept a checkout DTO with plan and interval', async () => {
       const dto = Object.assign(new CheckoutDto(), {
         plan: 'pro',
         interval: 'month',
@@ -411,13 +345,13 @@ describe('SubscriptionsService.checkout', () => {
       expect(errors).toHaveLength(0);
     });
 
-    it('should reject unknown paymentMethod', async () => {
+    it('rejects a payment method field (Stripe only)', async () => {
       const dto = Object.assign(new CheckoutDto(), {
         plan: 'pro',
         interval: 'month',
-        paymentMethod: 'paypal',
+        paymentMethod: 'cinetpay',
       });
-      const errors = await validate(dto);
+      const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
       expect(errors.some((e) => e.property === 'paymentMethod')).toBe(true);
     });
 
@@ -437,15 +371,6 @@ describe('SubscriptionsService.checkout', () => {
       });
       const errors = await validate(dto);
       expect(errors.some((e) => e.property === 'interval')).toBe(true);
-    });
-
-    it('should throw when CinetPay is requested but the gateway is missing', async () => {
-      const noGateway = new SubscriptionsService(prisma as never, entitlements as never);
-      await expect(
-        noGateway.checkout(userId, { plan: 'pro', interval: 'month', paymentMethod: 'cinetpay' })
-      ).rejects.toMatchObject({
-        response: expect.objectContaining({ code: 'CINETPAY_NOT_CONFIGURED' }),
-      });
     });
   });
 
@@ -750,20 +675,6 @@ describe('SubscriptionsService.checkout', () => {
         })
       );
     });
-
-    it('forwards a client returnUrl to CinetPay (gateway allowlists it)', async () => {
-      await service.checkout(userId, {
-        plan: 'pro',
-        interval: 'month',
-        paymentMethod: 'cinetpay',
-        successUrl: 'https://evil.example/phish',
-      });
-
-      expect(cinetpayGateway.createPayment).toHaveBeenCalledWith(
-        userId,
-        expect.objectContaining({ returnUrl: 'https://evil.example/phish' })
-      );
-    });
   });
 
   describe('existing Stripe subscriber (no second subscription)', () => {
@@ -960,31 +871,6 @@ describe('SubscriptionsService.checkout', () => {
       expect(expireSession).toHaveBeenCalledWith('cs_old_sub');
       expect(createCheckoutSession).toHaveBeenCalledTimes(1);
     });
-
-    it('blocks CinetPay checkout while a card subscription is active', async () => {
-      await expect(
-        service.checkout(userId, { plan: 'business', interval: 'month', paymentMethod: 'cinetpay' })
-      ).rejects.toMatchObject({
-        response: expect.objectContaining({ code: 'STRIPE_SUBSCRIPTION_ACTIVE' }),
-      });
-      expect(cinetpayGateway.createPayment).not.toHaveBeenCalled();
-    });
-  });
-});
-
-describe('geo-based payment suggestion (v2)', () => {
-  it.each([
-    ['SN', 'cinetpay'],
-    ['CI', 'cinetpay'],
-    ['sn', 'cinetpay'],
-    ['US', 'stripe'],
-    ['FR', 'stripe'],
-    [undefined, 'stripe'],
-    ['', 'stripe'],
-    ['XX', 'stripe'],
-    ['ZZ', 'stripe'],
-  ] as const)('country %s → %s', (country, expected) => {
-    expect(suggestPaymentMethod(country || undefined)).toBe(expected);
   });
 });
 

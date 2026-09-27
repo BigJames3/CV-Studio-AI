@@ -12,6 +12,10 @@ import {
   type OptimizeResumeResult,
   type CoverLetterResult,
   type AtsExplainResult,
+  type CareerAdviceResult,
+  type InterviewPrepResult,
+  type JobMatchResult,
+  type SkillsSuggestResult,
 } from '@cvstudio/ai-service';
 import { PrismaService } from '../../database/prisma.module';
 import { AiQuotaService, type AiQuotaReservation } from './ai-quota.service';
@@ -29,6 +33,14 @@ import {
   LinkedInImportDto,
   ParsePdfDto,
 } from './dto/ai.dto';
+
+type CvInsightResults = {
+  'job-match': JobMatchResult;
+  interview: InterviewPrepResult;
+  'career-advice': CareerAdviceResult;
+  'skills-suggest': SkillsSuggestResult;
+};
+type CvInsightFeature = keyof CvInsightResults;
 
 @Injectable()
 export class AiService {
@@ -171,21 +183,9 @@ export class AiService {
   }
 
   async matchJob(userId: string, dto: MatchJobDto) {
-    await this.assertCvOwnership(userId, dto.cvId);
-    return {
-      status: 'completed',
-      feature: 'job-match',
-      promptId: 'job_matcher',
-      model: this.modelFor('job-match'),
-      matchScore: 68,
-      mustHaveGaps: [
-        { requirement: 'Example skill from JD', reason: 'Not found in CV facts (scaffold)' },
-      ],
-      niceToHaveGaps: [],
-      strengths: [],
-      suggestedEdits: [],
-      warnings: ['Wire embeddings + LLM explain in ai-service'],
-    };
+    return this.runCvInsight(userId, dto.cvId, 'job-match', {
+      jobDescription: dto.jobDescription,
+    });
   }
 
   async checkAts(userId: string, dto: CheckAtsDto) {
@@ -278,44 +278,14 @@ export class AiService {
   }
 
   async interviewPrep(userId: string, dto: InterviewPrepDto) {
-    await this.assertCvOwnership(userId, dto.cvId);
-    return {
-      status: 'completed',
-      feature: 'interview',
-      promptId: 'interview_prep',
-      model: this.modelFor('interview'),
-      interviewType: dto.interviewType ?? 'hr',
-      questions: [
-        {
-          question: 'Tell me about a time you delivered under pressure',
-          framework: 'STAR',
-          tips: ['Use a metric', 'Keep under 2 minutes'],
-          needsUserInput: false,
-        },
-      ],
-      disclaimer: 'Practice aid only — not a guarantee of hiring outcomes.',
-    };
+    return this.runCvInsight(userId, dto.cvId, 'interview', {
+      jobDescription: dto.jobDescription,
+      interviewType: dto.interviewType,
+    });
   }
 
   async careerAdvice(userId: string, dto: CareerAdviceDto) {
-    await this.assertCvOwnership(userId, dto.cvId);
-    return {
-      status: 'completed',
-      feature: 'career-advice',
-      promptId: 'career_advisor',
-      model: this.modelFor('career-advice'),
-      cards: [
-        {
-          title: 'Clarify target role keywords',
-          type: 'positioning',
-          body: 'Align headline and top bullets to the target role using existing experience only.',
-          priority: 'high',
-          evidenceBased: true,
-          actions: ['Update headline', 'Run Job Matcher on 3 target JDs'],
-        },
-      ],
-      disclaimer: 'General career information — not certified coaching or legal advice.',
-    };
+    return this.runCvInsight(userId, dto.cvId, 'career-advice', { targetRole: dto.targetRole });
   }
 
   async generatePortfolio(userId: string, dto: GeneratePortfolioDto) {
@@ -337,15 +307,7 @@ export class AiService {
   }
 
   async skillsSuggest(userId: string, dto: SkillsSuggestDto) {
-    await this.assertCvOwnership(userId, dto.cvId);
-    return {
-      status: 'completed',
-      feature: 'skills-suggest',
-      promptId: 'skills_suggest',
-      model: this.modelFor('skills-suggest'),
-      suggestions: [],
-      warnings: ['Scaffold — evidence-gated skill suggestions only'],
-    };
+    return this.runCvInsight(userId, dto.cvId, 'skills-suggest', { targetRole: dto.targetRole });
   }
 
   async linkedInImport(userId: string, dto: LinkedInImportDto) {
@@ -381,6 +343,60 @@ export class AiService {
       input,
       message: 'Wire packages/ai-service + BullMQ ai queue + docs/ai/prompts',
     };
+  }
+
+  /**
+   * CV analysis features (job match, interview prep, career advice, skills suggestions).
+   * They share the daily optimize quota and read only the caller's own CV.
+   */
+  private async runCvInsight<F extends CvInsightFeature>(
+    userId: string,
+    cvId: string,
+    feature: F,
+    input: Record<string, unknown>
+  ) {
+    const cv = await this.assertCvOwnership(userId, cvId);
+    const quota = await this.quotas.reserveOptimizeQuota(userId, cvId);
+    return this.withReservation(quota, async () => {
+      const gateway = await runAiFeature({
+        feature,
+        userId,
+        locale: 'en',
+        payload: { ...input, cvFacts: (cv.content as Record<string, unknown>) ?? {} },
+      });
+
+      const data = gateway.data as CvInsightResults[F] | undefined;
+      if (!data) {
+        throw new ServiceUnavailableException({
+          code: 'AI_PROVIDER_ERROR',
+          message: gateway.error ?? `${feature} failed`,
+        });
+      }
+      if (!gateway.ok || !data.ok) {
+        const refusals = 'refusals' in data ? data.refusals : [];
+        throw new BadRequestException({
+          code: 'AI_REFUSED',
+          message: refusals?.join('; ') || gateway.error || `${feature} refused`,
+          details: { refusals: refusals ?? [] },
+        });
+      }
+
+      const { ok: _ok, ...result } = data;
+      await this.quotas.commit(quota, {
+        prompt: `${feature} | ${JSON.stringify(input).slice(0, 280)}`,
+        result: { ...result, provider: gateway.provider, model: gateway.model },
+        tokensUsed: gateway.tokensUsed ?? 0,
+      });
+
+      return {
+        status: 'completed',
+        feature,
+        ...result,
+        model: gateway.model ?? this.modelFor(feature),
+        provider: gateway.provider ?? 'heuristic',
+        quota: { used: quota.used + 1, limit: quota.limit },
+      };
+    });
   }
 
   /** Run a quota-reserved call; the reserved slot is given back if anything fails. */

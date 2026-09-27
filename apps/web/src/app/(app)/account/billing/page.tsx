@@ -10,6 +10,7 @@ import { InvoiceHistory } from '@/components/billing/invoice-history';
 import { BillingPlansSkeleton, PlanGrid } from '@/components/billing/plan-grid';
 import { queryKeys, subscriptionsApi, paymentsApi, plansApi, invoicesApi } from '@/lib/api';
 import { FALLBACK_PLANS } from '@/lib/billing/plans-catalog';
+import { checkoutErrorMessage } from '@/lib/billing/checkout-error-message';
 import { useMe, useSubscription, useUserPlan } from '@/hooks';
 import { cn, suggestPaymentMethod, type PaymentProvider } from '@/lib/utils';
 import {
@@ -322,9 +323,9 @@ function BillingPageContent() {
         paymentMethod: selectedMethod,
       });
       window.location.href = url;
-    } catch {
+    } catch (error) {
       track('checkout_failed', { plan, interval, payment_method: selectedMethod });
-      setCheckoutError('Le paiement a échoué. Réessayez ou utilisez une autre carte.');
+      setCheckoutError(checkoutErrorMessage(error));
       setCheckoutPending(null);
     }
   }

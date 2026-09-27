@@ -14,6 +14,7 @@ import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 import { LinkedInSignInButton } from '@/components/auth/linkedin-sign-in-button';
 import { sanitizeNextPath } from '@/lib/safe-next';
 import { authApi } from '@/lib/api';
+import { authErrorMessage } from '@/lib/auth/auth-error-message';
 
 const totpSchema = z.object({
   totp: z.string().min(6, 'Code requis').max(16),
@@ -105,7 +106,11 @@ function LoginPageInner() {
           >
             Retour
           </button>
-          {login.isError && <p className="text-sm text-error">Code invalide ou session expirée.</p>}
+          {login.isError && (
+            <p className="text-sm text-error" role="alert">
+              {authErrorMessage(login.error, 'totp')}
+            </p>
+          )}
         </form>
       ) : (
         <>
@@ -153,7 +158,7 @@ function LoginPageInner() {
             </Button>
             {login.isError && (
               <p className="text-sm text-error" data-testid="login-error" role="alert">
-                Identifiants invalides ou API indisponible.
+                {authErrorMessage(login.error, 'login')}
               </p>
             )}
           </form>

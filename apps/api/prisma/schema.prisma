@@ -540,8 +540,6 @@ model Subscription {
   stripeSubscriptionId   String?            @map("stripe_subscription_id") @db.VarChar(255)
   stripeCustomerId       String?            @unique @map("stripe_customer_id") @db.VarChar(255)
   provider               String?            @db.VarChar(32) // 'stripe'
-  /// Unused since CinetPay was removed; dropped by the next release (expand/contract).
-  cinetpayTransactionId  String?            @unique @map("cinetpay_transaction_id") @db.VarChar(255)
   lastPaymentError       String?            @map("last_payment_error") @db.VarChar(512)
   createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)

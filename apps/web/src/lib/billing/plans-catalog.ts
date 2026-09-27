@@ -29,7 +29,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
   {
     id: 'pro',
     name: 'Pro',
-    description: '5 CVs, 50+ templates, all AI features, ATS, portfolio',
+    description: '5 CVs, unlimited templates, AI optimization, ATS check',
     position: 1,
     priceMonthly: 9.99,
     priceAnnual: 99,

@@ -119,6 +119,13 @@ describe('mapPlanToPublicDto', () => {
   );
 });
 
+describe('plan descriptions only promise what ships', () => {
+  // Template counts are plan rules (Free: 5, paid: unlimited), but no made-up "50+" or portfolio.
+  it.each(CATALOG_FALLBACK_ROWS)('$name', (row) => {
+    expect(row.description).not.toMatch(/\d+\+ templates|portfolio/i);
+  });
+});
+
 describe('catalog matches the runtime PDF/share gate (FE-001)', () => {
   it.each([
     ['free', FREE],

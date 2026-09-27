@@ -12,6 +12,7 @@ Copy from `apps/api/.env.example`. **Never commit real keys.** Do not put secret
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `STRIPE_SECRET_KEY`                         | Server SDK. Placeholder `sk_test_xxx` = unconfigured                                                                                              |
 | `STRIPE_WEBHOOK_SECRET`                     | `POST /api/v1/payments/webhook` signature                                                                                                         |
+| `STRIPE_CONNECT_WEBHOOK_SECRET`             | Optional. Secret of the second endpoint ("events on connected accounts": `account.updated` for marketplace sellers).                              |
 | `STRIPE_PRICE_PRO_MONTHLY` / `_YEARLY`      | Price IDs                                                                                                                                         |
 | `STRIPE_PRICE_BUSINESS_MONTHLY` / `_YEARLY` | Price IDs                                                                                                                                         |
 | `STRIPE_FAIL_CLOSED`                        | Default on. Missing keys → checkout 400 / webhook 503 (no `dev_bypass`, no soft-ack). `0` disables the flag only; checkout still requires Stripe. |

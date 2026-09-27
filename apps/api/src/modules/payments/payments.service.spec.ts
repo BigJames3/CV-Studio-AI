@@ -177,6 +177,54 @@ describe('PaymentsService webhook fail-closed', () => {
     }
   });
 
+  describe('webhook signature (account + Connect endpoints)', () => {
+    const payload = JSON.stringify({ id: 'evt_sig', object: 'event', type: 'account.updated' });
+
+    function signedWith(secret: string) {
+      const stripe = (service as unknown as { stripe: Stripe }).stripe;
+      return stripe.webhooks.generateTestHeaderString({ payload, secret });
+    }
+
+    beforeEach(() => {
+      process.env.STRIPE_CONNECT_WEBHOOK_SECRET = 'whsec_connect';
+      jest.spyOn(service, 'processEventWithRetry').mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      delete process.env.STRIPE_CONNECT_WEBHOOK_SECRET;
+    });
+
+    it('accepts an event signed by the account endpoint secret', async () => {
+      await expect(
+        service.handleStripeWebhook(Buffer.from(payload), signedWith('whsec_real'))
+      ).resolves.toEqual({ received: true });
+      expect(service.processEventWithRetry).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'evt_sig' })
+      );
+    });
+
+    it('accepts an event signed by the Connect endpoint secret', async () => {
+      await expect(
+        service.handleStripeWebhook(Buffer.from(payload), signedWith('whsec_connect'))
+      ).resolves.toEqual({ received: true });
+    });
+
+    it('rejects a Connect event when STRIPE_CONNECT_WEBHOOK_SECRET is not set', async () => {
+      delete process.env.STRIPE_CONNECT_WEBHOOK_SECRET;
+      await expect(
+        service.handleStripeWebhook(Buffer.from(payload), signedWith('whsec_connect'))
+      ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'INVALID_WEBHOOK' }) });
+      expect(service.processEventWithRetry).not.toHaveBeenCalled();
+    });
+
+    it('rejects an event signed by an unknown secret', async () => {
+      await expect(
+        service.handleStripeWebhook(Buffer.from(payload), signedWith('whsec_attacker'))
+      ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'INVALID_WEBHOOK' }) });
+      expect(service.processEventWithRetry).not.toHaveBeenCalled();
+    });
+  });
+
   it('skips already processed events (idempotency)', async () => {
     webhookStore.isProcessed.mockResolvedValue(true);
     await service.processEventWithRetry({

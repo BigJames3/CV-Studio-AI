@@ -14,7 +14,12 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { MailService } from '../../mail/mail.service';
 import { StripeWebhookStoreService } from './stripe-webhook-store.service';
 import { StripeAlertService } from './stripe-alert.service';
-import { expandableStripeId, isNonPlaceholderSecret, stripeSecretForClient } from './payment-env';
+import {
+  expandableStripeId,
+  isNonPlaceholderSecret,
+  stripeSecretForClient,
+  stripeWebhookSecrets,
+} from './payment-env';
 import { emitSecurityAlert } from '../../observability';
 import { MarketplaceService } from '../marketplace/marketplace.service';
 
@@ -58,8 +63,7 @@ export class PaymentsService {
   }
 
   async handleStripeWebhook(rawBody: Buffer, signature: string) {
-    const secret = process.env.STRIPE_WEBHOOK_SECRET;
-    if (!this.stripe || !isNonPlaceholderSecret(secret)) {
+    if (!this.stripe || !isNonPlaceholderSecret(process.env.STRIPE_WEBHOOK_SECRET)) {
       this.alerts.captureException(
         new Error('Stripe webhook received but Stripe is not configured'),
         {
@@ -73,10 +77,18 @@ export class PaymentsService {
       });
     }
 
-    let event: Stripe.Event;
-    try {
-      event = this.stripe.webhooks.constructEvent(rawBody, signature, secret);
-    } catch (err) {
+    // One endpoint for account events, an optional second one for Connect events: accept either.
+    let event: Stripe.Event | undefined;
+    let err: unknown;
+    for (const secret of stripeWebhookSecrets()) {
+      try {
+        event = this.stripe.webhooks.constructEvent(rawBody, signature, secret);
+        break;
+      } catch (e) {
+        err = e;
+      }
+    }
+    if (!event) {
       this.logger.error(`Webhook signature verification failed: ${(err as Error).message}`);
       emitSecurityAlert({
         id: 'SEC-05',

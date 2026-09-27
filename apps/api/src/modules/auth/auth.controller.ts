@@ -48,7 +48,13 @@ export class AuthController {
     };
   }
 
-  private attachCookies(res: Response, refreshToken: string) {
+  /**
+   * Issue the session cookies for a successful sign-in, after revoking the session the
+   * browser previously held so switching accounts never leaves it active.
+   */
+  private async attachCookies(req: Request, res: Response, refreshToken: string) {
+    const previous = req.cookies?.[REFRESH_COOKIE] as string | undefined;
+    await this.auth.revokeReplacedSession(previous, refreshToken, this.ctx(req));
     setAuthCookies(res, refreshToken);
   }
 
@@ -59,9 +65,9 @@ export class AuthController {
     return rest;
   }
 
-  private respondAuth(req: Request, res: Response, result: TokenBundle | TwoFactorChallenge) {
+  private async respondAuth(req: Request, res: Response, result: TokenBundle | TwoFactorChallenge) {
     if ('requires2fa' in result) return result;
-    this.attachCookies(res, result.refreshToken);
+    await this.attachCookies(req, res, result.refreshToken);
     return this.toClientAuth(req, result);
   }
 
@@ -75,7 +81,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response
   ) {
     const tokens = await this.auth.register(dto, this.ctx(req));
-    this.attachCookies(res, tokens.refreshToken);
+    await this.attachCookies(req, res, tokens.refreshToken);
     return this.toClientAuth(req, tokens);
   }
 
@@ -127,7 +133,8 @@ export class AuthController {
   ) {
     const token = (req.cookies?.[REFRESH_COOKIE] as string | undefined) ?? dto.refreshToken ?? '';
     const tokens = await this.auth.refresh(token, this.ctx(req));
-    this.attachCookies(res, tokens.refreshToken);
+    // Rotation within the same session: never revoke the cookie it was issued from.
+    setAuthCookies(res, tokens.refreshToken);
     return this.toClientAuth(req, tokens);
   }
 
@@ -187,7 +194,7 @@ export class AuthController {
       dto.backupCode,
       this.ctx(req)
     );
-    this.attachCookies(res, tokens.refreshToken);
+    await this.attachCookies(req, res, tokens.refreshToken);
     return this.toClientAuth(req, tokens);
   }
 

@@ -53,6 +53,25 @@ describe('@cvstudio/ai-service optimize-resume gateway', () => {
     expect(response.model).toBe('heuristic-v1');
   });
 
+  it('cover letter cites the roles of a saved CV (CvContent uses experiences)', async () => {
+    const response = await runAiFeature({
+      feature: 'cover-letter',
+      userId: 'u1',
+      payload: {
+        jobDescription: 'React role',
+        company: 'Wave',
+        cvFacts: {
+          identity: { fullName: 'Awa Diallo' },
+          experiences: [{ title: 'Frontend Engineer', company: 'Orange', bullets: [] }],
+          skills: [{ name: 'React' }],
+        },
+      },
+    });
+    const data = response.data as { usedEvidence: string[]; warnings: string[] };
+    expect(data.usedEvidence).toEqual(['Frontend Engineer at Orange', 'React']);
+    expect(data.warnings).toEqual([]);
+  });
+
   it('runAiFeature completes cover-letter via heuristic', async () => {
     process.env.AI_PROVIDER = 'heuristic';
     const response = await runAiFeature({

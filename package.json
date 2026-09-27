@@ -10,8 +10,8 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "dev": "turbo run dev --parallel --filter=@cvstudio/api --filter=@cvstudio/web",
-    "dev:all": "turbo run dev --parallel",
+    "dev": "turbo run dev --filter=@cvstudio/api --filter=@cvstudio/web",
+    "dev:all": "turbo run dev",
     "dev:api": "turbo run dev --filter=@cvstudio/api",
     "dev:web": "turbo run dev --filter=@cvstudio/web",
     "dev:mobile": "turbo run start --filter=@cvstudio/mobile",

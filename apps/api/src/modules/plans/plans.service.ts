@@ -5,6 +5,7 @@ import { getCvLimit } from '@cvstudio/shared-utils';
 import { PrismaService } from '../../database/prisma.module';
 import { RedisService } from '../../redis/redis.module';
 import { isNonPlaceholderSecret } from '../payments/payment-env';
+import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 
 export const PLAN_CACHE_KEY = 'plans:all';
 export const PLAN_CACHE_TTL_SECONDS = 3600;
@@ -39,11 +40,14 @@ type PlanRow = {
   apiAccess: boolean;
 };
 
+/** Free users get the non-premium official templates; paid plans get every template. */
+const FREE_TEMPLATE_COUNT = TEMPLATE_SEEDS.filter((t) => !t.isPremium).length;
+
 /** Used when `plans` is empty (seed not run) so the billing UI still has prices. */
 export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   {
     name: 'Free',
-    description: '1 CV, 5 templates, no PDF export, no AI',
+    description: '1 CV, 4 templates, no PDF export, no AI',
     priceMonthly: 0,
     priceYearly: 0,
     cvLimit: 1,
@@ -55,7 +59,7 @@ export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   },
   {
     name: 'Pro',
-    description: '5 CVs, 50+ templates, all AI features, ATS, portfolio',
+    description: '5 CVs, all templates incl. premium, AI optimization, ATS check',
     priceMonthly: 9.99,
     priceYearly: 99,
     cvLimit: 5,
@@ -118,7 +122,7 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
     { feature: 'aiFeatures', value: String(plan.aiFeatures), included: plan.aiFeatures },
     {
       feature: 'templates',
-      value: id === 'free' ? '5' : 'unlimited',
+      value: id === 'free' ? String(FREE_TEMPLATE_COUNT) : 'all',
       included: true,
     },
     {

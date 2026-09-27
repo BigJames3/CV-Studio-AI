@@ -1,6 +1,6 @@
 # Payment gateway setup
 
-Stripe is the only payment provider (cards, auto-renew). CinetPay (Mobile Money) was removed on 2026-09-27, together with its routes, its gateway and the geo-based payment suggestion. The unused `cinetpay_transaction_id` column is dropped by the following release (expand/contract).
+Stripe is the only payment provider (cards, auto-renew). CinetPay (Mobile Money) was removed on 2026-09-27, together with its routes, its gateway and the geo-based payment suggestion. The unused `cinetpay_transaction_id` column was dropped by the following release (expand/contract).
 
 ## Environment
 

@@ -4,6 +4,8 @@ import {
   detectLanguage,
   grammarCheckHeuristic,
   grammarCheckWithOpenAi,
+  importLinkedInExport,
+  parseCsv,
   optimizeResumeWithOpenAi,
   extractCvFacts,
   extractKeywords,
@@ -117,7 +119,7 @@ describe('@cvstudio/ai-service optimize-resume gateway', () => {
 
   it('runAiFeature reports unwired features clearly', async () => {
     const response = await runAiFeature({
-      feature: 'linkedin-import',
+      feature: 'ocr',
       userId: 'u1',
       payload: {},
     });
@@ -518,5 +520,128 @@ describe('@cvstudio/ai-service optimize with OpenAI (shared request helper)', ()
     await expect(
       optimizeResumeWithOpenAi({ bulletText: 'Did X' }, { env: { AI_API_KEY: 'k' }, fetchImpl })
     ).rejects.toThrow(/invalid JSON schema/);
+  });
+});
+
+describe('@cvstudio/ai-service LinkedIn data export import (AI-001 step 2)', () => {
+  const EXPORT = {
+    'Basic_LinkedInDataExport/Profile.csv':
+      '\uFEFFFirst Name,Last Name,Maiden Name,Address,Birth Date,Headline,Summary,Industry,Zip Code,Geo Location,Twitter Handles,Websites,Instant Messengers\r\n' +
+      'Awa,Diallo,,,,"Frontend Engineer, React","Builds fast web apps.\nLoves design systems.",IT,,Dakar,,"[PERSONAL:https://awa.dev,COMPANY:https://orange.com]",\r\n',
+    'Positions.csv':
+      'Company Name,Title,Description,Location,Started On,Finished On\n' +
+      'Orange,Frontend Engineer,"• Built a design system used by 12 teams\n- Improved speed - by caching",Dakar,Jan 2021,\n' +
+      'Wave,"Web Developer, Payments",Built payment pages,,Mar 2018,Dec 2020\n',
+    'Education.csv':
+      'School Name,Start Date,End Date,Notes,Degree Name,Activities\nUCAD,2014,2017,Mention bien,Licence Informatique,\n',
+    'Skills.csv': 'Name\nReact\nTypeScript\n\n',
+    'Languages.csv': 'Name,Proficiency\nFrançais,Native or bilingual proficiency\n',
+    'Certifications.csv':
+      'Name,Url,Authority,Started On,Finished On,License Number\nAWS Cloud Practitioner,,Amazon,Jun 2023,,\n',
+    'Projects.csv':
+      'Title,Description,Url,Started On,Finished On\nAtlas,Open source UI kit,https://atlas.dev,,\n',
+    'Email Addresses.csv':
+      'Email Address,Confirmed,Primary,Updated On\nold@example.com,Yes,No,\nawa@example.com,Yes,Yes,\n',
+    'PhoneNumbers.csv': 'Extension,Number,Type\n,+221 77 000 00 00,Mobile\n',
+    'Connections.csv': 'First Name\nBob\n',
+  };
+
+  it('parses RFC 4180 CSV: quotes, doubled quotes, commas and newlines in fields', () => {
+    expect(parseCsv('A,B\r\n"x, y","say ""hi""\nthere"\n,z')).toEqual([
+      { a: 'x, y', b: 'say "hi"\nthere' },
+      { a: '', b: 'z' },
+    ]);
+    expect(parseCsv('')).toEqual([]);
+  });
+
+  it('maps every export file to CV content without inventing anything', () => {
+    const result = importLinkedInExport({ files: EXPORT });
+    expect(result.ok).toBe(true);
+    expect(result.content.identity).toEqual({
+      fullName: 'Awa Diallo',
+      headline: 'Frontend Engineer, React',
+      email: 'awa@example.com',
+      phone: '+221 77 000 00 00',
+      city: 'Dakar',
+      website: 'https://awa.dev',
+      photoUrl: null,
+    });
+    expect(result.content.summary.text).toBe('Builds fast web apps.\nLoves design systems.');
+    expect(result.content.experiences).toEqual([
+      {
+        id: 'li-exp-1',
+        company: 'Orange',
+        title: 'Frontend Engineer',
+        location: 'Dakar',
+        start: 'Jan 2021',
+        end: null,
+        current: true,
+        bullets: ['Built a design system used by 12 teams', 'Improved speed - by caching'],
+      },
+      {
+        id: 'li-exp-2',
+        company: 'Wave',
+        title: 'Web Developer, Payments',
+        location: undefined,
+        start: 'Mar 2018',
+        end: 'Dec 2020',
+        current: false,
+        bullets: ['Built payment pages'],
+      },
+    ]);
+    expect(result.content.education[0]).toMatchObject({
+      school: 'UCAD',
+      degree: 'Licence Informatique',
+      start: '2014',
+      end: '2017',
+      details: 'Mention bien',
+    });
+    expect(result.content.skills.map((s) => s.name)).toEqual(['React', 'TypeScript']);
+    expect(result.content.languages[0]).toMatchObject({
+      name: 'Français',
+      level: 'Native or bilingual proficiency',
+    });
+    expect(result.content.certificates[0]).toMatchObject({ issuer: 'Amazon', year: '2023' });
+    expect(result.content.projects[0]).toMatchObject({ name: 'Atlas', url: 'https://atlas.dev' });
+    expect(result.stats).toEqual({
+      experiences: 2,
+      education: 1,
+      skills: 2,
+      languages: 1,
+      certificates: 1,
+      projects: 1,
+    });
+    expect(result.warnings).toEqual(['Ignored 1 file(s) not used for a CV']);
+  });
+
+  it('falls back to the account identity when the export has no profile', () => {
+    const result = importLinkedInExport({
+      files: { 'Skills.csv': 'Name\nSQL' },
+      fallbackIdentity: { fullName: 'Awa Diallo', email: 'a@x.com', photoUrl: 'https://p' },
+    });
+    expect(result.content.identity).toMatchObject({
+      fullName: 'Awa Diallo',
+      email: 'a@x.com',
+      photoUrl: 'https://p',
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('refuses an export with no usable data and flags a missing name', () => {
+    const result = importLinkedInExport({ files: { 'Connections.csv': 'First Name\nBob' } });
+    expect(result.ok).toBe(false);
+    expect(result.refusals[0]).toMatch(/No LinkedIn export data/);
+    expect(result.warnings).toContain('No name found: add it in the editor');
+  });
+
+  it('gateway maps the export and ignores non-text file values', async () => {
+    const response = await runAiFeature({
+      feature: 'linkedin-import',
+      userId: 'u1',
+      payload: { files: { 'Skills.csv': 'Name\nSQL', 'Positions.csv': 42 } },
+    });
+    expect(response).toMatchObject({ ok: true, model: 'deterministic-v1' });
+    const empty = await runAiFeature({ feature: 'linkedin-import', userId: 'u1', payload: {} });
+    expect(empty).toMatchObject({ ok: false, error: expect.stringMatching(/No LinkedIn/) });
   });
 });

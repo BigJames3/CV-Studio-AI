@@ -445,7 +445,7 @@ Deterministic field mapping first ; **S** for summary polish only on mapped fact
 ### API
 
 - Part of `generate-cv` source=linkedin
-- `POST /api/v1/ai/linkedin-import` (à ajouter pour sync)
+- `POST /api/v1/ai/linkedin-import` : body `{ files: { "Positions.csv": "<texte CSV>", ... } }`, les fichiers de l'export officiel LinkedIn (« Obtenir une copie de vos données »). Réponse : brouillon `CvContent` non enregistré + `stats`. Mapping déterministe, sans modèle ni quota IA. L'API LinkedIn (scopes `openid email profile`) ne fournit ni expériences ni formations : seul l'export les contient. Le nom, l'email et la photo du compte complètent ce que l'export n'a pas.
 
 ### Prompt
 

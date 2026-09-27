@@ -5,6 +5,7 @@ import { optimizeResumeHeuristic } from './providers/heuristic-optimize';
 import { grammarCheckWithOpenAi, optimizeResumeWithOpenAi } from './providers/openai-compatible';
 import type { GrammarCheckInput, GrammarCheckResult } from './prompts/grammar-check';
 import { detectLanguage, grammarCheckHeuristic } from './providers/heuristic-grammar';
+import { importLinkedInExport, type LinkedInImportInput } from './linkedin-import';
 import type { CoverLetterInput, CoverLetterResult } from './prompts/cover-letter';
 import { generateCoverLetterHeuristic } from './providers/heuristic-cover-letter';
 import type { AtsExplainInput, AtsExplainResult } from './prompts/ats-explain';
@@ -233,10 +234,39 @@ async function runGrammarCheck(req: AiRequest): Promise<AiResponse> {
   }
 }
 
+/** LinkedIn data export → CV content. Deterministic mapping, no model call. */
+function runLinkedInImport(req: AiRequest): AiResponse {
+  const files = req.payload.files;
+  const input: LinkedInImportInput = {
+    files:
+      files && typeof files === 'object'
+        ? Object.fromEntries(
+            Object.entries(files as Record<string, unknown>).filter(
+              (entry): entry is [string, string] => typeof entry[1] === 'string'
+            )
+          )
+        : {},
+    fallbackIdentity:
+      req.payload.fallbackIdentity && typeof req.payload.fallbackIdentity === 'object'
+        ? (req.payload.fallbackIdentity as LinkedInImportInput['fallbackIdentity'])
+        : undefined,
+  };
+  const result = importLinkedInExport(input);
+  return {
+    ok: result.ok,
+    data: result,
+    model: 'deterministic-v1',
+    tokensUsed: 0,
+    provider: 'heuristic',
+    error: result.ok ? undefined : result.refusals.join('; '),
+  };
+}
+
 /**
  * Multi-feature AI gateway.
  * Live: optimize-resume, cover-letter, ats (explain layer), job-match, interview,
- * career-advice, skills-suggest, grammar-check (OpenAI when configured, rules otherwise).
+ * career-advice, skills-suggest, grammar-check (OpenAI when configured, rules otherwise),
+ * linkedin-import (data export mapping).
  */
 export async function runAiFeature(req: AiRequest): Promise<AiResponse> {
   switch (req.feature) {
@@ -248,6 +278,8 @@ export async function runAiFeature(req: AiRequest): Promise<AiResponse> {
       return runAtsExplain(req);
     case 'grammar-check':
       return runGrammarCheck(req);
+    case 'linkedin-import':
+      return runLinkedInImport(req);
     case 'job-match':
     case 'interview':
     case 'career-advice':

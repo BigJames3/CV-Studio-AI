@@ -41,6 +41,14 @@ describe('AiService', () => {
           ...data,
         })),
       },
+      user: {
+        findFirst: jest.fn().mockResolvedValue({
+          firstName: 'Awa',
+          lastName: 'Diallo',
+          email: 'awa@example.com',
+          avatarUrl: 'https://cdn.example/awa.png',
+        }),
+      },
       aiHistory: {
         create: jest.fn().mockResolvedValue({ id: 'hist-1' }),
         count: jest.fn().mockResolvedValue(quotaUsed),
@@ -529,6 +537,63 @@ describe('AiService', () => {
     });
   });
 
+  it('imports a LinkedIn data export as draft CV content without using AI quota', async () => {
+    const { service, quotas, prisma } = createService();
+
+    const result = await service.linkedInImport(userId, {
+      files: {
+        'Positions.csv':
+          'Company Name,Title,Description,Location,Started On,Finished On\nOrange,Engineer,Built X,Dakar,Jan 2021,',
+        'Skills.csv': 'Name\nReact',
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      feature: 'linkedin-import',
+      provider: 'heuristic',
+      model: 'deterministic-v1',
+      stats: { experiences: 1, skills: 1 },
+      content: {
+        identity: {
+          fullName: 'Awa Diallo',
+          email: 'awa@example.com',
+          photoUrl: 'https://cdn.example/awa.png',
+        },
+        experiences: [expect.objectContaining({ company: 'Orange', current: true })],
+      },
+    });
+    expect(prisma.user.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: userId, deletedAt: null } })
+    );
+    expect(quotas.reserveOptimizeQuota).not.toHaveBeenCalled();
+  });
+
+  it('rejects a LinkedIn import with no recognised export data', async () => {
+    const { service, prisma } = createService();
+    prisma.user.findFirst.mockResolvedValueOnce(null);
+
+    await expect(
+      service.linkedInImport(userId, { files: { 'Connections.csv': 'First Name\nBob' } })
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'LINKEDIN_EXPORT_EMPTY' }),
+    });
+
+    runAiFeatureMock.mockResolvedValueOnce({ ok: false });
+    await expect(service.linkedInImport(userId, { files: {} })).rejects.toMatchObject({
+      response: expect.objectContaining({ message: 'LinkedIn import failed' }),
+    });
+
+    runAiFeatureMock.mockResolvedValueOnce({
+      ok: true,
+      data: { ok: true, content: {}, stats: {}, recognizedFiles: [], warnings: [] },
+    });
+    await expect(service.linkedInImport(userId, { files: {} })).resolves.toMatchObject({
+      model: 'deterministic-v1',
+      provider: 'heuristic',
+    });
+  });
+
   it('checks CV ownership before reserving quota for CV insights', async () => {
     const { service, quotas } = createService({ ...defaultCv(), userId: 'someone-else' });
 
@@ -538,7 +603,7 @@ describe('AiService', () => {
     expect(quotas.reserveOptimizeQuota).not.toHaveBeenCalled();
   });
 
-  it('returns grammar check, skills suggestions and queued import jobs', async () => {
+  it('returns grammar check, skills suggestions and the queued PDF job', async () => {
     const { service } = createService();
 
     await expect(
@@ -564,17 +629,6 @@ describe('AiService', () => {
       provider: 'heuristic',
       suggestions: [],
       toDevelop: expect.arrayContaining([expect.objectContaining({ skill: 'CSS' })]),
-    });
-
-    await expect(
-      service.linkedInImport(userId, {
-        profileJson: { headline: 'Engineer' },
-      })
-    ).resolves.toMatchObject({
-      status: 'queued',
-      feature: 'linkedin-import',
-      model: 'gpt-4o-mini',
-      hasProfileJson: true,
     });
 
     await expect(

@@ -79,6 +79,13 @@ export {
 } from './prompts/grammar-check';
 export { grammarCheckHeuristic, detectLanguage, applyEdits } from './providers/heuristic-grammar';
 
+export type {
+  LinkedInImportInput,
+  LinkedInImportResult,
+  LinkedInImportStats,
+} from './linkedin-import';
+export { importLinkedInExport, parseCsv } from './linkedin-import';
+
 export { optimizeResumeHeuristic } from './providers/heuristic-optimize';
 export { matchJobHeuristic } from './providers/heuristic-job-match';
 export { interviewPrepHeuristic } from './providers/heuristic-interview-prep';

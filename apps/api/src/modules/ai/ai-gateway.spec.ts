@@ -1,5 +1,10 @@
 import {
+  applyEdits,
   careerAdviceHeuristic,
+  detectLanguage,
+  grammarCheckHeuristic,
+  grammarCheckWithOpenAi,
+  optimizeResumeWithOpenAi,
   extractCvFacts,
   extractKeywords,
   interviewPrepHeuristic,
@@ -112,7 +117,7 @@ describe('@cvstudio/ai-service optimize-resume gateway', () => {
 
   it('runAiFeature reports unwired features clearly', async () => {
     const response = await runAiFeature({
-      feature: 'grammar-check',
+      feature: 'linkedin-import',
       userId: 'u1',
       payload: {},
     });
@@ -307,5 +312,211 @@ describe('@cvstudio/ai-service gateway routes CV insights (AI-001)', () => {
     });
     expect(response.ok).toBe(false);
     expect(response.error).toMatch(/no usable keywords/);
+  });
+});
+
+describe('@cvstudio/ai-service grammar check rules (AI-001 step 2)', () => {
+  const NBSP = '\u00a0';
+
+  it('detects French and English, honouring an explicit locale', () => {
+    expect(detectLanguage('Chef de projet à Dakar')).toBe('fr');
+    expect(detectLanguage('I led the team')).toBe('en');
+    expect(detectLanguage('I led the team', 'fr-FR')).toBe('fr');
+    expect(detectLanguage('J’ai dirigé', 'en-US')).toBe('en');
+  });
+
+  it('fixes spacing, repeated words, capitals and French typography', () => {
+    const result = grammarCheckHeuristic({
+      text: "j'ai  dirigé une équipe. nous nous sommes concentrés sur la la qualité: résultats !",
+    });
+    expect(result).toMatchObject({ ok: true, language: 'fr' });
+    expect(result.correctedText).toBe(
+      `J'ai dirigé une équipe. Nous nous sommes concentrés sur la qualité${NBSP}: résultats${NBSP}!`
+    );
+    expect(result.edits.map((e) => e.rule)).toEqual([
+      'capitalization',
+      'whitespace',
+      'capitalization',
+      'repeated-word',
+      'fr-space-before-punctuation',
+      'fr-space-before-punctuation',
+    ]);
+    expect(result.warnings[0]).toMatch(/spelling is not verified/);
+  });
+
+  it('adds French non-breaking spaces inside « » quotes', () => {
+    expect(
+      grammarCheckHeuristic({ text: 'Projet «Atlas» livré', locale: 'fr' }).correctedText
+    ).toBe(`Projet «${NBSP}Atlas${NBSP}» livré`);
+  });
+
+  it('leaves times, URLs, decimals and abbreviations alone', () => {
+    const text = 'Réunion à 12:30 via https://acme.fr et 1,5 an de projet, e.g. suivi.';
+    expect(grammarCheckHeuristic({ text }).correctedText).toBe(text);
+  });
+
+  it('fixes English punctuation spacing and a missing space after a comma', () => {
+    const result = grammarCheckHeuristic({ text: 'i led 5 engineers ,shipped the the app !' });
+    expect(result.language).toBe('en');
+    expect(result.correctedText).toBe('I led 5 engineers, shipped the app!');
+  });
+
+  it('keeps the first of two overlapping edits', () => {
+    const { edits, correctedText } = applyEdits('abcd', [
+      { offset: 1, original: 'bc', replacement: 'X', rule: 'a', message: '' },
+      { offset: 2, original: 'cd', replacement: 'Y', rule: 'b', message: '' },
+      { offset: 0, original: 'a', replacement: 'a', rule: 'noop', message: '' },
+    ]);
+    expect(edits.map((e) => e.rule)).toEqual(['a']);
+    expect(correctedText).toBe('aXd');
+  });
+
+  it('refuses empty text', () => {
+    expect(grammarCheckHeuristic({ text: '  ' })).toMatchObject({
+      ok: false,
+      refusals: ['text is required'],
+    });
+  });
+});
+
+describe('@cvstudio/ai-service grammar check with OpenAI (AI-001 step 2)', () => {
+  const env = { OPENAI_API_KEY: 'sk-test' };
+  const reply = (content: unknown, ok = true) =>
+    jest.fn().mockResolvedValue({
+      ok,
+      status: ok ? 200 : 500,
+      text: async () => 'server error',
+      json: async () => ({
+        model: 'gpt-4o-mini',
+        usage: { total_tokens: 42 },
+        choices: [{ message: { content: JSON.stringify(content) } }],
+      }),
+    });
+
+  it('returns the corrected text and locates each edit in the input', async () => {
+    const fetchImpl = reply({
+      correctedText: 'I managed 5 engineers at Acme.',
+      edits: [
+        { original: 'manged', replacement: 'managed', message: 'Spelling' },
+        { original: 'not in text', replacement: 'x', message: 'dropped' },
+        { original: 42, replacement: 'x' },
+      ],
+    });
+    const { result, model, tokensUsed } = await grammarCheckWithOpenAi(
+      { text: 'I manged 5 engineers at Acme.' },
+      'en',
+      { env, fetchImpl }
+    );
+    expect(result).toMatchObject({ ok: true, correctedText: 'I managed 5 engineers at Acme.' });
+    expect(result.edits).toEqual([
+      { offset: 2, original: 'manged', replacement: 'managed', rule: 'llm', message: 'Spelling' },
+    ]);
+    expect({ model, tokensUsed }).toEqual({ model: 'gpt-4o-mini', tokensUsed: 42 });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body).toMatchObject({ temperature: 0, response_format: { type: 'json_object' } });
+    expect(body.messages[1].content).toContain('untrusted data');
+  });
+
+  it('rejects an answer that changes a number, an email or a URL', async () => {
+    const fetchImpl = reply({ correctedText: 'I managed 6 engineers at Acme.', edits: [] });
+    await expect(
+      grammarCheckWithOpenAi({ text: 'I manged 5 engineers at Acme.' }, 'en', { env, fetchImpl })
+    ).rejects.toThrow(/changed facts/);
+  });
+
+  it('rejects an answer that rewrites the text', async () => {
+    const fetchImpl = reply({ correctedText: 'Led.', edits: [] });
+    await expect(
+      grammarCheckWithOpenAi({ text: 'I led a large team of engineers.' }, 'en', { env, fetchImpl })
+    ).rejects.toThrow(/rewrote/);
+  });
+
+  it('rejects empty or malformed answers and HTTP errors', async () => {
+    const text = { text: 'I led a team.' };
+    await expect(
+      grammarCheckWithOpenAi(text, 'en', { env, fetchImpl: reply({ edits: [] }) })
+    ).rejects.toThrow(/no text/);
+    await expect(
+      grammarCheckWithOpenAi(text, 'en', { env, fetchImpl: reply({}, false) })
+    ).rejects.toThrow(/failed \(500\)/);
+    const notJson = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => '',
+      json: async () => ({ choices: [{ message: { content: 'not json' } }] }),
+    });
+    await expect(grammarCheckWithOpenAi(text, 'en', { env, fetchImpl: notJson })).rejects.toThrow(
+      /invalid JSON/
+    );
+    await expect(grammarCheckWithOpenAi(text, 'en', { env: {} })).rejects.toThrow(/OPENAI_API_KEY/);
+  });
+
+  it('gateway falls back to the rules when OpenAI fails', async () => {
+    const previous = { ...process.env };
+    process.env.AI_PROVIDER = 'openai';
+    process.env.OPENAI_API_KEY = 'sk-test';
+    process.env.OPENAI_BASE_URL = 'http://127.0.0.1:9';
+    try {
+      const response = await runAiFeature({
+        feature: 'grammar-check',
+        userId: 'u1',
+        payload: { text: 'i led the the team.' },
+      });
+      expect(response).toMatchObject({ ok: true, provider: 'heuristic' });
+      const data = response.data as { correctedText: string; warnings: string[] };
+      expect(data.correctedText).toBe('I led the team.');
+      expect(data.warnings.some((w) => w.startsWith('openai_fallback:'))).toBe(true);
+    } finally {
+      process.env = previous;
+    }
+  });
+
+  it('gateway uses the rules without an API key and refuses empty text', async () => {
+    process.env.AI_PROVIDER = 'heuristic';
+    const ok = await runAiFeature({
+      feature: 'grammar-check',
+      userId: 'u1',
+      payload: { text: 'hi' },
+    });
+    expect(ok).toMatchObject({ ok: true, provider: 'heuristic', model: 'heuristic-v1' });
+    const empty = await runAiFeature({ feature: 'grammar-check', userId: 'u1', payload: {} });
+    expect(empty).toMatchObject({ ok: false, error: 'text is required' });
+  });
+});
+
+describe('@cvstudio/ai-service optimize with OpenAI (shared request helper)', () => {
+  it('posts a JSON-mode request and parses the variants', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => '',
+      json: async () => ({
+        usage: { total_tokens: 7 },
+        choices: [
+          { message: { content: '```json\n{"variants":[{"text":"Led X","rationale":"r"}]}\n```' } },
+        ],
+      }),
+    });
+    const out = await optimizeResumeWithOpenAi(
+      { bulletText: 'Did X', jobDescription: 'JD' },
+      { env: { OPENAI_API_KEY: 'k', OPENAI_BASE_URL: 'https://gw.example/v1/' }, fetchImpl }
+    );
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://gw.example/v1/chat/completions');
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body).toMatchObject({ model: 'gpt-4o', temperature: 0.35, max_tokens: 800 });
+    expect(out).toMatchObject({ model: 'gpt-4o', tokensUsed: 7 });
+    expect(out.result.variants[0]).toMatchObject({ text: 'Led X', rationale: 'r' });
+  });
+
+  it('rejects an answer without variants', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => '',
+      json: async () => ({ choices: [{ message: { content: '{"variants":[]}' } }] }),
+    });
+    await expect(
+      optimizeResumeWithOpenAi({ bulletText: 'Did X' }, { env: { AI_API_KEY: 'k' }, fetchImpl })
+    ).rejects.toThrow(/invalid JSON schema/);
   });
 });

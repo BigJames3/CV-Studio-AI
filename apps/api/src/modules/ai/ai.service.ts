@@ -13,6 +13,7 @@ import {
   type CoverLetterResult,
   type AtsExplainResult,
   type CareerAdviceResult,
+  type GrammarCheckResult,
   type InterviewPrepResult,
   type JobMatchResult,
   type SkillsSuggestResult,
@@ -293,17 +294,53 @@ export class AiService {
     return this.queued('portfolio', userId, dto);
   }
 
+  /** Proofreading: OpenAI when configured, rule-based otherwise. Shares the optimize quota. */
   async grammarCheck(userId: string, dto: GrammarCheckDto) {
-    return {
-      status: 'completed',
-      feature: 'grammar-check',
-      promptId: 'grammar_check',
-      model: this.modelFor('grammar-check'),
-      correctedText: dto.text,
-      edits: [],
-      warnings: ['Scaffold — wire LLM S or LanguageTool'],
-      userId,
-    };
+    const quota = await this.quotas.reserveOptimizeQuota(userId);
+    return this.withReservation(quota, async () => {
+      const gateway = await runAiFeature({
+        feature: 'grammar-check',
+        userId,
+        locale: dto.locale,
+        payload: { text: dto.text },
+      });
+
+      const data = gateway.data as GrammarCheckResult | undefined;
+      if (!data) {
+        throw new ServiceUnavailableException({
+          code: 'AI_PROVIDER_ERROR',
+          message: gateway.error ?? 'grammar-check failed',
+        });
+      }
+      if (!gateway.ok || !data.ok) {
+        throw new BadRequestException({
+          code: 'AI_REFUSED',
+          message: data.refusals?.join('; ') || gateway.error || 'grammar-check refused',
+          details: { refusals: data.refusals ?? [] },
+        });
+      }
+
+      const { ok: _ok, ...result } = data;
+      await this.quotas.commit(quota, {
+        prompt: `grammar-check | ${dto.text.slice(0, 280)}`,
+        result: {
+          edits: result.edits.length,
+          language: result.language,
+          provider: gateway.provider,
+          model: gateway.model,
+        },
+        tokensUsed: gateway.tokensUsed ?? 0,
+      });
+
+      return {
+        status: 'completed',
+        feature: 'grammar-check',
+        ...result,
+        model: gateway.model ?? this.modelFor('grammar-check'),
+        provider: gateway.provider ?? 'heuristic',
+        quota: { used: quota.used + 1, limit: quota.limit },
+      };
+    });
   }
 
   async skillsSuggest(userId: string, dto: SkillsSuggestDto) {

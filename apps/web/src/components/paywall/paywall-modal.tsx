@@ -37,7 +37,7 @@ const featureNames: Record<string, { title: string; description: string }> = {
   },
   'templates:pro': {
     title: '🎨 Templates premium',
-    description: 'Les templates Pro et Business sont réservés au plan Business.',
+    description: 'Les templates premium sont inclus dans les plans Pro et Business.',
   },
   'ai:generate': {
     title: '✨ Génération IA',

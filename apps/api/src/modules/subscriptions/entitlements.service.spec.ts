@@ -66,9 +66,11 @@ describe('EntitlementsService', () => {
     await expect(service.can('u1', 'cv:share')).resolves.toBe(true);
   });
 
-  it('denies pro templates for pro, allows business', async () => {
-    prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'pro' });
+  it('allows premium templates for pro and business, denies free (FE-002)', async () => {
+    prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'free' });
     await expect(service.can('u1', 'templates:pro')).resolves.toBe(false);
+    prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'pro' });
+    await expect(service.can('u1', 'templates:pro')).resolves.toBe(true);
     prisma.user.findUnique.mockResolvedValue({ subscriptionTier: 'business' });
     await expect(service.can('u1', 'templates:pro')).resolves.toBe(true);
   });
@@ -131,6 +133,7 @@ describe('EntitlementsService', () => {
       await expect(service.can('u1', 'cv:share')).resolves.toBe(false);
       await expect(service.can('u1', 'ai:optimize')).resolves.toBe(false);
       await expect(service.can('u1', 'cv:create')).resolves.toBe(false);
+      await expect(service.can('u1', 'templates:pro')).resolves.toBe(false);
     });
 
     it('treats an expired business period as free for premium templates', async () => {

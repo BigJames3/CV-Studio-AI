@@ -68,7 +68,7 @@ describe('CvsService feature gates', () => {
     expect(prisma.cv.create).toHaveBeenCalled();
   });
 
-  it('create blocks premium template for free/pro', async () => {
+  it('create blocks premium template when the plan lacks it (free)', async () => {
     prisma.template.findFirst.mockResolvedValue({ isPremium: true });
     entitlements.assertCan
       .mockResolvedValueOnce(undefined)
@@ -76,6 +76,11 @@ describe('CvsService feature gates', () => {
     await expect(
       service.create('u1', { title: 'Exec', templateId: '11111111-1111-4111-8111-111111111103' })
     ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(entitlements.assertCan).toHaveBeenCalledWith(
+      'u1',
+      'templates:pro',
+      'This template requires a Pro or Business plan'
+    );
   });
 
   it('share denies free users', async () => {

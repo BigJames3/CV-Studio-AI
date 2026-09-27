@@ -48,8 +48,9 @@ export function canShare(user: FeatureGateUser): boolean {
   return canDownloadPDF(user);
 }
 
+/** Premium templates are included in Pro and Business. */
 export function canAccessProTemplates(user: FeatureGateUser): boolean {
-  return normalizeTier(user.subscriptionTier) === 'business';
+  return normalizeTier(user.subscriptionTier) !== 'free';
 }
 
 export function canAccessBusinessTemplates(user: FeatureGateUser): boolean {
@@ -61,9 +62,9 @@ export function canAccessAdvancedFeatures(user: FeatureGateUser): boolean {
 }
 
 export function getAvailableTemplateTypes(user: FeatureGateUser): TemplateAccessType[] {
-  if (normalizeTier(user.subscriptionTier) === 'business') {
-    return ['free', 'pro', 'business'];
-  }
+  const tier = normalizeTier(user.subscriptionTier);
+  if (tier === 'business') return ['free', 'pro', 'business'];
+  if (tier === 'pro') return ['free', 'pro'];
   return ['free'];
 }
 

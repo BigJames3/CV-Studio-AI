@@ -70,7 +70,7 @@ The schema is `apps/api/prisma/schema.prisma` (the single source of truth; `docs
 - Feature modules live in `src/modules/*` (auth, users, cvs, templates, subscriptions, plans, payments, invoices, ai, analytics, marketplace, health). Cross-cutting code (guards, filters, interceptors, middleware, feature gating) is in `src/common`. Infrastructure lives in `src/database` (Prisma), `src/redis`, `src/cache`, `src/mail`, `src/queue` and `src/observability` (Sentry, PostHog).
 - **Two entrypoints from one codebase**: `main.ts` is the HTTP API. `worker.ts` (`WORKER_KIND=pdf node dist/worker.js`) is a PDF worker that keeps a warm Chromium pool (`PdfBrowserPool` in `modules/cvs/export`). In local dev, PDF jobs are processed inline by the API. `ScheduleModule` (cron) is disabled when `WORKER_KIND` is set or `NODE_ENV=test`.
 - Env loading: `.env.test` (only when `NODE_ENV=test`), then `.env.local`, then `.env`. Copy `apps/api/.env.example` and `apps/web/.env.example` to start.
-- Payments: Stripe only (CinetPay was removed). Webhook handling is fail-closed (see `docs/STRIPE-WEBHOOK-FAIL-CLOSED.md`, `docs/PAYMENT_GATEWAY_SETUP.md`). Maintenance script: `webhook:retry-dlq`.
+- Payments: Stripe only (CinetPay was removed). Webhook handling is fail-closed (see `docs/STRIPE-WEBHOOK-FAIL-CLOSED.md`, `docs/PAYMENT_GATEWAY_SETUP.md`). Maintenance scripts: `webhook:retry-dlq`, and `pnpm stripe:check` (read-only check of keys, prices, webhooks and customer portal).
 
 ## Web architecture (apps/web)
 

@@ -31,6 +31,22 @@ Web: `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`.
 
 See [docs/pre-launch/OBSERVABILITY_SETUP.md](./pre-launch/OBSERVABILITY_SETUP.md).
 
+## Check the configuration
+
+```bash
+pnpm stripe:check
+```
+
+Read-only. It loads `apps/api/.env.local` then `apps/api/.env` (the process environment wins), then checks:
+
+- the keys: a test key, or a live key allowed by `STRIPE_ALLOW_LIVE`, plus `whsec_` webhook secrets;
+- that the Stripe account is reachable;
+- the 4 prices: they exist, are active, recurring, in EUR, with the right interval, and with the amounts the app displays; a trial set on a price is flagged, because the app adds the trial itself;
+- the webhook endpoints ending in `/api/v1/payments/webhook` and their events;
+- that the customer portal is activated.
+
+It exits with code 1 on any error.
+
 ## Fail-closed
 
 - Missing Stripe keys → checkout 400 `STRIPE_NOT_CONFIGURED`, webhook 503 (see `docs/STRIPE-WEBHOOK-FAIL-CLOSED.md`).

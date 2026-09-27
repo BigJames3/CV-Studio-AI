@@ -291,7 +291,7 @@ export class CvsService {
     await this.entitlements.assertCan(
       userId,
       'templates:pro',
-      'This template requires a Business plan'
+      'This template requires a Pro or Business plan'
     );
   }
 }

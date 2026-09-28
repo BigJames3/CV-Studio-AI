@@ -20,16 +20,47 @@ spec:
         version: green
     spec:
       serviceAccountName: api
+      # Spread replicas over zones and nodes so one zone or node going down keeps the API up.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: api
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: api
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: api
           image: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/api:sha-replace
           ports:
             - containerPort: 3001
               name: http
+          # Same secrets and settings as blue: without them the API refuses to boot.
+          envFrom:
+            - secretRef:
+                name: api-secrets
+          env:
+            - name: STRIPE_FAIL_CLOSED
+              value: '1'
           readinessProbe:
             httpGet:
               path: /api/v1/health/ready
               port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 15
           resources:
             requests:
               cpu: 250m
@@ -37,4 +68,21 @@ spec:
             limits:
               cpu: '1'
               memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          # readOnlyRootFilesystem: Chromium (inline PDF export) and Node need a writable /tmp.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          lifecycle:
+            preStop:
+              exec:
+                command: ['/bin/sh', '-c', 'sleep 10']
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
 # After smoke: kubectl -n cvstudio patch svc api -p '{"spec":{"selector":{"app":"api","version":"green"}}}'

@@ -1,0 +1,34 @@
+# Voluntary disruptions (node drains, cluster upgrades) evict at most one pod at a time.
+# maxUnavailable (not minAvailable) so single-replica overlays such as dev can still be drained.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  namespace: cvstudio
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web
+  namespace: cvstudio
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: web
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: worker-pdf
+  namespace: cvstudio
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: worker-pdf

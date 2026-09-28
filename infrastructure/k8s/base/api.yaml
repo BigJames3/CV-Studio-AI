@@ -23,6 +23,20 @@ spec:
         prometheus.io/path: '/metrics'
     spec:
       serviceAccountName: api
+      # Spread replicas over zones and nodes so one zone or node going down keeps the API up.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: api
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: api
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -62,10 +76,18 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ['ALL']
+          # readOnlyRootFilesystem: Chromium (inline PDF export) and Node need a writable /tmp.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           lifecycle:
             preStop:
               exec:
                 command: ['/bin/sh', '-c', 'sleep 10']
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
 ---
 apiVersion: v1
 kind: Service

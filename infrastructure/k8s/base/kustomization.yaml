@@ -6,6 +6,7 @@ resources:
   - api.yaml
   - web.yaml
   - workers.yaml
+  - pdb.yaml
   - ingress.yaml
   - migrate-job.yaml
   - blue-green-api.yaml

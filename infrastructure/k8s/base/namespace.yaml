@@ -4,8 +4,3 @@ metadata:
   name: cvstudio
   labels:
     app.kubernetes.io/part-of: cvstudio
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: monitoring

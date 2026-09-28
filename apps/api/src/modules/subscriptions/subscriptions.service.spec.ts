@@ -285,6 +285,7 @@ describe('SubscriptionsService.checkout', () => {
   let listCustomers: jest.Mock;
   let updateCustomer: jest.Mock;
   let retrieveSubscription: jest.Mock;
+  let listSubscriptions: jest.Mock;
   const prevPrices = {
     STRIPE_PRICE_PRO_MONTHLY: process.env.STRIPE_PRICE_PRO_MONTHLY,
     STRIPE_PRICE_PRO_YEARLY: process.env.STRIPE_PRICE_PRO_YEARLY,
@@ -352,10 +353,12 @@ describe('SubscriptionsService.checkout', () => {
     listCustomers = jest.fn().mockResolvedValue({ data: [] });
     updateCustomer = jest.fn().mockResolvedValue({ id: 'cus_old' });
     retrieveSubscription = jest.fn();
+    // A customer with no subscription in Stripe, unless a test says otherwise.
+    listSubscriptions = jest.fn().mockResolvedValue({ data: [] });
     (service as unknown as { stripe: unknown }).stripe = {
       checkout: { sessions: { create: createCheckoutSession } },
       customers: { create: createCustomer, list: listCustomers, update: updateCustomer },
-      subscriptions: { retrieve: retrieveSubscription },
+      subscriptions: { retrieve: retrieveSubscription, list: listSubscriptions },
     };
   });
 
@@ -762,7 +765,11 @@ describe('SubscriptionsService.checkout', () => {
           sessions: { create: createCheckoutSession, list: listSessions, expire: expireSession },
         },
         customers: { create: createCustomer, list: listCustomers, update: updateCustomer },
-        subscriptions: { retrieve: retrieveSubscription, update: updateSubscription },
+        subscriptions: {
+          retrieve: retrieveSubscription,
+          update: updateSubscription,
+          list: listSubscriptions,
+        },
       };
     });
 
@@ -890,6 +897,47 @@ describe('SubscriptionsService.checkout', () => {
       await service.checkout(userId, { plan: 'business', interval: 'month' });
       expect(createCheckoutSession).toHaveBeenCalledTimes(1);
       expect(updateSubscription).not.toHaveBeenCalled();
+    });
+
+    it('finds the Stripe subscription even before its webhook reached the database', async () => {
+      // Pro was just paid: Stripe has sub_live, but checkout.session.completed has not been
+      // processed yet, so the database only knows the customer.
+      prisma.subscription.findUnique.mockResolvedValue({
+        stripeSubscriptionId: null,
+        stripeCustomerId: 'cus_existing',
+      });
+      listSubscriptions.mockResolvedValue({ data: [liveSub()] });
+
+      const result = await service.checkout(userId, { plan: 'business', interval: 'month' });
+
+      expect(listSubscriptions).toHaveBeenCalledWith(
+        expect.objectContaining({ customer: 'cus_existing', status: 'all' })
+      );
+      expect(createCheckoutSession).not.toHaveBeenCalled();
+      expect(updateSubscription.mock.calls[0]).toEqual([
+        'sub_live',
+        expect.objectContaining({ items: [{ id: 'si_1', price: 'price_biz_month' }] }),
+      ]);
+      expect(result).toMatchObject({
+        mode: 'updated',
+        plan: 'business',
+        subscriptionId: 'sub_live',
+      });
+    });
+
+    it('fails closed when Stripe cannot list the customer subscriptions', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({
+        stripeSubscriptionId: null,
+        stripeCustomerId: 'cus_existing',
+      });
+      listSubscriptions.mockRejectedValue(new Error('Stripe down'));
+
+      await expect(
+        service.checkout(userId, { plan: 'business', interval: 'month' })
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'STRIPE_UNAVAILABLE' }),
+      });
+      expect(createCheckoutSession).not.toHaveBeenCalled();
     });
 
     it('expires older open Checkout sessions before creating a new one', async () => {

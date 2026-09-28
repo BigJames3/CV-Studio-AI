@@ -2,7 +2,9 @@ import type { AiFeature } from './routing';
 import { resolveModel } from './routing';
 import type { OptimizeResumeInput, OptimizeResumeResult } from './prompts/optimize-resume';
 import { optimizeResumeHeuristic } from './providers/heuristic-optimize';
-import { optimizeResumeWithOpenAi } from './providers/openai-compatible';
+import { grammarCheckWithOpenAi, optimizeResumeWithOpenAi } from './providers/openai-compatible';
+import type { GrammarCheckInput, GrammarCheckResult } from './prompts/grammar-check';
+import { detectLanguage, grammarCheckHeuristic } from './providers/heuristic-grammar';
 import type { CoverLetterInput, CoverLetterResult } from './prompts/cover-letter';
 import { generateCoverLetterHeuristic } from './providers/heuristic-cover-letter';
 import type { AtsExplainInput, AtsExplainResult } from './prompts/ats-explain';
@@ -202,10 +204,39 @@ function runCvInsight(req: AiRequest): AiResponse {
   };
 }
 
+async function runGrammarCheck(req: AiRequest): Promise<AiResponse> {
+  const input: GrammarCheckInput = {
+    text: typeof req.payload.text === 'string' ? req.payload.text : '',
+    locale: req.locale,
+  };
+  const fallback = (warning?: string): AiResponse => {
+    const result: GrammarCheckResult = grammarCheckHeuristic(input);
+    if (warning) result.warnings.push(warning);
+    return {
+      ok: result.ok,
+      data: result,
+      model: 'heuristic-v1',
+      tokensUsed: 0,
+      provider: 'heuristic',
+      error: result.ok ? undefined : result.refusals.join('; '),
+    };
+  };
+
+  if (!input.text.trim() || resolveProviderMode() !== 'openai') return fallback();
+  try {
+    const language = detectLanguage(input.text, input.locale);
+    const { result, model, tokensUsed } = await grammarCheckWithOpenAi(input, language);
+    return { ok: true, data: result, model, tokensUsed, provider: 'openai' };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'OpenAI provider failed';
+    return fallback(`openai_fallback: ${message}`);
+  }
+}
+
 /**
  * Multi-feature AI gateway.
  * Live: optimize-resume, cover-letter, ats (explain layer), job-match, interview,
- * career-advice, skills-suggest.
+ * career-advice, skills-suggest, grammar-check (OpenAI when configured, rules otherwise).
  */
 export async function runAiFeature(req: AiRequest): Promise<AiResponse> {
   switch (req.feature) {
@@ -215,6 +246,8 @@ export async function runAiFeature(req: AiRequest): Promise<AiResponse> {
       return runCoverLetter(req);
     case 'ats':
       return runAtsExplain(req);
+    case 'grammar-check':
+      return runGrammarCheck(req);
     case 'job-match':
     case 'interview':
     case 'career-advice':

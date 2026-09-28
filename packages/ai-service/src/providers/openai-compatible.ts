@@ -6,6 +6,14 @@ import {
   type OptimizeResumeResult,
   type OptimizeVariant,
 } from '../prompts/optimize-resume';
+import {
+  buildGrammarCheckMessages,
+  GRAMMAR_CHECK_PROMPT_ID,
+  GRAMMAR_CHECK_PROMPT_VERSION,
+  type GrammarCheckInput,
+  type GrammarCheckResult,
+  type GrammarEdit,
+} from '../prompts/grammar-check';
 import { resolveModel } from '../routing';
 
 type ChatCompletionResponse = {
@@ -68,24 +76,27 @@ type FetchLike = (
   json: () => Promise<unknown>;
 }>;
 
-/**
- * OpenAI-compatible Chat Completions caller (OpenAI, Azure OpenAI, local gateways).
- */
-export async function optimizeResumeWithOpenAi(
-  input: OptimizeResumeInput,
-  options?: {
-    apiKey?: string;
-    baseUrl?: string;
-    model?: string;
-    fetchImpl?: FetchLike;
-    env?: {
-      OPENAI_API_KEY?: string;
-      AI_API_KEY?: string;
-      OPENAI_BASE_URL?: string;
-      OPENAI_MODEL?: string;
-    };
-  }
-): Promise<OpenAiOptimizeResult> {
+export type OpenAiOptions = {
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  fetchImpl?: FetchLike;
+  env?: {
+    OPENAI_API_KEY?: string;
+    AI_API_KEY?: string;
+    OPENAI_BASE_URL?: string;
+    OPENAI_MODEL?: string;
+  };
+};
+
+/** One JSON-mode Chat Completions call; throws on any transport or empty-content failure. */
+async function requestChatJson(
+  label: string,
+  defaultModel: string,
+  messages: { system: string; user: string },
+  settings: { temperature: number; maxTokens: number },
+  options?: OpenAiOptions
+): Promise<{ content: string; model: string; tokensUsed: number }> {
   const env = options?.env ?? process.env;
   const apiKey = options?.apiKey ?? env.OPENAI_API_KEY ?? env.AI_API_KEY;
   if (!apiKey) {
@@ -96,16 +107,12 @@ export async function optimizeResumeWithOpenAi(
     /\/$/,
     ''
   );
-  const model =
-    options?.model ??
-    env.OPENAI_MODEL ??
-    resolveModel('optimize-resume', input.jobDescription ? 'gpt-4o' : undefined);
+  const model = options?.model ?? env.OPENAI_MODEL ?? defaultModel;
   const fetchImpl: FetchLike =
     options?.fetchImpl ?? ((globalThis as { fetch?: FetchLike }).fetch as FetchLike);
   if (!fetchImpl) {
     throw new Error('fetch is not available in this runtime');
   }
-  const { system, user } = buildOptimizeResumeMessages(input);
 
   const response = await fetchImpl(`${baseUrl}/chat/completions`, {
     method: 'POST',
@@ -115,35 +122,132 @@ export async function optimizeResumeWithOpenAi(
     },
     body: JSON.stringify({
       model,
-      temperature: 0.35,
-      max_tokens: 800,
+      temperature: settings.temperature,
+      max_tokens: settings.maxTokens,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
+        { role: 'system', content: messages.system },
+        { role: 'user', content: messages.user },
       ],
     }),
   });
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(`OpenAI optimize failed (${response.status}): ${body.slice(0, 400)}`);
+    throw new Error(`OpenAI ${label} failed (${response.status}): ${body.slice(0, 400)}`);
   }
 
   const payload = (await response.json()) as ChatCompletionResponse;
   const content = payload.choices?.[0]?.message?.content;
   if (!content) {
-    throw new Error('OpenAI optimize returned empty content');
+    throw new Error(`OpenAI ${label} returned empty content`);
   }
+  return {
+    content,
+    model: payload.model ?? model,
+    tokensUsed: payload.usage?.total_tokens ?? 0,
+  };
+}
+
+/**
+ * OpenAI-compatible Chat Completions caller (OpenAI, Azure OpenAI, local gateways).
+ */
+export async function optimizeResumeWithOpenAi(
+  input: OptimizeResumeInput,
+  options?: OpenAiOptions
+): Promise<OpenAiOptimizeResult> {
+  const { content, model, tokensUsed } = await requestChatJson(
+    'optimize',
+    resolveModel('optimize-resume', input.jobDescription ? 'gpt-4o' : undefined),
+    buildOptimizeResumeMessages(input),
+    { temperature: 0.35, maxTokens: 800 },
+    options
+  );
 
   const parsed = parseOptimizeJson(content);
   if (!parsed) {
     throw new Error('OpenAI optimize returned invalid JSON schema');
   }
 
+  return { result: parsed, model, tokensUsed };
+}
+
+/** Numbers, emails and URLs: facts a proofreader must never change. */
+function protectedTokens(text: string): string {
+  return (text.match(/[\w.+-]+@[\w-]+\.[\w.]+|https?:\/\/\S+|\d+(?:[.,]\d+)?/g) ?? [])
+    .sort()
+    .join('|');
+}
+
+export type OpenAiGrammarResult = {
+  result: GrammarCheckResult;
+  model: string;
+  tokensUsed: number;
+};
+
+/**
+ * LLM proofreading. The answer is rejected (the caller falls back to rules) when it changes a
+ * number, email or URL, or rewrites the text too much to be a correction.
+ */
+export async function grammarCheckWithOpenAi(
+  input: GrammarCheckInput,
+  language: 'fr' | 'en',
+  options?: OpenAiOptions
+): Promise<OpenAiGrammarResult> {
+  const { content, model, tokensUsed } = await requestChatJson(
+    'grammar check',
+    resolveModel('grammar-check'),
+    buildGrammarCheckMessages(input, language),
+    { temperature: 0, maxTokens: 4000 },
+    options
+  );
+
+  let parsed: { correctedText?: unknown; edits?: unknown };
+  try {
+    parsed = JSON.parse(stripCodeFences(content)) as typeof parsed;
+  } catch {
+    throw new Error('OpenAI grammar check returned invalid JSON');
+  }
+  const correctedText = typeof parsed.correctedText === 'string' ? parsed.correctedText : '';
+  if (!correctedText.trim()) {
+    throw new Error('OpenAI grammar check returned no text');
+  }
+  const drift = Math.abs(correctedText.length - input.text.length) / input.text.length;
+  if (drift > 0.3 || protectedTokens(correctedText) !== protectedTokens(input.text)) {
+    throw new Error('OpenAI grammar check changed facts or rewrote the text');
+  }
+
+  // Locate each quoted edit in the input, in order; edits it cannot find are dropped.
+  const edits: GrammarEdit[] = [];
+  let from = 0;
+  for (const raw of Array.isArray(parsed.edits) ? parsed.edits : []) {
+    const edit = raw as { original?: unknown; replacement?: unknown; message?: unknown };
+    if (typeof edit.original !== 'string' || typeof edit.replacement !== 'string') continue;
+    if (!edit.original) continue;
+    const offset = input.text.indexOf(edit.original, from);
+    if (offset < 0) continue;
+    edits.push({
+      offset,
+      original: edit.original,
+      replacement: edit.replacement,
+      rule: 'llm',
+      message: typeof edit.message === 'string' ? edit.message : 'Correction',
+    });
+    from = offset + edit.original.length;
+  }
+
   return {
-    result: parsed,
-    model: payload.model ?? model,
-    tokensUsed: payload.usage?.total_tokens ?? 0,
+    result: {
+      ok: true,
+      promptId: GRAMMAR_CHECK_PROMPT_ID,
+      promptVersion: GRAMMAR_CHECK_PROMPT_VERSION,
+      language,
+      correctedText,
+      edits,
+      warnings: [],
+      refusals: [],
+    },
+    model,
+    tokensUsed,
   };
 }

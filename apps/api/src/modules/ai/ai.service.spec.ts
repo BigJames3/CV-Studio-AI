@@ -470,6 +470,65 @@ describe('AiService', () => {
     });
   });
 
+  it('proofreads text on the optimize quota and commits the result (AI-001 step 2)', async () => {
+    const { service, quotas } = createService();
+
+    const result = await service.grammarCheck(userId, {
+      text: 'i led the the team.',
+      locale: 'en',
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      feature: 'grammar-check',
+      language: 'en',
+      correctedText: 'I led the team.',
+      quota: { used: 1, limit: 50 },
+    });
+    expect(result).not.toHaveProperty('ok');
+    expect(quotas.reserveOptimizeQuota).toHaveBeenCalledWith(userId);
+    expect(quotas.commit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'res-1' }),
+      expect.objectContaining({
+        prompt: expect.stringMatching(/^grammar-check \| /),
+        result: expect.objectContaining({ edits: 2, language: 'en' }),
+      })
+    );
+  });
+
+  it('refuses empty text for grammar check and gives the slot back', async () => {
+    const { service, quotas } = createService();
+
+    await expect(service.grammarCheck(userId, { text: '   ' })).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'AI_REFUSED', message: 'text is required' }),
+    });
+    expect(quotas.release).toHaveBeenCalled();
+  });
+
+  it('maps grammar check gateway failures and uses fallback messages', async () => {
+    const { service } = createService();
+    runAiFeatureMock.mockResolvedValueOnce({ ok: false });
+    await expect(service.grammarCheck(userId, { text: 'Hi.' })).rejects.toBeInstanceOf(
+      ServiceUnavailableException
+    );
+    runAiFeatureMock.mockResolvedValueOnce({ ok: false, error: 'boom' });
+    await expect(service.grammarCheck(userId, { text: 'Hi.' })).rejects.toMatchObject({
+      response: expect.objectContaining({ message: 'boom' }),
+    });
+    runAiFeatureMock.mockResolvedValueOnce({ ok: false, data: { ok: false } });
+    await expect(service.grammarCheck(userId, { text: 'Hi.' })).rejects.toMatchObject({
+      response: expect.objectContaining({ message: 'grammar-check refused' }),
+    });
+    runAiFeatureMock.mockResolvedValueOnce({
+      ok: true,
+      data: { ok: true, edits: [], language: 'en', correctedText: 'Hi.' },
+    });
+    await expect(service.grammarCheck(userId, { text: 'Hi.' })).resolves.toMatchObject({
+      model: 'gpt-4o-mini',
+      provider: 'heuristic',
+    });
+  });
+
   it('checks CV ownership before reserving quota for CV insights', async () => {
     const { service, quotas } = createService({ ...defaultCv(), userId: 'someone-else' });
 
@@ -479,7 +538,7 @@ describe('AiService', () => {
     expect(quotas.reserveOptimizeQuota).not.toHaveBeenCalled();
   });
 
-  it('returns the grammar scaffold, skills suggestions and queued import jobs', async () => {
+  it('returns grammar check, skills suggestions and queued import jobs', async () => {
     const { service } = createService();
 
     await expect(
@@ -489,8 +548,9 @@ describe('AiService', () => {
     ).resolves.toMatchObject({
       status: 'completed',
       feature: 'grammar-check',
-      model: 'gpt-4o-mini',
+      provider: 'heuristic',
       correctedText: 'I lead cross-functional teams.',
+      edits: [],
     });
 
     await expect(

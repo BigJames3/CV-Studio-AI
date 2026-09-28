@@ -8,7 +8,7 @@ export type { AiFeature } from './routing';
 export { DEFAULT_MODEL_ROUTING, resolveModel } from './routing';
 
 export type { AiRequest, AiResponse, AiProviderMode, ProviderEnv } from './gateway';
-export { runAiFeature, resolveProviderMode } from './gateway';
+export { runAiFeature, resolveProviderMode, OPENAI_FALLBACK_WARNING } from './gateway';
 
 export type {
   OptimizeResumeInput,
@@ -86,6 +86,14 @@ export { careerAdviceHeuristic } from './providers/heuristic-career-advice';
 export { skillsSuggestHeuristic } from './providers/heuristic-skills-suggest';
 export { generateCoverLetterHeuristic } from './providers/heuristic-cover-letter';
 export { explainAtsHeuristic } from './providers/heuristic-ats-explain';
-export { optimizeResumeWithOpenAi, grammarCheckWithOpenAi } from './providers/openai-compatible';
+export {
+  optimizeResumeWithOpenAi,
+  grammarCheckWithOpenAi,
+  OpenAiUnavailableError,
+  resetOpenAiCircuit,
+  OPENAI_CIRCUIT_OPEN_MS,
+  OPENAI_CIRCUIT_THRESHOLD,
+  OPENAI_DEFAULT_TIMEOUT_MS,
+} from './providers/openai-compatible';
 export type { OpenAiOptions } from './providers/openai-compatible';
 export { SYSTEM_GUARDRAILS } from './prompts/guardrails';

@@ -68,6 +68,7 @@ type FetchLike = (
     method?: string;
     headers?: Record<string, string>;
     body?: string;
+    signal?: AbortSignal;
   }
 ) => Promise<{
   ok: boolean;
@@ -86,8 +87,47 @@ export type OpenAiOptions = {
     AI_API_KEY?: string;
     OPENAI_BASE_URL?: string;
     OPENAI_MODEL?: string;
+    AI_REQUEST_TIMEOUT_MS?: string;
   };
 };
+
+/** Default cap on one OpenAI call; the gateway then falls back to the rule-based provider. */
+export const OPENAI_DEFAULT_TIMEOUT_MS = 30_000;
+/** Consecutive transport failures (timeout, network, 429, 5xx...) that open the circuit. */
+export const OPENAI_CIRCUIT_THRESHOLD = 5;
+/** How long an open circuit skips OpenAI; after it, calls go through and one more failure reopens it. */
+export const OPENAI_CIRCUIT_OPEN_MS = 30_000;
+
+/** Thrown instead of calling OpenAI while the circuit is open. */
+export class OpenAiUnavailableError extends Error {
+  constructor(message = 'OpenAI circuit open') {
+    super(message);
+    this.name = 'OpenAiUnavailableError';
+  }
+}
+
+/**
+ * Per-process circuit breaker: when OpenAI is down or hanging, requests go straight to the
+ * rule-based fallback instead of each waiting for its own timeout.
+ */
+const circuit = { failures: 0, openUntil: 0 };
+
+export function resetOpenAiCircuit(): void {
+  circuit.failures = 0;
+  circuit.openUntil = 0;
+}
+
+function recordFailure(now: number): void {
+  circuit.failures += 1;
+  if (circuit.failures >= OPENAI_CIRCUIT_THRESHOLD) {
+    circuit.openUntil = now + OPENAI_CIRCUIT_OPEN_MS;
+  }
+}
+
+function timeoutMs(env: { AI_REQUEST_TIMEOUT_MS?: string }): number {
+  const value = Number(env.AI_REQUEST_TIMEOUT_MS);
+  return Number.isFinite(value) && value > 0 ? value : OPENAI_DEFAULT_TIMEOUT_MS;
+}
 
 /** One JSON-mode Chat Completions call; throws on any transport or empty-content failure. */
 async function requestChatJson(
@@ -114,28 +154,50 @@ async function requestChatJson(
     throw new Error('fetch is not available in this runtime');
   }
 
-  const response = await fetchImpl(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      temperature: settings.temperature,
-      max_tokens: settings.maxTokens,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: messages.system },
-        { role: 'user', content: messages.user },
-      ],
-    }),
-  });
+  const now = Date.now();
+  if (circuit.openUntil > now) {
+    throw new OpenAiUnavailableError();
+  }
+
+  let response: Awaited<ReturnType<FetchLike>>;
+  try {
+    response = await fetchImpl(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: settings.temperature,
+        max_tokens: settings.maxTokens,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: messages.system },
+          { role: 'user', content: messages.user },
+        ],
+      }),
+      signal: AbortSignal.timeout(timeoutMs(env)),
+    });
+  } catch (error) {
+    recordFailure(now);
+    // Duck-typed: the abort reason is a DOMException, not always an Error of this realm.
+    const { name, message } = (error ?? {}) as { name?: string; message?: string };
+    const reason =
+      name === 'TimeoutError' || name === 'AbortError'
+        ? `timed out after ${timeoutMs(env)} ms`
+        : (message ?? String(error));
+    throw new Error(`OpenAI ${label} request failed: ${reason}`);
+  }
 
   if (!response.ok) {
+    // 429 and 5xx mean OpenAI is struggling; other 4xx are about this request.
+    if (response.status === 429 || response.status >= 500) recordFailure(now);
     const body = await response.text().catch(() => '');
     throw new Error(`OpenAI ${label} failed (${response.status}): ${body.slice(0, 400)}`);
   }
+  circuit.failures = 0;
+  circuit.openUntil = 0;
 
   const payload = (await response.json()) as ChatCompletionResponse;
   const content = payload.choices?.[0]?.message?.content;

@@ -63,16 +63,21 @@ spec:
             # One JSON object per line: Fluent Bit (Merge_Log) indexes level, status, requestId...
             - name: LOG_FORMAT
               value: json
+          # Readiness checks Postgres (2 s cap in the API): a pod that loses the DB leaves the Service.
           readinessProbe:
             httpGet:
               path: /api/v1/health/ready
               port: http
             periodSeconds: 5
+            timeoutSeconds: 3
+          # Liveness never touches a dependency: a DB failover must not restart every pod.
           livenessProbe:
             httpGet:
-              path: /api/v1/health
+              path: /api/v1/health/live
               port: http
             periodSeconds: 15
+            timeoutSeconds: 2
+            failureThreshold: 3
           resources:
             requests:
               cpu: 250m

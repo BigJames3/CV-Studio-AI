@@ -1,5 +1,30 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport';
+
+/** Mails are sent inside the request (sign-up, password reset): never let SMTP hang it. */
+export const SMTP_TIMEOUTS = {
+  connectionTimeout: 10_000,
+  greetingTimeout: 10_000,
+  socketTimeout: 20_000,
+} as const;
+
+/**
+ * SMTP_HOST / SMTP_PORT, SMTP_SECURE=true for implicit TLS (465), SMTP_USER / SMTP_PASS for
+ * providers that require authentication (SES, SendGrid, Mailgun...). The server certificate is
+ * verified in production; local Mailpit (no valid certificate) is only accepted elsewhere.
+ */
+export function smtpOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): SMTPTransport.Options {
+  const port = Number(env.SMTP_PORT ?? 1025);
+  return {
+    host: env.SMTP_HOST ?? 'localhost',
+    port,
+    secure: env.SMTP_SECURE === 'true' || port === 465,
+    auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS ?? '' } : undefined,
+    tls: { rejectUnauthorized: env.NODE_ENV === 'production' },
+    ...SMTP_TIMEOUTS,
+  };
+}
 
 @Injectable()
 export class MailService implements OnModuleInit {
@@ -14,14 +39,9 @@ export class MailService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    const host = process.env.SMTP_HOST ?? 'localhost';
-    const port = Number(process.env.SMTP_PORT ?? 1025);
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: false,
-      tls: { rejectUnauthorized: false },
-    });
+    const options = smtpOptionsFromEnv();
+    this.transporter = nodemailer.createTransport(options);
+    const { host, port } = options;
     try {
       await this.transporter.verify();
       this.logger.log(`SMTP ready ${host}:${port}`);

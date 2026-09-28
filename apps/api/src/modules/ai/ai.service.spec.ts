@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import {
   BadRequestException,
   ForbiddenException,
@@ -494,6 +495,27 @@ describe('AiService', () => {
         result: expect.objectContaining({ edits: 2, language: 'en' }),
       })
     );
+  });
+
+  it('logs why OpenAI was skipped but never returns or stores it', async () => {
+    const { service, quotas } = createService();
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const secret =
+      'OpenAI grammar check failed (401): Incorrect API key provided: sk-proj-****abcd';
+    runAiFeatureMock.mockImplementationOnce(async (req) => ({
+      ...(await jest.requireActual('@cvstudio/ai-service').runAiFeature(req)),
+      providerError: secret,
+    }));
+
+    const result = await service.grammarCheck(userId, {
+      text: 'i led the the team.',
+      locale: 'en',
+    });
+
+    expect(JSON.stringify(result)).not.toContain('sk-proj');
+    expect(JSON.stringify(quotas.commit.mock.calls)).not.toContain('sk-proj');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(secret));
+    warn.mockRestore();
   });
 
   it('refuses empty text for grammar check and gives the slot back', async () => {

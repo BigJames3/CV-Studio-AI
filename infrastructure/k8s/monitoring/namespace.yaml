@@ -1,0 +1,7 @@
+# Applied on its own (kubectl apply -f), before the Helm charts that install into it.
+# It is not in base/: the base kustomization sets `namespace: cvstudio` on every resource, which
+# renamed this Namespace to cvstudio and made `kustomize build` fail for every overlay.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring

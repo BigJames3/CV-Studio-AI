@@ -1,8 +1,13 @@
+# PDF render workers: consume the BullMQ `pdf-render` queue fed by the API (PDF_RENDER_MODE=queue)
+# and run Chromium, so API pods don't. Same image as the API: identical Chromium, fonts and code,
+# hence byte-identical PDFs whichever side renders (the API falls back inline if no worker is up).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker-pdf
   namespace: cvstudio
+  labels:
+    app: worker-pdf
 spec:
   replicas: 2
   selector:
@@ -15,12 +20,34 @@ spec:
     spec:
       nodeSelector:
         workload: workers
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: worker-pdf
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      # SIGTERM lets in-flight renders finish (page timeout 15 s) before Chromium closes.
+      terminationGracePeriodSeconds: 60
       containers:
         - name: worker
-          image: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/worker:sha-replace
+          image: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/api:sha-replace
+          imagePullPolicy: IfNotPresent
+          # Skips the image entrypoint, which runs `prisma migrate deploy` (the API/migrate job's job).
+          # dumb-init stays PID 1 to forward signals and reap Chromium child processes.
+          command: ['dumb-init', '--', 'node', 'dist/worker.js']
+          envFrom:
+            - secretRef:
+                name: api-secrets
           env:
             - name: WORKER_KIND
               value: pdf
+            - name: PDF_WORKER_CONCURRENCY
+              value: '2'
           resources:
             requests:
               cpu: 500m
@@ -28,3 +55,16 @@ spec:
             limits:
               cpu: '2'
               memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          # Chromium writes its profile under /tmp.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi

@@ -7,5 +7,3 @@ images:
     newTag: staging
   - name: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/web
     newTag: staging
-  - name: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/worker
-    newTag: staging

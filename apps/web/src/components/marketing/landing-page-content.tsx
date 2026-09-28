@@ -92,22 +92,14 @@ export function LandingPageContent() {
         />
 
         <div className="relative mx-auto flex min-h-[100svh] max-w-content flex-col justify-end px-4 pb-16 pt-28 md:justify-center md:pb-24">
-          <motion.p
-            className="font-[family-name:var(--font-landing-display)] text-5xl font-semibold tracking-tight md:text-7xl lg:text-8xl"
-            initial={reduce ? false : { opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7 }}
-          >
+          {/* The hero text is the LCP element: it must be visible in the server HTML, so it
+              is not faded in with framer-motion (which starts it at opacity 0 until hydration). */}
+          <p className="font-[family-name:var(--font-landing-display)] text-5xl font-semibold tracking-tight md:text-7xl lg:text-8xl">
             CV Studio AI
-          </motion.p>
-          <motion.h1
-            className="mt-6 max-w-2xl text-2xl font-medium leading-snug text-[#D7E8E4] md:text-3xl"
-            initial={reduce ? false : { opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.12 }}
-          >
+          </p>
+          <h1 className="mt-6 max-w-2xl text-2xl font-medium leading-snug text-[#D7E8E4] md:text-3xl">
             Des CV qui passent les filtres.
-          </motion.h1>
+          </h1>
           <motion.p
             className="mt-4 max-w-xl text-base text-[#A8C5BE] md:text-lg"
             initial={reduce ? false : { opacity: 0 }}

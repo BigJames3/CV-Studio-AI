@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../database/prisma.module';
+import { CronLockService } from '../../redis/cron-lock.service';
 
 export const DEFAULT_AI_HISTORY_TTL_DAYS = 7;
 
@@ -8,7 +9,10 @@ export const DEFAULT_AI_HISTORY_TTL_DAYS = 7;
 export class AiRetentionJob {
   private readonly logger = new Logger(AiRetentionJob.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cronLock: CronLockService
+  ) {}
 
   ttlDays(): number {
     const parsed = Number(process.env.AI_HISTORY_TTL_DAYS ?? DEFAULT_AI_HISTORY_TTL_DAYS);
@@ -29,6 +33,6 @@ export class AiRetentionJob {
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async dailyPurge() {
-    await this.purgeExpired();
+    await this.cronLock.runExclusive('ai-retention', 23 * 60 * 60, () => this.purgeExpired());
   }
 }

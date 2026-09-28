@@ -6,6 +6,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './database/prisma.module';
 import { RedisModule, RedisService } from './redis/redis.module';
 import { RedisThrottlerStorage } from './redis/redis-throttler.storage';
+import { CronLockModule } from './redis/cron-lock.module';
 import { MailModule } from './mail/mail.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { AuthModule } from './modules/auth/auth.module';
@@ -49,6 +50,7 @@ import { shouldSkipThrottle } from './common/utils/throttle-skip';
     PrismaModule,
     FeatureGateModule,
     RedisModule,
+    CronLockModule,
     MailModule,
     AuthModule,
     UsersModule,

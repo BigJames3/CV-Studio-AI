@@ -13,7 +13,7 @@ describe('AiRetentionJob', () => {
       aiHistory: { deleteMany: jest.fn().mockResolvedValue({ count: 4 }) },
     };
     process.env.AI_HISTORY_TTL_DAYS = '7';
-    const job = new AiRetentionJob(prisma as never);
+    const job = new AiRetentionJob(prisma as never, {} as never);
     const result = await job.purgeExpired();
     expect(result).toEqual({ deleted: 4, ttlDays: 7 });
     expect(prisma.aiHistory.deleteMany).toHaveBeenCalledWith({
@@ -23,7 +23,7 @@ describe('AiRetentionJob', () => {
 
   it('falls back to default TTL', () => {
     delete process.env.AI_HISTORY_TTL_DAYS;
-    const job = new AiRetentionJob({} as never);
+    const job = new AiRetentionJob({} as never, {} as never);
     expect(job.ttlDays()).toBe(DEFAULT_AI_HISTORY_TTL_DAYS);
   });
 });

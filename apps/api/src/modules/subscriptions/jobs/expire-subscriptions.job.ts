@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../../database/prisma.module';
+import { CronLockService } from '../../../redis/cron-lock.service';
 import { resolveEffectiveTier, TIER_SOURCE_SELECT } from '../effective-tier';
 
 const BATCH_SIZE = 500;
@@ -9,7 +10,10 @@ const BATCH_SIZE = 500;
 export class ExpireSubscriptionsJob {
   private readonly logger = new Logger(ExpireSubscriptionsJob.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cronLock: CronLockService
+  ) {}
 
   /**
    * Every hour: persist `free` on users whose paid tier has lapsed (missed Stripe webhook,
@@ -19,6 +23,12 @@ export class ExpireSubscriptionsJob {
    * so a late renewal webhook can restore the tier.
    */
   @Cron(CronExpression.EVERY_HOUR)
+  async scheduledRun() {
+    await this.cronLock.runExclusive('expire-subscriptions', 55 * 60, () =>
+      this.downgradeExpired()
+    );
+  }
+
   async downgradeExpired(now = new Date()): Promise<{ count: number }> {
     let count = 0;
     let cursor: string | undefined;

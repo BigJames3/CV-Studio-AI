@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   BadRequestException,
+  NotFoundException,
   ServiceUnavailableException,
   Inject,
   Optional,
@@ -60,6 +61,55 @@ export class PaymentsService {
       take: 50,
     });
     return { items };
+  }
+
+  /**
+   * The billing page calls this when Stripe redirects back from Checkout. The session is read
+   * from Stripe (the redirect alone proves nothing) and fulfilled exactly like
+   * checkout.session.completed, so the plan is active even when the webhook is late or was not
+   * delivered. Idempotent with the webhook.
+   */
+  async confirmCheckoutSession(userId: string, sessionId: string): Promise<{ confirmed: boolean }> {
+    if (!this.stripe) {
+      throw new BadRequestException({
+        code: 'STRIPE_NOT_CONFIGURED',
+        message: 'Stripe is not configured (fail-closed).',
+      });
+    }
+
+    const notFound = new NotFoundException({
+      code: 'CHECKOUT_SESSION_NOT_FOUND',
+      message: 'Checkout session not found',
+    });
+    let session: Stripe.Checkout.Session;
+    try {
+      session = await this.stripe.checkout.sessions.retrieve(sessionId, { expand: ['invoice'] });
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code === 'resource_missing') throw notFound;
+      this.logger.warn(`Checkout confirm failed for ${sessionId}: ${(error as Error).message}`);
+      throw new ServiceUnavailableException({
+        code: 'STRIPE_UNAVAILABLE',
+        message: 'Stripe is unavailable, the payment will be confirmed by webhook.',
+      });
+    }
+
+    const owner = session.client_reference_id ?? session.metadata?.userId;
+    if (owner !== userId || session.mode !== 'subscription') throw notFound;
+    if (session.status !== 'complete') return { confirmed: false };
+
+    try {
+      await this.onCheckoutCompleted(session);
+      const invoice = session.invoice;
+      if (invoice && typeof invoice !== 'string' && invoice.status === 'paid') {
+        await this.onInvoicePaid(invoice);
+      }
+    } catch (error) {
+      // The webhook created the same row at the same moment: it is confirmed either way.
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) {
+        throw error;
+      }
+    }
+    return { confirmed: true };
   }
 
   async handleStripeWebhook(rawBody: Buffer, signature: string) {

@@ -28,6 +28,17 @@ export function stripeSecretForClient(): string | null {
   return key;
 }
 
+/**
+ * Signing secrets of the webhook endpoints that post to POST /payments/webhook.
+ * Stripe signs "your account" events and "connected accounts" (Connect, e.g. account.updated)
+ * events from two separate endpoints, each with its own secret.
+ */
+export function stripeWebhookSecrets(): string[] {
+  return [process.env.STRIPE_WEBHOOK_SECRET, process.env.STRIPE_CONNECT_WEBHOOK_SECRET].filter(
+    isNonPlaceholderSecret
+  );
+}
+
 export function isStripeConfiguredFromEnv() {
   return isNonPlaceholderSecret(process.env.STRIPE_SECRET_KEY);
 }

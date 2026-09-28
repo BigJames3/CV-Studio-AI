@@ -209,6 +209,45 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
     );
   });
 
+  it.each([
+    ['incomplete', 'suspended'],
+    ['paused', 'suspended'],
+    ['incomplete_expired', 'canceled'],
+    ['some_future_status', 'suspended'],
+  ])('grants no paid access for Stripe status %s (stored as %s)', async (status, stored) => {
+    const result = await service.applyPaidEntitlement({
+      userId,
+      plan: 'pro',
+      provider: 'stripe',
+      status,
+      periodEnd: future,
+      stripeSubscriptionId: 'sub_123',
+    });
+
+    expect(result).toMatchObject({ status: stored });
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ subscriptionTier: 'free' }) })
+    );
+  });
+
+  it.each(['active', 'trialing', 'past_due'])(
+    'keeps the paid tier for status %s',
+    async (status) => {
+      await service.applyPaidEntitlement({
+        userId,
+        plan: 'business',
+        provider: 'stripe',
+        status,
+        periodEnd: future,
+        stripeSubscriptionId: 'sub_123',
+      });
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ subscriptionTier: 'business' }) })
+      );
+    }
+  );
+
   it('should persist currentPeriodEnd on create and update', async () => {
     await service.applyPaidEntitlement({
       userId,
@@ -901,5 +940,76 @@ describe('SubscriptionsService.cancelImmediately', () => {
         data: expect.objectContaining({ subscriptionTier: 'free' }),
       })
     );
+  });
+});
+
+describe('SubscriptionsService.billingPortal', () => {
+  const prisma = {
+    plan: { findUnique: jest.fn() },
+    subscription: { findUnique: jest.fn() },
+    user: { findFirst: jest.fn(), update: jest.fn() },
+  };
+  let createPortal: jest.Mock;
+  let service: SubscriptionsService;
+  const prevOrigin = process.env.APP_URL;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.APP_URL = 'https://app.example.com';
+    service = new SubscriptionsService(prisma as never, {} as never);
+    createPortal = jest.fn().mockResolvedValue({ url: 'https://billing.stripe.com/p/session_1' });
+    (service as unknown as { stripe: unknown }).stripe = {
+      billingPortal: { sessions: { create: createPortal } },
+    };
+  });
+
+  afterEach(() => {
+    if (prevOrigin === undefined) delete process.env.APP_URL;
+    else process.env.APP_URL = prevOrigin;
+  });
+
+  it('opens a portal session for the stored Stripe customer, back to billing', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({
+      userId: 'user-1',
+      stripeCustomerId: 'cus_1',
+    });
+
+    await expect(service.billingPortal('user-1')).resolves.toEqual({
+      url: 'https://billing.stripe.com/p/session_1',
+    });
+    expect(prisma.subscription.findUnique).toHaveBeenCalledWith({ where: { userId: 'user-1' } });
+    expect(createPortal).toHaveBeenCalledWith({
+      customer: 'cus_1',
+      return_url: 'https://app.example.com/account/billing',
+    });
+  });
+
+  it('refuses when the user never paid by card (no Stripe customer)', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({ userId: 'user-1', stripeCustomerId: null });
+
+    await expect(service.billingPortal('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'NO_BILLING_ACCOUNT' }),
+    });
+    expect(createPortal).not.toHaveBeenCalled();
+  });
+
+  it('reports the portal as unavailable when Stripe refuses (portal not activated)', async () => {
+    prisma.subscription.findUnique.mockResolvedValue({
+      userId: 'user-1',
+      stripeCustomerId: 'cus_1',
+    });
+    createPortal.mockRejectedValue(new Error('No configuration provided'));
+
+    await expect(service.billingPortal('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'BILLING_PORTAL_UNAVAILABLE' }),
+    });
+  });
+
+  it('fails closed when Stripe is not configured', async () => {
+    (service as unknown as { stripe: unknown }).stripe = null;
+
+    await expect(service.billingPortal('user-1')).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'STRIPE_NOT_CONFIGURED' }),
+    });
   });
 });

@@ -120,6 +120,44 @@ export class SubscriptionsService {
     });
   }
 
+  /**
+   * Stripe Customer Portal session: update the card, pay an unpaid invoice, download invoices.
+   * The portal must be activated once in the Stripe Dashboard (Settings → Billing → Customer portal).
+   */
+  async billingPortal(userId: string): Promise<{ url: string }> {
+    if (!this.stripe) {
+      throw new BadRequestException({
+        code: 'STRIPE_NOT_CONFIGURED',
+        message: 'Stripe is not configured (fail-closed). Billing portal unavailable.',
+      });
+    }
+
+    const sub = await this.prisma.subscription.findUnique({ where: { userId } });
+    if (!sub?.stripeCustomerId) {
+      throw new NotFoundException({
+        code: 'NO_BILLING_ACCOUNT',
+        message: 'No card payment has been made on this account yet.',
+      });
+    }
+
+    try {
+      const session = await this.stripe.billingPortal.sessions.create({
+        customer: sub.stripeCustomerId,
+        return_url: `${appOriginFromEnv()}/account/billing`,
+      });
+      return { url: session.url };
+    } catch (error) {
+      this.logger.error(
+        `Could not open the Stripe billing portal for ${sub.stripeCustomerId}`,
+        error instanceof Error ? error.stack : error
+      );
+      throw new ServiceUnavailableException({
+        code: 'BILLING_PORTAL_UNAVAILABLE',
+        message: 'The billing portal is unavailable. Please try again later.',
+      });
+    }
+  }
+
   /** Immediate Stripe cancel for account erasure (GDPR). Does not throw if Stripe is down. */
   async cancelImmediately(userId: string): Promise<{
     hadSubscription: boolean;
@@ -265,20 +303,27 @@ export class SubscriptionsService {
     stripeCustomerId?: string;
     cancelAtPeriodEnd?: boolean;
   }) {
-    const statusMap: Record<string, 'active' | 'canceled' | 'past_due' | 'trialing'> = {
-      active: 'active',
-      trialing: 'trialing',
-      past_due: 'past_due',
-      canceled: 'canceled',
-      unpaid: 'past_due',
-    };
+    // Stripe status → local status. `incomplete` (first payment not done) and `paused` grant
+    // no access; anything unknown fails closed instead of defaulting to `active`.
+    const statusMap: Record<string, 'active' | 'canceled' | 'past_due' | 'trialing' | 'suspended'> =
+      {
+        active: 'active',
+        trialing: 'trialing',
+        past_due: 'past_due',
+        canceled: 'canceled',
+        unpaid: 'past_due',
+        incomplete: 'suspended',
+        paused: 'suspended',
+        incomplete_expired: 'canceled',
+      };
 
-    const mappedStatus = statusMap[params.status ?? 'active'] ?? 'active';
+    const mappedStatus = statusMap[params.status ?? 'active'] ?? 'suspended';
     const isCanceled = mappedStatus === 'canceled';
+    const grantsAccess = !isCanceled && mappedStatus !== 'suspended';
     const cancelAtPeriodEnd = Boolean(params.cancelAtPeriodEnd) && !isCanceled;
     const periodStart = params.periodStart ?? new Date();
     const tier =
-      isCanceled || params.plan.toLowerCase() === 'free'
+      !grantsAccess || params.plan.toLowerCase() === 'free'
         ? 'free'
         : params.plan.toLowerCase() === 'business'
           ? 'business'

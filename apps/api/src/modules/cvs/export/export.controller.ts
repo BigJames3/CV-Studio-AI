@@ -83,8 +83,8 @@ export class CvExportController {
       throw new HttpException(
         {
           statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+          // The cause (Chromium path, timeout...) is logged above, never sent to the client.
           message: 'Failed to generate PDF',
-          details: error instanceof Error ? error.message : undefined,
           suggestion: 'Please try again or contact support',
         },
         HttpStatus.INTERNAL_SERVER_ERROR

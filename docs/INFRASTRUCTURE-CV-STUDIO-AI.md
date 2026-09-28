@@ -74,12 +74,11 @@ Tags obligatoires : `Project=cvstudio`, `Env`, `Owner=platform`, `CostCenter`.
 
 ### 3.1 Images
 
-| Image              | Base                                                     | Contenu            |
-| ------------------ | -------------------------------------------------------- | ------------------ |
-| `cvstudio/api`     | `node:24-alpine` multi-stage                             | NestJS dist        |
-| `cvstudio/web`     | `node:24-alpine` → `nginx:alpine` **ou** Node standalone | Next.js            |
-| `cvstudio/worker`  | same as api + Chromium deps (PDF)                        | BullMQ consumers   |
-| `cvstudio/migrate` | api slim                                                 | Prisma migrate job |
+| Image              | Base                                                     | Contenu                                                                            |
+| ------------------ | -------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `cvstudio/api`     | `node:24-alpine` multi-stage, Chromium included          | NestJS dist ; aussi le worker PDF (`node dist/worker.js`, Deployment `worker-pdf`) |
+| `cvstudio/web`     | `node:24-alpine` → `nginx:alpine` **ou** Node standalone | Next.js                                                                            |
+| `cvstudio/migrate` | api slim                                                 | Prisma migrate job                                                                 |
 
 ### 3.2 Principes
 
@@ -90,7 +89,7 @@ Tags obligatoires : `Project=cvstudio`, `Env`, `Owner=platform`, `CostCenter`.
 - Registry : **ECR** per account/region
 - Tag : `sha-<gitsha>` + `env-v<semver>`
 
-Fichiers : `apps/api/Dockerfile` · `apps/web/Dockerfile` · `apps/api/Dockerfile.worker` · `infrastructure/docker/docker-compose.yml`
+Fichiers : `apps/api/Dockerfile` (API et worker PDF) · `apps/web/Dockerfile` · `infrastructure/docker/docker-compose.yml`
 
 ### 3.3 Local compose
 

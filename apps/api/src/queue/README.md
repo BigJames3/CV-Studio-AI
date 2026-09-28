@@ -31,6 +31,4 @@ In queue mode:
 - **Concurrency:** `PDF_WORKER_CONCURRENCY` (default 2 pages at once on one warm Chromium).
 - **Image:** the API image (`apps/api/Dockerfile`), started with `node dist/worker.js`: same Chromium and fonts, so the PDF is identical whichever side renders it. See `infrastructure/k8s/base/workers.yaml`.
 
-`apps/api/Dockerfile.worker` is not used by the manifests: it builds from `apps/api` alone, without the lockfile, the `@cvstudio/*` workspace packages or `prisma generate`.
-
 Generated PDFs are cached in Redis for 5 minutes (`pdf:cache:*`, `pdf:wysiwyg:*`).

@@ -12,7 +12,7 @@ import { EntitlementsService } from '../../subscriptions/entitlements.service';
 import { normalizeCvContent } from './normalize-cv-content';
 import { validateCvForExport } from './validate-cv-for-export';
 import { buildPdfHtml, suggestFilename } from './pdf-html.builder';
-import { PdfGeneratorService } from './pdf-generator.service';
+import { PdfRenderQueue } from './pdf-render-queue.service';
 import { optimizeImageForPdf } from './optimize-image';
 import type { ExportPdfOptions, PdfCvContent, PdfPageSize } from './pdf-content.types';
 
@@ -42,7 +42,7 @@ export class PdfExportService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly entitlements: EntitlementsService,
-    private readonly generator: PdfGeneratorService
+    private readonly renderer: PdfRenderQueue
   ) {}
 
   async renderFromContent(
@@ -76,7 +76,7 @@ export class PdfExportService {
       if (cached) {
         return { buffer: cached, filename, warnings: [] };
       }
-      const buffer = await this.generator.htmlToPdf(options.html, {
+      const buffer = await this.renderer.htmlToPdf(options.html, {
         ...options,
         wysiwyg: true,
         includeFooter: false,
@@ -120,7 +120,7 @@ export class PdfExportService {
       title: options.filename,
     });
 
-    const buffer = await this.generator.htmlToPdf(html, {
+    const buffer = await this.renderer.htmlToPdf(html, {
       ...options,
       filename: suggestFilename(cv, options.filename),
       siteUrl: options.siteUrl ?? process.env.APP_URL ?? 'https://cvstudio.ai',

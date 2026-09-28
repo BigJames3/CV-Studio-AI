@@ -1,14 +1,15 @@
 /**
- * PDF worker entry — same codebase as API, Chromium-enabled image.
+ * PDF worker entry — same codebase and image as the API (Chromium included).
  * Run: WORKER_KIND=pdf node dist/worker.js
  *
- * Jobs are currently processed inline by the API for local/dev.
- * This process keeps a warm browser pool and can re-process stalled Redis jobs.
+ * Consumes the BullMQ `pdf-render` queue that the API feeds when PDF_RENDER_MODE=queue,
+ * keeping Chromium out of API pods. Without that setting the API renders inline (local dev).
  */
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { PdfBrowserPool } from './modules/cvs/export/pdf-generator.service';
+import { PdfRenderQueue } from './modules/cvs/export/pdf-render-queue.service';
 import { RedisService } from './redis/redis.module';
 
 async function bootstrap() {
@@ -24,7 +25,12 @@ async function bootstrap() {
 
   const pool = app.get(PdfBrowserPool);
   await pool.getBrowser();
-  logger.log('Chromium warm — PDF worker ready');
+
+  // One Chromium, several pages: each render is mostly waiting on layout and PDF encoding.
+  const concurrency = Math.max(1, Number(process.env.PDF_WORKER_CONCURRENCY) || 2);
+  const worker = app.get(PdfRenderQueue).startWorker(concurrency);
+  await worker.waitUntilReady();
+  logger.log(`Chromium warm — PDF worker consuming the queue (concurrency ${concurrency})`);
 
   const redis = app.get(RedisService);
   // Heartbeat key for k8s / ops
@@ -34,6 +40,8 @@ async function bootstrap() {
 
   const shutdown = async () => {
     logger.log('Shutting down PDF worker');
+    // Let in-flight renders finish before Chromium is closed with the rest of the app.
+    await worker.close();
     await app.close();
     process.exit(0);
   };

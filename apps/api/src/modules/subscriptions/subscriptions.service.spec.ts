@@ -456,6 +456,23 @@ describe('SubscriptionsService.checkout', () => {
       expect(params.customer).toBe('cus_existing');
       expect(createCustomer).not.toHaveBeenCalled();
     });
+    it('grants no second trial to a customer who already had a subscription in Stripe', async () => {
+      // The database lost track (free again, no subscription id) but Stripe remembers an ended
+      // subscription on the customer: the trial was already used.
+      prisma.subscription.findUnique.mockResolvedValue({
+        stripeSubscriptionId: null,
+        stripeCustomerId: 'cus_existing',
+      });
+      listSubscriptions.mockResolvedValue({ data: [{ id: 'sub_old', status: 'canceled' }] });
+
+      await service.checkout(userId, { plan: 'pro', interval: 'month' });
+
+      const params = createCheckoutSession.mock.calls[0][0] as {
+        subscription_data?: { trial_period_days?: number; metadata?: Record<string, string> };
+      };
+      expect(params.subscription_data?.trial_period_days).toBeUndefined();
+      expect(params.subscription_data?.metadata?.trial_days).toBeUndefined();
+    });
   });
 
   describe('fail-closed checkout', () => {

@@ -264,13 +264,18 @@ export class SubscriptionsService {
     // The database learns the subscription id from the webhook (or the success page): until
     // then, a just-paid subscription only exists in Stripe. Ask Stripe before opening another
     // Checkout, otherwise ordering a second plan right after the first bills both.
-    const unrecorded = await this.findLiveCustomerSubscription(stripeCustomerId);
+    const { live: unrecorded, hadSubscription } =
+      await this.customerSubscriptions(stripeCustomerId);
     if (unrecorded) {
       return this.changeStripePlan(userId, unrecorded, dto, priceId, successUrl);
     }
 
+    // One 14-day trial per customer: Stripe's history counts, not only what the database
+    // recorded (duplicate Checkouts each got a trial of their own).
     const grantTrial =
-      (user.subscriptionTier ?? 'free') === 'free' && !existingSub?.stripeSubscriptionId;
+      (user.subscriptionTier ?? 'free') === 'free' &&
+      !existingSub?.stripeSubscriptionId &&
+      !hadSubscription;
 
     await this.expireOpenCheckoutSessions(stripeCustomerId, userId);
 
@@ -460,9 +465,13 @@ export class SubscriptionsService {
   }
 
   /** A live subscription of this Stripe customer, whether or not the database knows it yet. */
-  private async findLiveCustomerSubscription(
+  /**
+   * The customer's subscriptions in Stripe, whether or not the database knows them yet: the live
+   * one if any, and whether the customer ever had one (the 14-day trial is granted once).
+   */
+  private async customerSubscriptions(
     customerId: string
-  ): Promise<Stripe.Subscription | null> {
+  ): Promise<{ live: Stripe.Subscription | null; hadSubscription: boolean }> {
     let subs: Stripe.ApiList<Stripe.Subscription>;
     try {
       subs = await this.stripe!.subscriptions.list({
@@ -480,7 +489,10 @@ export class SubscriptionsService {
         message: 'Could not verify your current subscription. Please try again later.',
       });
     }
-    return subs.data.find((sub) => LIVE_STRIPE_STATUSES.has(sub.status)) ?? null;
+    return {
+      live: subs.data.find((sub) => LIVE_STRIPE_STATUSES.has(sub.status)) ?? null,
+      hadSubscription: subs.data.length > 0,
+    };
   }
 
   /**

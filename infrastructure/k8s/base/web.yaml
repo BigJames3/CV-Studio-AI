@@ -28,16 +28,35 @@ spec:
           labelSelector:
             matchLabels:
               app: web
+      # Same hardening as the API. 10001 is `app` in apps/web/Dockerfile (declared by name).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: web
           image: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/web:sha-replace
           ports:
             - containerPort: 3000
               name: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
           readinessProbe:
             httpGet:
               path: /
               port: http
+          # /api/health is the image HEALTHCHECK: a Next route with no dependency.
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 2
+            failureThreshold: 3
           resources:
             requests:
               cpu: 100m

@@ -38,8 +38,12 @@ spec:
           labelSelector:
             matchLabels:
               app: api
+      # The image declares `USER app` by name: without a numeric runAsUser the kubelet cannot
+      # check runAsNonRoot and refuses to start the container. 10001 is `app` in the Dockerfile.
       securityContext:
         runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:

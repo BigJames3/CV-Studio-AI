@@ -677,7 +677,9 @@ describe('MarketplaceService security fixes', () => {
         expect.objectContaining({
           amount: 4000,
           destination: 'acct_seller',
-        })
+        }),
+        // Same seller, day and amount on a second run: Stripe returns the first transfer.
+        { idempotencyKey: expect.stringMatching(/^marketplace-payout:.+:2026-09-09:4000$/) }
       );
     });
 

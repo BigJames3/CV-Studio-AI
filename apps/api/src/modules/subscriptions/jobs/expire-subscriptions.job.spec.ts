@@ -20,11 +20,17 @@ describe('ExpireSubscriptionsJob', () => {
   const prisma = {
     user: { findMany: jest.fn(), updateMany: jest.fn() },
   };
+  const cronLock = {
+    runExclusive: jest.fn(async (_job: string, _ttl: number, fn: () => Promise<unknown>) => ({
+      ran: true,
+      result: await fn(),
+    })),
+  };
   let job: ExpireSubscriptionsJob;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    job = new ExpireSubscriptionsJob(prisma as never);
+    job = new ExpireSubscriptionsJob(prisma as never, cronLock as never);
     prisma.user.updateMany.mockImplementation(async ({ where }) => ({
       count: where.id.in.length,
     }));
@@ -79,5 +85,18 @@ describe('ExpireSubscriptionsJob', () => {
       cursor: { id: 'u499' },
       skip: 1,
     });
+  });
+
+  it('runs the hourly schedule through the cross-replica lock', async () => {
+    prisma.user.findMany.mockResolvedValueOnce([]);
+
+    await job.scheduledRun();
+
+    expect(cronLock.runExclusive).toHaveBeenCalledWith(
+      'expire-subscriptions',
+      55 * 60,
+      expect.any(Function)
+    );
+    expect(prisma.user.findMany).toHaveBeenCalledTimes(1);
   });
 });

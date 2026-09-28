@@ -815,16 +815,23 @@ export class MarketplaceService {
 
       const periodStart = new Date(cutoff);
       try {
-        const transfer = await stripe.transfers.create({
-          amount: available,
-          currency: 'usd',
-          destination: seller.stripeAccountId,
-          metadata: {
-            type: 'marketplace_payout',
-            sellerId: seller.userId,
-            sellerProfileId: seller.id,
+        const transfer = await stripe.transfers.create(
+          {
+            amount: available,
+            currency: 'usd',
+            destination: seller.stripeAccountId,
+            metadata: {
+              type: 'marketplace_payout',
+              sellerId: seller.userId,
+              sellerProfileId: seller.id,
+            },
           },
-        });
+          // A second run on the same day (retry, second replica) gets the same transfer back
+          // from Stripe instead of paying the seller twice.
+          {
+            idempotencyKey: `marketplace-payout:${seller.id}:${now.toISOString().slice(0, 10)}:${available}`,
+          }
+        );
 
         const payout = await this.prisma.sellerPayout.create({
           data: {

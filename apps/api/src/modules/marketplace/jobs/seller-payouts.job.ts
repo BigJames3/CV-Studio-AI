@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { MailService } from '../../../mail/mail.service';
+import { CronLockService } from '../../../redis/cron-lock.service';
 import { MarketplaceService } from '../marketplace.service';
 
 @Injectable()
@@ -9,11 +10,19 @@ export class SellerPayoutsJob {
 
   constructor(
     private readonly marketplace: MarketplaceService,
-    private readonly mail: MailService
+    private readonly mail: MailService,
+    private readonly cronLock: CronLockService
   ) {}
 
   /** Wednesday 09:00 UTC — weekly Connect transfers for platform-held earnings. */
   @Cron('0 9 * * 3')
+  async scheduledRun() {
+    // One replica only: every pod running it would pay each seller once per pod.
+    await this.cronLock.runExclusive('seller-payouts', 6 * 24 * 60 * 60, () =>
+      this.runWeeklyPayouts()
+    );
+  }
+
   async runWeeklyPayouts() {
     try {
       const result = await this.marketplace.processWeeklyPayouts();

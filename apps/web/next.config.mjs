@@ -96,6 +96,11 @@ const nextConfig = {
             key: 'Permissions-Policy',
             value: 'camera=(), microphone=(), geolocation=()',
           },
+          // HTTPS only for a year, as the API already does (helmet). Production only: over
+          // plain-http localhost browsers ignore it anyway. No `preload`: it is hard to undo.
+          ...(process.env.NODE_ENV === 'production'
+            ? [{ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' }]
+            : []),
         ],
       },
     ];

@@ -62,10 +62,18 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ['ALL']
+          # readOnlyRootFilesystem: Chromium (inline PDF export) and Node need a writable /tmp.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           lifecycle:
             preStop:
               exec:
                 command: ['/bin/sh', '-c', 'sleep 10']
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
 ---
 apiVersion: v1
 kind: Service

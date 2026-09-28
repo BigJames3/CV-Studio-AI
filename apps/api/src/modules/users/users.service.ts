@@ -24,6 +24,7 @@ const PROFILE_SELECT = {
   targetRole: true,
   careerLevel: true,
   onboardingCompletedAt: true,
+  lifecycleEmailsOptOut: true,
 } as const;
 
 @Injectable()
@@ -103,6 +104,9 @@ export class UsersService {
         ...(dto.location !== undefined ? { location: dto.location } : {}),
         ...(dto.bio !== undefined ? { bio: dto.bio } : {}),
         ...(avatarUrl !== undefined ? { avatarUrl } : {}),
+        ...(dto.lifecycleEmailsOptOut !== undefined
+          ? { lifecycleEmailsOptOut: dto.lifecycleEmailsOptOut }
+          : {}),
       },
       select: {
         id: true,
@@ -114,6 +118,7 @@ export class UsersService {
         location: true,
         bio: true,
         subscriptionTier: true,
+        lifecycleEmailsOptOut: true,
         updatedAt: true,
       },
     });

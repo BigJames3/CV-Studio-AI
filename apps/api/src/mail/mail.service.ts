@@ -52,7 +52,14 @@ export class MailService implements OnModuleInit {
     }
   }
 
-  async send(options: { to: string; subject: string; html: string; text?: string }) {
+  /** Resolves false (and logs) when the mail could not be handed to SMTP; never throws. */
+  async send(options: {
+    to: string;
+    subject: string;
+    html: string;
+    text?: string;
+    headers?: Record<string, string>;
+  }): Promise<boolean> {
     try {
       await this.transporter.sendMail({
         from: this.from,
@@ -60,10 +67,13 @@ export class MailService implements OnModuleInit {
         subject: options.subject,
         html: options.html,
         text: options.text,
+        headers: options.headers,
       });
+      return true;
     } catch (err) {
       this.logger.warn(`Failed to send mail to ${options.to}: ${(err as Error).message}`);
       this.logger.debug(`Mail fallback subject=${options.subject} text=${options.text ?? ''}`);
+      return false;
     }
   }
 

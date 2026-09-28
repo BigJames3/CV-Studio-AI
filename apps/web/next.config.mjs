@@ -51,11 +51,10 @@ const nextConfig = {
     return config;
   },
   images: {
-    formats: ['image/avif', 'image/webp'],
-    remotePatterns: [
-      { protocol: 'https', hostname: '**.cvstudio.ai' },
-      { protocol: 'https', hostname: 'images.unsplash.com' },
-    ],
+    // No page uses next/image, so the built-in optimizer (/_next/image) only added attack
+    // surface: Next.js 14 has unpatched advisories in it, including a critical RCE fixed only in
+    // 15.5.24. With `unoptimized`, Next answers 404 on /_next/image. Re-enable after upgrading.
+    unoptimized: true,
   },
   experimental: {
     outputFileTracingRoot: path.join(dir, '../..'),

@@ -91,3 +91,16 @@ App Router with route groups `(marketing)`, `(auth)` and `(app)`, plus public sh
 ## Working conventions requested by the maintainer
 
 When fixing tooling or CI issues: observe, reproduce, prove the root cause, then propose a minimal fix and **wait for validation** before modifying anything. Never add `--no-verify`, `|| true` or `continue-on-error: true` to hide real errors. Don't install packages, bump versions, touch the lockfile or change application code to fix a purely environmental problem without justification. Keep each fix in its own isolated commit, and run `git diff --check` before committing.
+
+## AI agent governance
+
+The project's agent team is already defined and is authoritative:
+
+- `AGENTS.md`: shared charter (priorities P0→P4, Definition of Done, security, git, report format).
+- `docs/agents/00-README.md`: repository map, feature and plan matrices, anti-conflict rule.
+- `docs/agents/01-architect.md` … `08-devops.md`: one sheet per agent (ownership, allowed and forbidden files).
+- `docs/agents/TASK_BOARD.md` and `DECISIONS.md`: confirmed tasks and open human decisions.
+
+`.claude/agents/` exposes these 8 agents as Claude Code subagents (`architect`, `security`, `qa`, `backend`, `frontend`, `ai`, `billing`, `devops`). Each wrapper points to its `docs/agents/` sheet: edit the sheet, not the wrapper.
+
+Cross-cutting work: `architect` splits it → `security` confirms the risk (read-only) → the owning agent implements → `qa` tests → `architect` reviews the diff.

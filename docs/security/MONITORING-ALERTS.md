@@ -23,6 +23,9 @@ Log fields required: `request_id`, `actor_id`, `ip`, `route`, `action`, `result`
 - SEC-01 → `emitSecurityAlert` on refresh reuse (Sentry fatal + `IR_WEBHOOK_URL`)
 - SEC-05 → `emitSecurityAlert` on Stripe signature failure
 - HTTP logs include `requestId` from `RequestIdMiddleware`
+- Access log (`msg: "http"`, `context: "HTTP"`) written when the response is sent, so it also covers requests rejected by guards (401, 403, 429) and unknown routes (404): `method`, `path` (never the query string), `status`, `ms`, `requestId`, `userId`, `ip`. Level: `warn` for 4xx, `error` for 5xx. Successful health probes are not logged. SEC-02 / SEC-03 / SEC-10 can be built on it.
+- `LOG_FORMAT=json` (set in k8s): every line is one JSON object (`time`, `level`, `context`, `msg`, plus the fields above), with no colors or text prefix, so Fluent Bit `Merge_Log` indexes each field.
+- A client `X-Request-Id` is kept only if it matches `[A-Za-z0-9._:-]{1,128}`; otherwise a UUID replaces it (no log injection).
 
 Remaining rows still need CloudWatch/Datadog once production exists.
 

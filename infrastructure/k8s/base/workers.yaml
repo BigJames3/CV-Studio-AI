@@ -48,6 +48,8 @@ spec:
               value: pdf
             - name: PDF_WORKER_CONCURRENCY
               value: '2'
+            - name: LOG_FORMAT
+              value: json
           resources:
             requests:
               cpu: 500m

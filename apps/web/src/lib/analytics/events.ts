@@ -41,6 +41,10 @@ export const AnalyticsEvents = [
   'marketplace_item_viewed',
   'marketplace_purchase_started',
   'marketplace_purchase_succeeded',
+  'onboarding_viewed',
+  'onboarding_step_completed',
+  'onboarding_skipped',
+  'onboarding_completed',
   'paywall_viewed',
   'paywall_cta_clicked',
   /** Business user at the CV limit asks support for more (measures demand for a bigger plan). */

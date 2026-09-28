@@ -4,6 +4,7 @@ import { AuthSessionService } from '../auth/auth-session.service';
 import { AuthAuditService } from '../auth/auth-audit.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { OnboardingDto } from './dto/onboarding.dto';
 
 const PROFILE_SELECT = {
   id: true,
@@ -20,6 +21,9 @@ const PROFILE_SELECT = {
   is2faEnabled: true,
   lastLoginAt: true,
   createdAt: true,
+  targetRole: true,
+  careerLevel: true,
+  onboardingCompletedAt: true,
 } as const;
 
 @Injectable()
@@ -63,6 +67,23 @@ export class UsersService {
       user,
       cvs,
     };
+  }
+
+  /** Saves the onboarding answers; the completion date is set once and never moved. */
+  async updateOnboarding(userId: string, dto: OnboardingDto) {
+    const current = await this.me(userId);
+    const targetRole = dto.targetRole?.trim();
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(dto.targetRole !== undefined ? { targetRole: targetRole || null } : {}),
+        ...(dto.careerLevel !== undefined ? { careerLevel: dto.careerLevel } : {}),
+        ...(dto.completed && !current.onboardingCompletedAt
+          ? { onboardingCompletedAt: new Date() }
+          : {}),
+      },
+      select: PROFILE_SELECT,
+    });
   }
 
   async updateMe(userId: string, dto: UpdateUserDto) {

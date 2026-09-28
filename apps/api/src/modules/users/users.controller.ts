@@ -2,6 +2,7 @@ import { Controller, Get, Patch, Delete, Body } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { OnboardingDto } from './dto/onboarding.dto';
 import { CurrentUser, AuthUser } from '../../common/decorators';
 
 @ApiTags('Users')
@@ -26,6 +27,12 @@ export class UsersController {
   @ApiOperation({ summary: 'Update current user profile' })
   updateMe(@CurrentUser() user: AuthUser, @Body() dto: UpdateUserDto) {
     return this.users.updateMe(user.id, dto);
+  }
+
+  @Patch('me/onboarding')
+  @ApiOperation({ summary: 'Save guided onboarding answers (target role, level, completion)' })
+  updateOnboarding(@CurrentUser() user: AuthUser, @Body() dto: OnboardingDto) {
+    return this.users.updateOnboarding(user.id, dto);
   }
 
   @Delete('me')

@@ -46,6 +46,7 @@ export const config = {
     '/account/:path*',
     '/analytics/:path*',
     '/seller/:path*',
+    '/bienvenue',
     '/login',
     '/register',
   ],

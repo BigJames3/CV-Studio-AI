@@ -110,6 +110,23 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {user && !user.onboardingCompletedAt && !isLoading && cvs.length === 0 ? (
+        <div
+          className="mt-8 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-primary/30 bg-primary/5 p-5"
+          data-testid="onboarding-banner"
+        >
+          <div>
+            <p className="font-semibold">Créez votre premier CV en 2 minutes</p>
+            <p className="text-sm text-content-secondary">
+              Choisissez votre métier et partez d’un exemple déjà rédigé.
+            </p>
+          </div>
+          <Link href="/bienvenue">
+            <Button>Commencer</Button>
+          </Link>
+        </div>
+      ) : null}
+
       {isLoading && <p className="mt-8 text-sm">Chargement…</p>}
       {isError && (
         <p className="mt-8 text-sm text-error">

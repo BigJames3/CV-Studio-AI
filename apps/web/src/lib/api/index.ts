@@ -204,6 +204,17 @@ export type UserProfile = {
   lastLoginAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
+  targetRole?: string | null;
+  careerLevel?: CareerLevel | null;
+  onboardingCompletedAt?: string | null;
+};
+
+export type CareerLevel = 'student' | 'junior' | 'confirmed' | 'senior';
+
+export type OnboardingInput = {
+  targetRole?: string;
+  careerLevel?: CareerLevel;
+  completed?: boolean;
 };
 
 export type UpdateProfileInput = {
@@ -220,6 +231,8 @@ export const usersApi = {
   getMe: () => apiClient<UserProfile>('/users/me'),
   updateMe: (body: UpdateProfileInput) =>
     apiClient<UserProfile>('/users/me', { method: 'PATCH', body }),
+  updateOnboarding: (body: OnboardingInput) =>
+    apiClient<UserProfile>('/users/me/onboarding', { method: 'PATCH', body }),
   deleteMe: () =>
     apiClient<{
       deleted: boolean;

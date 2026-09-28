@@ -132,7 +132,8 @@ export default function RegisterPage() {
                 firstName: values.firstName,
                 lastName: values.lastName,
               });
-              router.push('/dashboard');
+              // First visit: guided onboarding (target job, starting point, template).
+              router.push('/bienvenue');
             } catch {
               /* surfaced via registerMutation.error */
             }

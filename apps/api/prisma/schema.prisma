@@ -207,6 +207,10 @@ model User {
   lockedUntil                DateTime?        @map("locked_until") @db.Timestamptz(6)
   lastLoginAt                 DateTime?        @map("last_login_at") @db.Timestamptz(6)
   emailVerificationSentAt     DateTime?        @map("email_verification_sent_at") @db.Timestamptz(6)
+  /// Guided onboarding (/bienvenue): target job and level, used to pick CV examples.
+  targetRole                  String?          @map("target_role") @db.VarChar(120)
+  careerLevel                 String?          @map("career_level") @db.VarChar(32)
+  onboardingCompletedAt       DateTime?        @map("onboarding_completed_at") @db.Timestamptz(6)
   createdAt                   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt                   DateTime?        @map("deleted_at") @db.Timestamptz(6)

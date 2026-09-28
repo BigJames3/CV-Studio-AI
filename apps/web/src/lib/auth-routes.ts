@@ -5,6 +5,7 @@ export const APP_ROUTE_PREFIXES = [
   '/account',
   '/analytics',
   '/seller',
+  '/bienvenue',
 ] as const;
 
 export const AUTH_PAGES = ['/login', '/register'] as const;

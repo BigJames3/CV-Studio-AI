@@ -9,12 +9,14 @@ import { ChangePasswordForm } from '@/components/profile/ChangePasswordForm';
 import { SessionsList } from '@/components/profile/SessionsList';
 import { LogoutButton } from '@/components/profile/LogoutButton';
 import { TwoFactorSetup } from '@/components/profile/TwoFactorSetup';
+import { EmailPreferences } from '@/components/profile/EmailPreferences';
 import { useAuthStore } from '@/stores/auth-store';
 
 const TABS = [
   { id: 'profile', label: 'Profil' },
   { id: 'security', label: 'Sécurité' },
   { id: 'sessions', label: 'Sessions' },
+  { id: 'emails', label: 'E-mails' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -92,6 +94,7 @@ export default function SettingsPage() {
           </div>
         )}
         {tab === 'sessions' && <SessionsList />}
+        {tab === 'emails' && <EmailPreferences user={user} />}
       </div>
 
       <div className="mt-10 border-t border-border pt-6">

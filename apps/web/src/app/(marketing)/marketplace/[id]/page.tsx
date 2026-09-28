@@ -2,20 +2,23 @@ import { Suspense } from 'react';
 import { createPageMetadata } from '@/lib/seo';
 import { ListingDetail } from '@/components/marketplace/listing-detail';
 
-type Props = { params: { id: string } };
+// Next 15: route params are a Promise.
+type Props = { params: Promise<{ id: string }> };
 
-export function generateMetadata({ params }: Props) {
+export async function generateMetadata({ params }: Props) {
+  const { id } = await params;
   return createPageMetadata({
     title: 'Template marketplace',
     description: 'Détail d’un template premium CV Studio',
-    path: `/marketplace/${params.id}`,
+    path: `/marketplace/${id}`,
   });
 }
 
-export default function MarketplaceDetailPage({ params }: Props) {
+export default async function MarketplaceDetailPage({ params }: Props) {
+  const { id } = await params;
   return (
     <Suspense fallback={<p className="mx-auto max-w-content px-4 py-8 text-sm">Chargement…</p>}>
-      <ListingDetail listingId={params.id} />
+      <ListingDetail listingId={id} />
     </Suspense>
   );
 }

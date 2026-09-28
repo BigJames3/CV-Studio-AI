@@ -144,6 +144,17 @@ export async function listCvs(request: APIRequestContext, token: string) {
   return unwrap<{ items: Array<{ id: string; title: string }> }>(res);
 }
 
+/** Creates CVs through the API (fast setup for quota tests). */
+export async function createCvs(request: APIRequestContext, token: string, count: number) {
+  for (let i = 0; i < count; i++) {
+    const res = await request.post(`${API_URL}/cvs`, {
+      headers: await apiAuthHeaders(token),
+      data: { title: `Quota CV ${i + 1}` },
+    });
+    expect(res.ok(), `cv create failed: ${res.status()} ${await res.text()}`).toBeTruthy();
+  }
+}
+
 export async function checkout(
   request: APIRequestContext,
   token: string,

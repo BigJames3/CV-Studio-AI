@@ -43,6 +43,8 @@ export const AnalyticsEvents = [
   'marketplace_purchase_succeeded',
   'paywall_viewed',
   'paywall_cta_clicked',
+  /** Business user at the CV limit asks support for more (measures demand for a bigger plan). */
+  'cv_limit_support_clicked',
   'checkout_started',
   'checkout_succeeded',
   'checkout_failed',

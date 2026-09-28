@@ -13,6 +13,7 @@ import { PrismaService } from '../../database/prisma.module';
 import { FeatureGateService } from '../services/feature-gate.service';
 import { AuditLogService } from '../services/audit-log.service';
 import type { AuthUser } from '../decorators';
+import { upgradeDetails } from '../utils/upgrade-details';
 import {
   resolveEffectiveTier,
   TIER_SOURCE_SELECT,
@@ -73,7 +74,7 @@ export class FeatureGateGuard implements CanActivate {
         statusCode: 402,
         code: 'ENTITLEMENT_REQUIRED',
         message: `Feature requires higher tier: ${feature}`,
-        details: { feature, upgradeUrl: '/pricing' },
+        details: upgradeDetails(feature, String(gatedUser.subscriptionTier)),
       });
     }
 

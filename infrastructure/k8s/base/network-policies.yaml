@@ -1,0 +1,69 @@
+# Inbound traffic allowed into the cvstudio namespace; everything else is dropped.
+# Enforced only by a CNI that implements NetworkPolicy: on EKS, the VPC CNI add-on with
+# `enableNetworkPolicy: "true"` (or Calico/Cilium). Without one, these objects are no-ops.
+#
+# Egress is not restricted yet: api/worker need Postgres, Redis, Stripe, OpenAI, SMTP and
+# AWS STS; lock it down once those endpoints are validated on staging.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: cvstudio
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# The ALB uses ip targets: it reaches pods directly from the VPC subnets, so the HTTP ports are
+# open to any source. Only these ports: metrics, and every pod without a public port, stay closed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web-http
+  namespace: cvstudio
+spec:
+  podSelector:
+    matchLabels:
+      app: web
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: 3000
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-http
+  namespace: cvstudio
+spec:
+  podSelector:
+    matchLabels:
+      app: api
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: 3001
+          protocol: TCP
+---
+# Prometheus (kube-prometheus-stack in the monitoring namespace) is the only client of /metrics.
+# worker-pdf has no other inbound port: it only pulls jobs from Redis.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metrics-from-monitoring
+  namespace: cvstudio
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [api, worker-pdf]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9464
+          protocol: TCP

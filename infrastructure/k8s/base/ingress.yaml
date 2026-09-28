@@ -3,10 +3,12 @@ kind: Ingress
 metadata:
   name: cvstudio
   namespace: cvstudio
+  # AWS Load Balancer Controller only reads the alb.ingress.kubernetes.io/ prefix.
   annotations:
-    kubernetes.ingress.kubernetes.io/scheme: internet-facing
-    kubernetes.ingress.kubernetes.io/target-type: ip
-    kubernetes.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    # HTTP:80 exists only to redirect to HTTPS (ssl-redirect below).
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
     alb.ingress.kubernetes.io/ssl-redirect: '443'
     # ACM ARN set per overlay
     # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:...

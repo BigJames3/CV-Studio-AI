@@ -11,5 +11,6 @@ resources:
   - migrate-job.yaml
   - blue-green-api.yaml
   - stripe-webhook-retry-cronjob.yaml
+  - network-policies.yaml
 commonLabels:
   app.kubernetes.io/part-of: cvstudio

@@ -34,6 +34,14 @@ const LIVE_STRIPE_STATUSES = new Set<Stripe.Subscription.Status>([
 
 const PLAN_RANK: Record<PaidPlan, number> = { pro: 1, business: 2 };
 
+/**
+ * Stripe replaces {CHECKOUT_SESSION_ID} when it redirects back, so the billing page can ask the
+ * API to confirm that session with Stripe (POST /payments/checkout/confirm).
+ */
+function withCheckoutSessionId(url: string): string {
+  return `${url}${url.includes('?') ? '&' : '?'}session_id={CHECKOUT_SESSION_ID}`;
+}
+
 /** An upgrade costs more right away: higher tier, or same tier from monthly to yearly. */
 function isUpgrade(
   from: { plan: PaidPlan; interval: BillingInterval },
@@ -259,7 +267,7 @@ export class SubscriptionsService {
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: 'subscription',
-      success_url: successUrl,
+      success_url: withCheckoutSessionId(successUrl),
       cancel_url: cancelUrl,
       client_reference_id: userId,
       customer: stripeCustomerId,

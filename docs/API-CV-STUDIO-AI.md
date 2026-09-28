@@ -242,10 +242,11 @@ Query : `?premium=&published=true&cursor=`
 
 ### 4.6 Payments — `/api/v1/payments`
 
-| Method | Path                | Auth             |
-| ------ | ------------------- | ---------------- |
-| GET    | `/payments/history` | JWT              |
-| POST   | `/payments/webhook` | Stripe signature |
+| Method | Path                         | Auth             |
+| ------ | ---------------------------- | ---------------- |
+| GET    | `/payments/history`          | JWT              |
+| POST   | `/payments/checkout/confirm` | JWT              |
+| POST   | `/payments/webhook`          | Stripe signature |
 
 ### 4.7 Invoices — `/api/v1/invoices`
 

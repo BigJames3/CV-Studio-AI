@@ -398,6 +398,11 @@ export type PaymentHistoryItem = {
 
 export const paymentsApi = {
   history: () => apiClient<{ items: PaymentHistoryItem[] }>('/payments/history'),
+  confirmCheckout: (sessionId: string) =>
+    apiClient<{ confirmed: boolean }>('/payments/checkout/confirm', {
+      method: 'POST',
+      body: { sessionId },
+    }),
 };
 
 export const aiApi = {

@@ -79,6 +79,7 @@ function BillingPageContent() {
   const { tier } = useUserPlan();
 
   const checkoutState = parseCheckoutState(params.get('checkout'));
+  const checkoutSessionId = params.get('session_id');
 
   const [polledTier, setPolledTier] = useState<'free' | 'pro' | 'business' | null>(null);
   const [isPollingActivation, setIsPollingActivation] = useState(false);
@@ -161,6 +162,14 @@ function BillingPageContent() {
     const poll = async () => {
       if (cancelled) return;
       try {
+        // Ask the API to confirm the session with Stripe first, so activation does not depend on
+        // the webhook alone. On failure, polling still waits for the webhook.
+        if (attempts === 0 && checkoutSessionId) {
+          await paymentsApi.confirmCheckout(checkoutSessionId).catch((error: unknown) => {
+            console.warn('Checkout confirmation failed:', error);
+          });
+          if (cancelled) return;
+        }
         const result = await subscriptionsApi.me();
         if (cancelled) return;
         if (result.tier && result.tier !== 'free') {
@@ -195,7 +204,7 @@ function BillingPageContent() {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [checkoutState, queryClient, tier]);
+  }, [checkoutSessionId, checkoutState, queryClient, tier]);
 
   async function checkout(plan: 'pro' | 'business', interval: 'month' | 'year') {
     setCheckoutPending(plan);

@@ -59,6 +59,12 @@ stripe listen --forward-to localhost:3001/api/v1/payments/webhook
 # Copy the printed whsec_… into STRIPE_WEBHOOK_SECRET in apps/api/.env
 ```
 
+If the Stripe CLI is logged in to another account than `STRIPE_SECRET_KEY`, it forwards nothing (no `POST /api/v1/payments/webhook` in the API log). Pass the key explicitly: `stripe listen --api-key sk_test_… --forward-to …`.
+
+## Confirmation on return from Checkout
+
+Checkout redirects to `/account/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`. The billing page then calls `POST /api/v1/payments/checkout/confirm` with that id. The API reads the session from Stripe, checks that it belongs to the signed-in user and is `complete`, and runs the same fulfillment as `checkout.session.completed` (plan, then the first invoice if paid). The redirect alone grants nothing, and the webhook stays the source for renewals, failures, plan changes and cancellations. Both paths are idempotent.
+
 ## Customer portal
 
 "Gérer mon paiement et mes factures" on the billing page calls `POST /api/v1/subscriptions/me/portal`, which opens a Stripe Customer Portal session (update the card, pay an unpaid invoice, download invoices) and returns to `/account/billing`.

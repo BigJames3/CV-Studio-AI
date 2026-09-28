@@ -535,6 +535,138 @@ describe('PaymentsService webhook fail-closed', () => {
     });
   });
 
+  describe('confirmCheckoutSession (return from Stripe Checkout)', () => {
+    const paidInvoice = {
+      id: 'in_first',
+      number: 'INV-1',
+      status: 'paid',
+      subscription: 'sub_1',
+      amount_paid: 0,
+      currency: 'eur',
+      created: 1_700_000_000,
+    };
+
+    function attachSession(session: Record<string, unknown> | Error) {
+      const retrieveSub = attachStripeRetrieve('price_pro_month', false, { userId: 'user-1' });
+      const retrieveSession =
+        session instanceof Error
+          ? jest.fn().mockRejectedValue(session)
+          : jest.fn().mockResolvedValue({
+              id: 'cs_test_1',
+              mode: 'subscription',
+              status: 'complete',
+              client_reference_id: 'user-1',
+              metadata: { userId: 'user-1', plan: 'pro' },
+              customer: 'cus_1',
+              subscription: 'sub_1',
+              invoice: paidInvoice,
+              ...session,
+            });
+      (service as unknown as { stripe: Record<string, unknown> }).stripe = {
+        subscriptions: { retrieve: retrieveSub },
+        checkout: { sessions: { retrieve: retrieveSession } },
+      };
+      return retrieveSession;
+    }
+
+    beforeEach(() => {
+      subscriptions.applyPaidEntitlement.mockReset().mockResolvedValue(undefined);
+      prisma.subscription.findUnique.mockReset().mockResolvedValue(null);
+      prisma.subscription.findFirst
+        .mockReset()
+        .mockResolvedValue({ id: 'local-sub', userId: 'user-1' });
+      prisma.payment.create.mockReset().mockResolvedValue({});
+      prisma.invoice.upsert.mockReset().mockResolvedValue({});
+    });
+
+    it('reads the session from Stripe, grants the plan and records the first invoice', async () => {
+      const retrieveSession = attachSession({});
+
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_1')).resolves.toEqual({
+        confirmed: true,
+      });
+
+      expect(retrieveSession).toHaveBeenCalledWith('cs_test_1', { expand: ['invoice'] });
+      expect(subscriptions.applyPaidEntitlement).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-1', plan: 'pro', stripeSubscriptionId: 'sub_1' })
+      );
+      expect(prisma.invoice.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { invoiceNumber: 'INV-1' } })
+      );
+    });
+
+    it("refuses another user's session without revealing it", async () => {
+      attachSession({ client_reference_id: 'user-2', metadata: { userId: 'user-2' } });
+
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_1')).rejects.toMatchObject({
+        response: { code: 'CHECKOUT_SESSION_NOT_FOUND' },
+      });
+      expect(subscriptions.applyPaidEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('refuses a one-off (marketplace) payment session', async () => {
+      attachSession({ mode: 'payment', metadata: { type: 'marketplace', userId: 'user-1' } });
+
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_1')).rejects.toMatchObject({
+        response: { code: 'CHECKOUT_SESSION_NOT_FOUND' },
+      });
+      expect(subscriptions.applyPaidEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('grants nothing while the session is not complete', async () => {
+      attachSession({ status: 'open', invoice: null });
+
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_1')).resolves.toEqual({
+        confirmed: false,
+      });
+      expect(subscriptions.applyPaidEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('does not record an unpaid invoice', async () => {
+      attachSession({ invoice: { ...paidInvoice, status: 'open' } });
+
+      await service.confirmCheckoutSession('user-1', 'cs_test_1');
+      expect(subscriptions.applyPaidEntitlement).toHaveBeenCalled();
+      expect(prisma.invoice.upsert).not.toHaveBeenCalled();
+    });
+
+    it('maps an unknown session to 404 and a Stripe outage to 503', async () => {
+      attachSession(
+        Object.assign(new Error('No such checkout.session'), { code: 'resource_missing' })
+      );
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_x')).rejects.toMatchObject({
+        response: { code: 'CHECKOUT_SESSION_NOT_FOUND' },
+      });
+
+      attachSession(new Error('socket hang up'));
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_x')).rejects.toMatchObject({
+        response: { code: 'STRIPE_UNAVAILABLE' },
+      });
+    });
+
+    it('treats a row created at the same moment by the webhook as confirmed', async () => {
+      attachSession({});
+      const { Prisma } = jest.requireActual('@prisma/client');
+      subscriptions.applyPaidEntitlement.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+          code: 'P2002',
+          clientVersion: 'test',
+        })
+      );
+
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_1')).resolves.toEqual({
+        confirmed: true,
+      });
+    });
+
+    it('fails closed when Stripe is not configured', async () => {
+      (service as unknown as { stripe: null }).stripe = null;
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_1')).rejects.toMatchObject({
+        response: { code: 'STRIPE_NOT_CONFIGURED' },
+      });
+    });
+  });
+
   describe('P0-1: Lock Processing', () => {
     it('should prevent double processing with 2 concurrent webhooks', async () => {
       let lockHeld = false;

@@ -15,6 +15,7 @@ describe('PaymentsController', () => {
   const payments = {
     history: jest.fn(),
     handleStripeWebhook: jest.fn(),
+    confirmCheckoutSession: jest.fn(),
   };
 
   let controller: PaymentsController;
@@ -34,7 +35,15 @@ describe('PaymentsController', () => {
     expect(payments.history).toHaveBeenCalledWith('user-1');
   });
 
-  it('exposes only history and the Stripe webhook (CinetPay removed)', () => {
+  it('POST /payments/checkout/confirm confirms the session for the signed-in user', async () => {
+    payments.confirmCheckoutSession.mockResolvedValue({ confirmed: true });
+    await expect(controller.confirmCheckout(user, { sessionId: 'cs_test_1' })).resolves.toEqual({
+      confirmed: true,
+    });
+    expect(payments.confirmCheckoutSession).toHaveBeenCalledWith('user-1', 'cs_test_1');
+  });
+
+  it('exposes only history, checkout confirmation and the Stripe webhook (CinetPay removed)', () => {
     const routes = Object.getOwnPropertyNames(PaymentsController.prototype)
       .filter((name) => name !== 'constructor')
       .map((name) =>
@@ -43,7 +52,7 @@ describe('PaymentsController', () => {
           (PaymentsController.prototype as unknown as Record<string, object>)[name]
         )
       );
-    expect(routes.sort()).toEqual(['history', 'webhook']);
+    expect(routes.sort()).toEqual(['checkout/confirm', 'history', 'webhook']);
   });
 
   describe('POST /payments/webhook (Stripe)', () => {

@@ -3,9 +3,12 @@
 import { AppTopbar } from '@/components/layout/app-topbar';
 import { PaywallModal } from '@/components/paywall/paywall-modal';
 import { useUiStore } from '@/stores/ui-store';
+import { useMe, useUserPlan } from '@/hooks/useMe';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { paywall, closePaywall } = useUiStore();
+  const { tier } = useUserPlan();
+  const { data: user } = useMe();
 
   return (
     <div className="min-h-dvh bg-surface-app">
@@ -17,6 +20,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         feature={paywall.feature}
         cvCount={paywall.cvCount}
         cvLimit={paywall.cvLimit}
+        tier={tier}
+        userEmail={user?.email}
       />
     </div>
   );

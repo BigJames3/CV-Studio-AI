@@ -11,8 +11,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
+import { SUPPORT_BUSINESS_MAILTO } from '@/lib/billing/plans-catalog';
+import { getCvLimit } from '@cvstudio/shared-utils';
 
 const featureNames: Record<string, { title: string; description: string }> = {
   'cv:create': {
@@ -58,13 +61,37 @@ const PREMIUM_BENEFITS = [
   '14 jours gratuits',
 ] as const;
 
+const BUSINESS_CV_LIMIT = getCvLimit('business');
+
 export type PaywallModalProps = {
   isOpen: boolean;
   onClose: () => void;
   feature?: string;
   cvCount?: number;
   cvLimit?: number;
+  /** Current plan: the CV-limit message depends on it (Business has no plan above). */
+  tier?: 'free' | 'pro' | 'business';
+  /** Pre-fills the support e-mail for a Business quota request. */
+  userEmail?: string;
 };
+
+/** Support e-mail for a Business user asking for more CVs (option A, validated by product). */
+export function businessQuotaMailto(cvCount: number, cvLimit: number, email?: string): string {
+  const subject = 'Augmentation du quota de CV (Business)';
+  const body = [
+    'Bonjour,',
+    '',
+    `J'utilise ${cvCount}/${cvLimit} CV sur mon plan Business et j'aurais besoin d'une capacité plus élevée.`,
+    '',
+    'Mon besoin (nombre de CV, usage) :',
+    '',
+    email ? `Compte : ${email}` : '',
+  ]
+    .filter((line, i, all) => line !== '' || all[i - 1] !== '')
+    .join('\n');
+  const base = SUPPORT_BUSINESS_MAILTO.split('?')[0];
+  return `${base}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
 
 export function PaywallModal({
   isOpen,
@@ -72,20 +99,42 @@ export function PaywallModal({
   feature = 'cv:create',
   cvCount = 0,
   cvLimit = 1,
+  tier = 'free',
+  userEmail,
 }: PaywallModalProps) {
   const router = useRouter();
-  const copy = featureNames[feature] ?? {
-    title: '🔒 Fonctionnalité Premium',
-    description: 'Cette fonctionnalité est réservée aux utilisateurs Premium.',
-  };
-
   const isCvLimit = feature === 'cv:create';
+  // Only the CV quota differs between Pro and Business; Business has nothing above it.
+  const variant: 'premium' | 'business-upgrade' | 'business-support' = !isCvLimit
+    ? 'premium'
+    : tier === 'business'
+      ? 'business-support'
+      : tier === 'pro'
+        ? 'business-upgrade'
+        : 'premium';
+
+  const copy =
+    variant === 'business-support'
+      ? {
+          title: '🎯 Limite du plan Business atteinte',
+          description: `Vous avez atteint les ${cvLimit} CV de votre plan Business. Besoin de plus ? Contactez notre support pour augmenter votre capacité.`,
+        }
+      : variant === 'business-upgrade'
+        ? {
+            title: '🎯 Limite du plan Pro atteinte',
+            description: `Vous avez atteint les ${cvLimit} CV du plan Pro. Passez à Business pour gérer jusqu’à ${BUSINESS_CV_LIMIT} CV.`,
+          }
+        : (featureNames[feature] ?? {
+            title: '🔒 Fonctionnalité Premium',
+            description: 'Cette fonctionnalité est réservée aux utilisateurs Premium.',
+          });
+
   const safeLimit = Math.max(cvLimit, 1);
   const usagePercent = Math.min(100, Math.round((cvCount / safeLimit) * 100));
 
   useEffect(() => {
-    if (isOpen) track('paywall_viewed', { feature });
-  }, [isOpen, feature]);
+    if (isOpen) track('paywall_viewed', { feature, variant });
+  }, [isOpen, feature, variant]);
 
   return (
     <Dialog
@@ -125,43 +174,62 @@ export function PaywallModal({
           </div>
         ) : null}
 
-        <div className="rounded-lg bg-gradient-to-br from-purple-50 to-blue-50 p-4 dark:from-purple-950/40 dark:to-blue-950/40">
-          <p className="mb-2 text-sm font-semibold text-content-primary dark:text-neutral-100">
-            Inclus avec Premium
-          </p>
-          <ul className="space-y-1.5 text-sm text-content-secondary dark:text-neutral-300">
-            {PREMIUM_BENEFITS.map((benefit) => (
-              <li key={benefit} className="flex items-start gap-2">
-                <span className="mt-0.5 text-purple-600 dark:text-purple-400" aria-hidden>
-                  ✓
-                </span>
-                <span>{benefit}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        {variant === 'premium' ? (
+          <div className="rounded-lg bg-gradient-to-br from-purple-50 to-blue-50 p-4 dark:from-purple-950/40 dark:to-blue-950/40">
+            <p className="mb-2 text-sm font-semibold text-content-primary dark:text-neutral-100">
+              Inclus avec Premium
+            </p>
+            <ul className="space-y-1.5 text-sm text-content-secondary dark:text-neutral-300">
+              {PREMIUM_BENEFITS.map((benefit) => (
+                <li key={benefit} className="flex items-start gap-2">
+                  <span className="mt-0.5 text-purple-600 dark:text-purple-400" aria-hidden>
+                    ✓
+                  </span>
+                  <span>{benefit}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} className="w-full sm:w-auto">
             Plus tard
           </Button>
-          <Button
-            type="button"
-            data-testid="paywall-upgrade"
-            className="w-full border-0 bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-1 hover:from-purple-700 hover:to-blue-700 sm:w-auto"
-            onClick={() => {
-              track('paywall_cta_clicked', { feature });
-              onClose();
-              router.push('/account/billing?utm_source=paywall&utm_medium=modal');
-            }}
-          >
-            Passer à Premium
-          </Button>
+          {variant === 'business-support' ? (
+            <a
+              href={businessQuotaMailto(cvCount, cvLimit, userEmail)}
+              data-testid="paywall-contact-support"
+              className={cn(buttonVariants({ variant: 'primary' }), 'w-full sm:w-auto')}
+              onClick={() => {
+                track('cv_limit_support_clicked', { cvCount, cvLimit });
+                onClose();
+              }}
+            >
+              Contacter le support
+            </a>
+          ) : (
+            <Button
+              type="button"
+              data-testid="paywall-upgrade"
+              className="w-full border-0 bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-1 hover:from-purple-700 hover:to-blue-700 sm:w-auto"
+              onClick={() => {
+                track('paywall_cta_clicked', { feature, variant });
+                onClose();
+                router.push('/account/billing?utm_source=paywall&utm_medium=modal');
+              }}
+            >
+              {variant === 'business-upgrade' ? 'Passer à Business' : 'Passer à Premium'}
+            </Button>
+          )}
         </DialogFooter>
 
-        <p className="text-center text-xs text-content-muted dark:text-neutral-500">
-          Premiers 14 jours gratuits
-        </p>
+        {/* The trial only comes with a first subscription. */}
+        {tier === 'free' ? (
+          <p className="text-center text-xs text-content-muted dark:text-neutral-500">
+            Premiers 14 jours gratuits
+          </p>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

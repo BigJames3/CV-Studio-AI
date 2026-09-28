@@ -21,9 +21,9 @@ export function MarketingHeader() {
           <Link href="/pricing" className="text-[#A8C5BE] hover:text-white">
             Pricing
           </Link>
-          <a href="/#faq" className="text-[#A8C5BE] hover:text-white">
+          <Link href="/#faq" className="text-[#A8C5BE] hover:text-white">
             FAQ
-          </a>
+          </Link>
         </nav>
         <div className="flex items-center gap-2">
           <Link href="/login" className="px-3 text-sm font-medium text-[#A8C5BE] hover:text-white">

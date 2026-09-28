@@ -25,11 +25,12 @@ type PublicCv = {
   updatedAt: string;
 };
 
-export async function generateMetadata({ params }: { params: { slug: string } }) {
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
   return createPageMetadata({
-    title: `CV · ${params.slug}`,
+    title: `CV · ${slug}`,
     description: 'CV public partagé via CV Studio AI',
-    path: `/s/${params.slug}`,
+    path: `/s/${slug}`,
   });
 }
 
@@ -45,8 +46,9 @@ async function fetchPublicCv(slug: string): Promise<PublicCv | null> {
   }
 }
 
-export default async function PublicCvPage({ params }: { params: { slug: string } }) {
-  const cv = await fetchPublicCv(params.slug);
+export default async function PublicCvPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const cv = await fetchPublicCv(slug);
 
   if (!cv) {
     return (

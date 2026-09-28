@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { InvoiceHistory } from '@/components/billing/invoice-history';
 import { BillingPlansSkeleton, PlanGrid } from '@/components/billing/plan-grid';
 import { queryKeys, subscriptionsApi, paymentsApi, plansApi, invoicesApi } from '@/lib/api';
-import { FALLBACK_PLANS } from '@/lib/billing/plans-catalog';
+import { FALLBACK_PLANS, SUPPORT_BUSINESS_MAILTO } from '@/lib/billing/plans-catalog';
 import {
   billingPortalErrorMessage,
   checkoutErrorMessage,
@@ -430,7 +430,7 @@ function BillingPageContent() {
               équipe.
             </p>
             <a
-              href="mailto:support@cvstudio.ai?subject=Support%20Business%20-%20CV%20Studio"
+              href={SUPPORT_BUSINESS_MAILTO}
               className="mt-4 inline-flex min-h-10 items-center rounded-md bg-content-primary px-4 text-sm font-medium text-white hover:opacity-90"
             >
               Contactez le support

@@ -374,6 +374,18 @@ jobs:
           temporaryPublicStorage: true
           runs: 3
 
+      # Mobile profile (slow 4G, 4x CPU): the desktop run above missed a 5.6 s landing LCP.
+      # Thresholds leave headroom over the measured values (landing 2.6 s, pricing 2.3 s,
+      # marketplace 3.7 s) so they catch regressions without flaking; tighten them over time.
+      - name: Lighthouse CI (mobile)
+        uses: treosh/lighthouse-ci-action@v12
+        with:
+          configPath: './lighthouserc.mobile.json'
+          uploadArtifacts: true
+          artifactName: lighthouse-results-mobile
+          temporaryPublicStorage: true
+          runs: 3
+
       # --------------------------------------------------------
       # Diagnostics when Lighthouse fails
       # --------------------------------------------------------

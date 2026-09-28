@@ -34,7 +34,23 @@
 }
 
 @layer utilities {
+  /* Landing hero entrance, in CSS so the landing page needs no animation JS. */
+  .landing-fade-up {
+    animation: landing-fade-up 0.6s ease-out both;
+  }
+
   .cv-page-enter {
     animation: cv-fade-in var(--cv-duration-moderate) var(--cv-easing-in-out);
+  }
+}
+
+@keyframes landing-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }

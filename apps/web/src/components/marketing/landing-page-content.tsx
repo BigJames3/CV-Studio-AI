@@ -1,9 +1,6 @@
-'use client';
-
-import { useState } from 'react';
 import Link from 'next/link';
-import { motion, useReducedMotion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import { LandingFaq } from './landing-faq';
 
 const features = [
   {
@@ -62,15 +59,7 @@ const faqs = [
   },
 ];
 
-const fadeUp = {
-  hidden: { opacity: 0, y: 24 },
-  show: { opacity: 1, y: 0 },
-};
-
 export function LandingPageContent() {
-  const reduce = useReducedMotion();
-  const [openFaq, setOpenFaq] = useState<number | null>(0);
-
   return (
     <>
       <section className="relative min-h-[100svh] overflow-hidden bg-[#0B1F2A] text-[#F4F7F6]">
@@ -92,35 +81,22 @@ export function LandingPageContent() {
         />
 
         <div className="relative mx-auto flex min-h-[100svh] max-w-content flex-col justify-end px-4 pb-16 pt-28 md:justify-center md:pb-24">
-          <motion.p
-            className="font-[family-name:var(--font-landing-display)] text-5xl font-semibold tracking-tight md:text-7xl lg:text-8xl"
-            initial={reduce ? false : { opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7 }}
-          >
+          {/* The hero text is the LCP element: no entrance animation, so it paints with the HTML. */}
+          <p className="font-[family-name:var(--font-landing-display)] text-5xl font-semibold tracking-tight md:text-7xl lg:text-8xl">
             CV Studio AI
-          </motion.p>
-          <motion.h1
-            className="mt-6 max-w-2xl text-2xl font-medium leading-snug text-[#D7E8E4] md:text-3xl"
-            initial={reduce ? false : { opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.12 }}
-          >
+          </p>
+          <h1 className="mt-6 max-w-2xl text-2xl font-medium leading-snug text-[#D7E8E4] md:text-3xl">
             Des CV qui passent les filtres.
-          </motion.h1>
-          <motion.p
-            className="mt-4 max-w-xl text-base text-[#A8C5BE] md:text-lg"
-            initial={reduce ? false : { opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.22 }}
+          </h1>
+          <p
+            className="landing-fade-up mt-4 max-w-xl text-base text-[#A8C5BE] md:text-lg"
+            style={{ animationDelay: '220ms' }}
           >
             Créez un CV ATS-ready, adapté à chaque offre, en 15 minutes — avec aperçu live.
-          </motion.p>
-          <motion.div
-            className="mt-10 flex flex-wrap gap-3"
-            initial={reduce ? false : { opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
+          </p>
+          <div
+            className="landing-fade-up mt-10 flex flex-wrap gap-3"
+            style={{ animationDelay: '300ms' }}
           >
             <Link href="/register">
               <Button size="lg" className="bg-[#F4F7F6] text-[#0B1F2A] hover:bg-white">
@@ -136,15 +112,12 @@ export function LandingPageContent() {
                 Voir les modèles
               </Button>
             </Link>
-          </motion.div>
+          </div>
         </div>
 
-        <motion.div
+        <div
           className="pointer-events-none absolute inset-x-0 bottom-0 h-[38vh] bg-gradient-to-t from-[#0B1F2A] via-transparent to-transparent md:h-[42vh]"
           aria-hidden
-          initial={reduce ? false : { opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 1, delay: 0.2 }}
         />
       </section>
 
@@ -158,18 +131,11 @@ export function LandingPageContent() {
             sécurisé — sans clutter marketing.
           </p>
           <div className="mt-14 grid gap-10 md:grid-cols-2">
-            {features.map((f, i) => (
-              <motion.div
-                key={f.title}
-                variants={fadeUp}
-                initial={reduce ? false : 'hidden'}
-                whileInView="show"
-                viewport={{ once: true, margin: '-40px' }}
-                transition={{ duration: 0.45, delay: i * 0.06 }}
-              >
+            {features.map((f) => (
+              <div key={f.title}>
                 <h3 className="text-xl font-semibold text-[#0B1F2A]">{f.title}</h3>
                 <p className="mt-2 text-[#4A5F5A]">{f.body}</p>
-              </motion.div>
+              </div>
             ))}
           </div>
         </div>
@@ -200,20 +166,13 @@ export function LandingPageContent() {
             Ils l’utilisent déjà
           </h2>
           <div className="mt-12 grid gap-10 md:grid-cols-3">
-            {testimonials.map((t, i) => (
-              <motion.blockquote
-                key={t.name}
-                className="border-l-2 border-[#0D9488] pl-5"
-                initial={reduce ? false : { opacity: 0, x: -8 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.08 }}
-              >
+            {testimonials.map((t) => (
+              <blockquote key={t.name} className="border-l-2 border-[#0D9488] pl-5">
                 <p className="text-[#0B1F2A]">“{t.quote}”</p>
                 <footer className="mt-4 text-sm text-[#4A5F5A]">
                   {t.name} — {t.role}
                 </footer>
-              </motion.blockquote>
+              </blockquote>
             ))}
           </div>
         </div>
@@ -224,27 +183,7 @@ export function LandingPageContent() {
           <h2 className="font-[family-name:var(--font-landing-display)] text-3xl text-[#0B1F2A] md:text-4xl">
             FAQ
           </h2>
-          <div className="mt-10 divide-y divide-[#D5E0DC]">
-            {faqs.map((item, i) => {
-              const open = openFaq === i;
-              return (
-                <div key={item.q} className="py-4">
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between gap-4 text-left text-lg font-medium text-[#0B1F2A]"
-                    aria-expanded={open}
-                    onClick={() => setOpenFaq(open ? null : i)}
-                  >
-                    {item.q}
-                    <span aria-hidden className="text-[#0D9488]">
-                      {open ? '−' : '+'}
-                    </span>
-                  </button>
-                  {open && <p className="mt-3 max-w-2xl text-[#4A5F5A]">{item.a}</p>}
-                </div>
-              );
-            })}
-          </div>
+          <LandingFaq items={faqs} />
         </div>
       </section>
 

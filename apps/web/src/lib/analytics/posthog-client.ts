@@ -1,10 +1,13 @@
 'use client';
 
-import posthog from 'posthog-js';
+import type { PostHog } from 'posthog-js';
 
 const CONSENT_KEY = 'cv_analytics_consent';
 
 let initialized = false;
+let client: PostHog | null = null;
+// posthog-js (~80 KB) is loaded on demand, after hydration, so it never delays the first render.
+let loading: Promise<PostHog | null> | null = null;
 
 function projectKey(): string | undefined {
   const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
@@ -14,6 +17,17 @@ function projectKey(): string | undefined {
 
 function apiHost(): string {
   return process.env.NEXT_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com';
+}
+
+/** Runs now once PostHog is loaded, or when it finishes loading (calls keep their order). */
+function withClient(fn: (ph: PostHog) => void): void {
+  if (client) {
+    fn(client);
+    return;
+  }
+  void loading?.then((ph) => {
+    if (ph) fn(ph);
+  });
 }
 
 /** Dev captures by default so local validation works. Prod requires consent. */
@@ -40,34 +54,42 @@ export function initPostHog(): void {
   if (!key) return;
 
   initialized = true;
-  posthog.init(key, {
-    api_host: apiHost(),
-    person_profiles: 'identified_only',
-    capture_pageview: false,
-    capture_pageleave: true,
-    persistence: 'localStorage+cookie',
-    opt_out_capturing_by_default: true,
-    loaded: (ph) => {
-      if (shouldAutoEnable()) {
-        ph.opt_in_capturing();
-      }
-    },
-  });
+  loading = import('posthog-js')
+    .then(({ default: posthog }) => {
+      posthog.init(key, {
+        api_host: apiHost(),
+        person_profiles: 'identified_only',
+        capture_pageview: false,
+        capture_pageleave: true,
+        persistence: 'localStorage+cookie',
+        opt_out_capturing_by_default: true,
+        loaded: (ph) => {
+          if (shouldAutoEnable()) {
+            ph.opt_in_capturing();
+          }
+        },
+      });
+      client = posthog;
+      return posthog;
+    })
+    .catch(() => null);
 }
 
 export function optInPostHog(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(CONSENT_KEY, 'granted');
   if (!initialized) initPostHog();
-  if (initialized) posthog.opt_in_capturing();
+  if (initialized) withClient((ph) => ph.opt_in_capturing());
 }
 
 export function optOutPostHog(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(CONSENT_KEY, 'denied');
   if (initialized) {
-    posthog.opt_out_capturing();
-    posthog.reset();
+    withClient((ph) => {
+      ph.opt_out_capturing();
+      ph.reset();
+    });
   }
 }
 
@@ -76,7 +98,7 @@ export function identifyPostHog(
   traits?: Record<string, string | number | boolean | null | undefined>
 ): void {
   if (!initialized) return;
-  posthog.identify(userId, traits);
+  withClient((ph) => ph.identify(userId, traits));
 }
 
 export function capturePostHog(
@@ -84,12 +106,10 @@ export function capturePostHog(
   properties?: Record<string, string | number | boolean | null | undefined>
 ): void {
   if (!initialized) return;
-  posthog.capture(event, properties);
+  withClient((ph) => ph.capture(event, properties));
 }
 
 export function resetPostHog(): void {
   if (!initialized) return;
-  posthog.reset();
+  withClient((ph) => ph.reset());
 }
-
-export { posthog };

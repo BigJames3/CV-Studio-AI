@@ -62,9 +62,11 @@ jobs:
         run: |
           aws eks update-kubeconfig --name cvstudio-staging --region $AWS_REGION
           cd infrastructure/k8s/overlays/staging
+          # The manifests name images after a placeholder registry: that is the name to replace.
+          PLACEHOLDER=000000000000.dkr.ecr.eu-west-1.amazonaws.com
           kustomize edit set image \
-            $ECR_REGISTRY/cvstudio/api=${{ env.ECR_REGISTRY }}/cvstudio/api:${{ steps.meta.outputs.sha }} \
-            $ECR_REGISTRY/cvstudio/web=${{ env.ECR_REGISTRY }}/cvstudio/web:${{ steps.meta.outputs.sha }}
+            $PLACEHOLDER/cvstudio/api=$ECR_REGISTRY/cvstudio/api:${{ steps.meta.outputs.sha }} \
+            $PLACEHOLDER/cvstudio/web=$ECR_REGISTRY/cvstudio/web:${{ steps.meta.outputs.sha }}
           kubectl apply -k .
           kubectl -n cvstudio rollout status deploy/api --timeout=180s
           kubectl -n cvstudio rollout status deploy/web --timeout=180s

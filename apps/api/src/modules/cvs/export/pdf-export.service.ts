@@ -279,8 +279,11 @@ export class PdfExportService {
     }
   }
 
+  /**
+   * Redis is the source of truth, so every API pod sees the same job. Memory only keeps
+   * jobs this pod could not write to Redis, and is emptied once a write succeeds.
+   */
   private async saveJob(job: StoredPdfJob): Promise<void> {
-    this.memoryJobs.set(job.jobId, job);
     try {
       const { buffer, ...rest } = job;
       await this.redis.set(
@@ -291,27 +294,25 @@ export class PdfExportService {
         }),
         JOB_TTL_SECONDS
       );
+      this.memoryJobs.delete(job.jobId);
     } catch {
-      /* memory fallback */
+      this.memoryJobs.set(job.jobId, job);
     }
   }
 
   private async getJob(jobId: string): Promise<StoredPdfJob | null> {
-    const mem = this.memoryJobs.get(jobId);
-    if (mem) return mem;
     try {
       const raw = await this.redis.get(`pdf:job:${jobId}`);
-      if (!raw) return null;
+      if (!raw) return this.memoryJobs.get(jobId) ?? null;
       const parsed = JSON.parse(raw) as StoredPdfJob & { bufferB64?: string };
       const { bufferB64: _b64, ...rest } = parsed;
       const job: StoredPdfJob = {
         ...rest,
         buffer: parsed.bufferB64 ? Buffer.from(parsed.bufferB64, 'base64') : undefined,
       };
-      this.memoryJobs.set(jobId, job);
       return job;
     } catch {
-      return null;
+      return this.memoryJobs.get(jobId) ?? null;
     }
   }
 

@@ -11,7 +11,7 @@ import {
 import Stripe from 'stripe';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.module';
-import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { LIVE_STRIPE_STATUSES, SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { MailService } from '../../mail/mail.service';
 import { StripeWebhookStoreService } from './stripe-webhook-store.service';
 import { StripeAlertService } from './stripe-alert.service';
@@ -346,7 +346,7 @@ export class PaymentsService {
     const stripeCustomerId =
       expandableStripeId(session.customer) ?? expandableStripeId(stripeSub.customer);
 
-    await this.cancelSupersededSubscription(userId, stripeSub.id);
+    await this.cancelSupersededSubscriptions(userId, stripeSub.id, stripeCustomerId);
 
     const period = subscriptionPeriod(stripeSub);
     await this.subscriptions.applyPaidEntitlement({
@@ -433,29 +433,62 @@ export class PaymentsService {
   }
 
   /**
-   * If the user already had another live Stripe subscription (two Checkout tabs completed),
-   * cancel it with a prorated credit so the customer is never billed twice.
-   * Runs before the new subscription is recorded, so a retry still sees the previous id.
+   * One live Stripe subscription per user: when a Checkout completes, every other live
+   * subscription of the user is canceled with a prorated credit, so the customer is never billed
+   * twice. Candidates come from the database (the subscription it knows) and from Stripe (every
+   * subscription of the customer): Checkouts completed before the previous one was recorded
+   * (webhook late or missed, several tabs) are only visible in Stripe.
+   * Runs before the new subscription is recorded, so a retry still sees the previous ones.
    */
-  private async cancelSupersededSubscription(userId: string, newStripeSubId: string) {
+  private async cancelSupersededSubscriptions(
+    userId: string,
+    newStripeSubId: string,
+    stripeCustomerId: string | null | undefined
+  ) {
+    const stripe = this.stripe!;
+    const live = new Set<string>();
+
     const local = await this.prisma.subscription.findUnique({ where: { userId } });
-    const previousId = local?.stripeSubscriptionId;
-    if (!previousId || previousId === newStripeSubId) return;
-
-    let previous: Stripe.Subscription;
-    try {
-      previous = await this.stripe!.subscriptions.retrieve(previousId);
-    } catch (error) {
-      if ((error as { code?: string } | null)?.code === 'resource_missing') return;
-      throw error;
+    const recordedId = local?.stripeSubscriptionId;
+    if (recordedId && recordedId !== newStripeSubId) {
+      try {
+        const recorded = await stripe.subscriptions.retrieve(recordedId);
+        if (LIVE_STRIPE_STATUSES.has(recorded.status)) live.add(recorded.id);
+      } catch (error) {
+        if ((error as { code?: string } | null)?.code !== 'resource_missing') throw error;
+      }
     }
-    if (previous.status === 'canceled' || previous.status === 'incomplete_expired') return;
 
-    await this.stripe!.subscriptions.cancel(previousId, { prorate: true });
-    this.logger.warn(
-      `Canceled superseded Stripe subscription ${previousId} for user ${userId} ` +
-        `(replaced by ${newStripeSubId})`
-    );
+    if (stripeCustomerId) {
+      // A Stripe error throws: the event is retried rather than recorded next to a duplicate.
+      const subs = await stripe.subscriptions.list({
+        customer: stripeCustomerId,
+        status: 'all',
+        limit: 100,
+      });
+      for (const sub of subs.data) {
+        if (sub.id !== newStripeSubId && LIVE_STRIPE_STATUSES.has(sub.status)) live.add(sub.id);
+      }
+    }
+
+    for (const id of live) {
+      await stripe.subscriptions.cancel(id, { prorate: true });
+      this.logger.warn(
+        `Canceled superseded Stripe subscription ${id} for user ${userId} ` +
+          `(replaced by ${newStripeSubId})`
+      );
+    }
+    const unrecorded = [...live].filter((id) => id !== recordedId);
+    if (unrecorded.length > 0) {
+      // A plan change replaces the recorded subscription; anything else is a duplicate that
+      // got through (webhook missed, two tabs): worth a look.
+      emitSecurityAlert({
+        id: 'PAY-04',
+        severity: 'P2',
+        message: 'Duplicate Stripe subscriptions canceled',
+        extra: { userId, kept: newStripeSubId, canceled: [...live] },
+      });
+    }
   }
 
   /**

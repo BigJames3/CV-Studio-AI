@@ -19,7 +19,8 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: webhook-retry
-              image: cvstudioai/api:latest
+              # Same image and tag as the API: the overlays / CD set the tag of this placeholder.
+              image: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/api:sha-replace
               imagePullPolicy: IfNotPresent
               envFrom:
                 - secretRef:

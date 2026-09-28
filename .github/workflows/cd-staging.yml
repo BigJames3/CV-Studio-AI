@@ -43,11 +43,6 @@ jobs:
           docker build -t $ECR_REGISTRY/cvstudio/web:${{ steps.meta.outputs.sha }} -f apps/web/Dockerfile .
           docker push $ECR_REGISTRY/cvstudio/web:${{ steps.meta.outputs.sha }}
 
-      - name: Build & push Worker
-        run: |
-          docker build -t $ECR_REGISTRY/cvstudio/worker:${{ steps.meta.outputs.sha }} -f apps/api/Dockerfile.worker apps/api
-          docker push $ECR_REGISTRY/cvstudio/worker:${{ steps.meta.outputs.sha }}
-
       - name: Trivy image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -67,14 +62,16 @@ jobs:
         run: |
           aws eks update-kubeconfig --name cvstudio-staging --region $AWS_REGION
           cd infrastructure/k8s/overlays/staging
+          # The manifests name images after a placeholder registry: that is the name to replace.
+          PLACEHOLDER=000000000000.dkr.ecr.eu-west-1.amazonaws.com
           kustomize edit set image \
-            $ECR_REGISTRY/cvstudio/api=${{ env.ECR_REGISTRY }}/cvstudio/api:${{ steps.meta.outputs.sha }} \
-            $ECR_REGISTRY/cvstudio/web=${{ env.ECR_REGISTRY }}/cvstudio/web:${{ steps.meta.outputs.sha }} \
-            $ECR_REGISTRY/cvstudio/worker=${{ env.ECR_REGISTRY }}/cvstudio/worker:${{ steps.meta.outputs.sha }}
+            $PLACEHOLDER/cvstudio/api=$ECR_REGISTRY/cvstudio/api:${{ steps.meta.outputs.sha }} \
+            $PLACEHOLDER/cvstudio/web=$ECR_REGISTRY/cvstudio/web:${{ steps.meta.outputs.sha }}
           kubectl apply -k .
           kubectl -n cvstudio rollout status deploy/api --timeout=180s
           kubectl -n cvstudio rollout status deploy/web --timeout=180s
-          kubectl -n cvstudio rollout status deploy/worker --timeout=180s || true
+          # worker-pdf runs the API image (infrastructure/k8s/base/workers.yaml): same tag.
+          kubectl -n cvstudio rollout status deploy/worker-pdf --timeout=180s
 
       - name: Smoke
         run: |
@@ -90,10 +87,10 @@ jobs:
           aws eks update-kubeconfig --name cvstudio-staging --region $AWS_REGION || true
           kubectl -n cvstudio rollout undo deploy/api || true
           kubectl -n cvstudio rollout undo deploy/web || true
-          kubectl -n cvstudio rollout undo deploy/worker || true
+          kubectl -n cvstudio rollout undo deploy/worker-pdf || true
           kubectl -n cvstudio rollout status deploy/api --timeout=180s || true
           kubectl -n cvstudio rollout status deploy/web --timeout=180s || true
-          kubectl -n cvstudio rollout status deploy/worker --timeout=180s || true
+          kubectl -n cvstudio rollout status deploy/worker-pdf --timeout=180s || true
           curl -fsS https://api.staging.cvstudio.ai/api/v1/health/ready || echo "::error::Staging health failed after rollback"
 
       - name: Slack on failure

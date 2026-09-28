@@ -58,7 +58,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.sha }}
         run: |
           present=true
-          for repo in cvstudio/api cvstudio/web cvstudio/worker; do
+          for repo in cvstudio/api cvstudio/web; do
             if ! aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
               present=false
             fi
@@ -73,16 +73,14 @@ jobs:
         run: |
           docker build -t "$REG/cvstudio/api:$TAG" -f apps/api/Dockerfile .
           docker build -t "$REG/cvstudio/web:$TAG" -f apps/web/Dockerfile .
-          docker build -t "$REG/cvstudio/worker:$TAG" -f apps/api/Dockerfile.worker apps/api
           docker push "$REG/cvstudio/api:$TAG"
           docker push "$REG/cvstudio/web:$TAG"
-          docker push "$REG/cvstudio/worker:$TAG"
 
       - name: Verify images exist in ECR
         env:
           TAG: ${{ steps.tag.outputs.sha }}
         run: |
-          for repo in cvstudio/api cvstudio/web cvstudio/worker; do
+          for repo in cvstudio/api cvstudio/web; do
             aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$TAG" \
               --query 'imageDetails[0].imageTags' --output text
           done
@@ -145,14 +143,15 @@ jobs:
         run: |
           kubectl -n cvstudio patch svc api -p '{"spec":{"selector":{"app":"api","version":"green"}}}'
 
-      - name: Roll web + worker
+      - name: Roll web + PDF worker
         run: |
           REG="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-west-1.amazonaws.com"
           TAG="${{ steps.tag.outputs.sha }}"
           kubectl -n cvstudio set image deploy/web web=$REG/cvstudio/web:$TAG
-          kubectl -n cvstudio set image deploy/worker worker=$REG/cvstudio/worker:$TAG || true
+          # worker-pdf runs the API image (infrastructure/k8s/base/workers.yaml).
+          kubectl -n cvstudio set image deploy/worker-pdf worker=$REG/cvstudio/api:$TAG
           kubectl -n cvstudio rollout status deploy/web --timeout=300s
-          kubectl -n cvstudio rollout status deploy/worker --timeout=300s || true
+          kubectl -n cvstudio rollout status deploy/worker-pdf --timeout=300s
 
       - name: Post-flip public smoke
         run: |
@@ -187,10 +186,10 @@ jobs:
           kubectl -n cvstudio scale deploy/api --replicas=3 || true
           kubectl -n cvstudio scale deploy/api-green --replicas=0 || true
           kubectl -n cvstudio rollout undo deploy/web || true
-          kubectl -n cvstudio rollout undo deploy/worker || true
+          kubectl -n cvstudio rollout undo deploy/worker-pdf || true
           kubectl -n cvstudio rollout status deploy/api --timeout=180s || true
           kubectl -n cvstudio rollout status deploy/web --timeout=180s || true
-          kubectl -n cvstudio rollout status deploy/worker --timeout=180s || true
+          kubectl -n cvstudio rollout status deploy/worker-pdf --timeout=180s || true
           echo "Post-rollback smoke"
           curl -fsS https://api.cvstudio.ai/api/v1/health/ready || echo "::error::Blue health failed after rollback"
           curl -fsS -o /dev/null -w "%{http_code}\n" https://cvstudio.ai/ || true

@@ -19,9 +19,8 @@ pnpm docker:app     # optional: also build/run api+web (profile app)
 
 Application images live under **`apps/`** (not duplicated here):
 
-- `apps/api/Dockerfile`
+- `apps/api/Dockerfile` (API and PDF worker: `node dist/worker.js`)
 - `apps/web/Dockerfile`
-- `apps/api/Dockerfile.worker`
 
 Compose `app` profile builds with:
 

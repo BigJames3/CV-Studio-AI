@@ -18,7 +18,7 @@ kubectl -n cvstudio get deploy,svc,pods
 kubectl -n cvstudio rollout history deploy/api
 kubectl -n cvstudio rollout history deploy/api-green
 kubectl -n cvstudio rollout history deploy/web
-kubectl -n cvstudio rollout history deploy/worker
+kubectl -n cvstudio rollout history deploy/worker-pdf
 
 # 1. Send API traffic back to blue BEFORE scaling green to 0
 kubectl -n cvstudio patch svc api -p '{"spec":{"selector":{"app":"api","version":"blue"}}}'
@@ -26,11 +26,11 @@ kubectl -n cvstudio scale deploy/api --replicas=3
 kubectl -n cvstudio scale deploy/api-green --replicas=0
 kubectl -n cvstudio rollout status deploy/api --timeout=5m
 
-# 2. Web + worker previous ReplicaSet
+# 2. Web + PDF worker previous ReplicaSet
 kubectl -n cvstudio rollout undo deploy/web
-kubectl -n cvstudio rollout undo deploy/worker
+kubectl -n cvstudio rollout undo deploy/worker-pdf
 kubectl -n cvstudio rollout status deploy/web --timeout=5m
-kubectl -n cvstudio rollout status deploy/worker --timeout=5m
+kubectl -n cvstudio rollout status deploy/worker-pdf --timeout=5m
 ```
 
 Do not `kubectl rollout undo` on green while the Service still selects `green` if green pods were already scaled to 0 — patch the Service to blue first.

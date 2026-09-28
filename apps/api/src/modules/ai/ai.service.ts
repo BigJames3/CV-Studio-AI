@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -9,6 +10,8 @@ import {
   runAiFeature,
   resolveModel,
   type AiFeature,
+  type AiRequest,
+  type AiResponse,
   type OptimizeResumeResult,
   type CoverLetterResult,
   type AtsExplainResult,
@@ -45,10 +48,21 @@ type CvInsightFeature = keyof CvInsightResults;
 
 @Injectable()
 export class AiService {
+  private readonly logger = new Logger(AiService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly quotas: AiQuotaService
   ) {}
+
+  /** Runs the gateway; why OpenAI was skipped is logged here and never returned to the client. */
+  private async callGateway(req: AiRequest): Promise<AiResponse> {
+    const { providerError, ...response } = await runAiFeature(req);
+    if (providerError) {
+      this.logger.warn(`OpenAI skipped for ${req.feature}, rule-based fallback: ${providerError}`);
+    }
+    return response;
+  }
 
   async generateCv(userId: string, dto: GenerateCvDto) {
     return this.queued('generate-cv', userId, dto);
@@ -66,7 +80,7 @@ export class AiService {
 
     const quota = await this.quotas.reserveOptimizeQuota(userId, dto.cvId);
     return this.withReservation(quota, async () => {
-      const gateway = await runAiFeature({
+      const gateway = await this.callGateway({
         feature: 'optimize-resume',
         userId,
         locale: 'en',
@@ -128,7 +142,7 @@ export class AiService {
     const cv = await this.assertCvOwnership(userId, dto.cvId);
     const quota = await this.quotas.reserveCoverLetterQuota(userId, dto.cvId);
     return this.withReservation(quota, async () => {
-      const gateway = await runAiFeature({
+      const gateway = await this.callGateway({
         feature: 'cover-letter',
         userId,
         locale: 'en',
@@ -210,7 +224,7 @@ export class AiService {
       const atsScore =
         tokens.length === 0 ? 70 : Math.round((matched / Math.max(tokens.length, 1)) * 1000) / 10;
 
-      const explainGateway = await runAiFeature({
+      const explainGateway = await this.callGateway({
         feature: 'ats',
         userId,
         locale: 'en',
@@ -298,7 +312,7 @@ export class AiService {
   async grammarCheck(userId: string, dto: GrammarCheckDto) {
     const quota = await this.quotas.reserveOptimizeQuota(userId);
     return this.withReservation(quota, async () => {
-      const gateway = await runAiFeature({
+      const gateway = await this.callGateway({
         feature: 'grammar-check',
         userId,
         locale: dto.locale,
@@ -395,7 +409,7 @@ export class AiService {
     const cv = await this.assertCvOwnership(userId, cvId);
     const quota = await this.quotas.reserveOptimizeQuota(userId, cvId);
     return this.withReservation(quota, async () => {
-      const gateway = await runAiFeature({
+      const gateway = await this.callGateway({
         feature,
         userId,
         locale: 'en',

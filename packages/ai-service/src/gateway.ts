@@ -28,7 +28,15 @@ export type AiResponse = {
   model?: string;
   tokensUsed?: number;
   provider?: 'heuristic' | 'openai';
+  /**
+   * Why OpenAI was skipped, for server logs only. Never send it to clients: it can hold the
+   * provider's raw error body. Clients only get the `openai_fallback` warning.
+   */
+  providerError?: string;
 };
+
+/** The only trace of an OpenAI failure that reaches the client (and the stored AI history). */
+export const OPENAI_FALLBACK_WARNING = 'openai_fallback';
 
 export type AiProviderMode = 'heuristic' | 'openai';
 
@@ -113,12 +121,13 @@ async function runOptimizeResume(req: AiRequest): Promise<AiResponse> {
         ok: fallback.ok,
         data: {
           ...fallback,
-          warnings: [...fallback.warnings, `openai_fallback: ${message}`],
+          warnings: [...fallback.warnings, OPENAI_FALLBACK_WARNING],
         } satisfies OptimizeResumeResult,
         model: resolveModel('optimize-resume'),
         tokensUsed: 0,
         provider: 'heuristic',
-        error: fallback.ok ? undefined : fallback.refusals.join('; ') || message,
+        error: fallback.ok ? undefined : fallback.refusals.join('; ') || 'Optimization failed',
+        providerError: message,
       };
     }
   }
@@ -209,9 +218,9 @@ async function runGrammarCheck(req: AiRequest): Promise<AiResponse> {
     text: typeof req.payload.text === 'string' ? req.payload.text : '',
     locale: req.locale,
   };
-  const fallback = (warning?: string): AiResponse => {
+  const fallback = (providerError?: string): AiResponse => {
     const result: GrammarCheckResult = grammarCheckHeuristic(input);
-    if (warning) result.warnings.push(warning);
+    if (providerError) result.warnings.push(OPENAI_FALLBACK_WARNING);
     return {
       ok: result.ok,
       data: result,
@@ -219,6 +228,7 @@ async function runGrammarCheck(req: AiRequest): Promise<AiResponse> {
       tokensUsed: 0,
       provider: 'heuristic',
       error: result.ok ? undefined : result.refusals.join('; '),
+      providerError,
     };
   };
 
@@ -229,7 +239,7 @@ async function runGrammarCheck(req: AiRequest): Promise<AiResponse> {
     return { ok: true, data: result, model, tokensUsed, provider: 'openai' };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'OpenAI provider failed';
-    return fallback(`openai_fallback: ${message}`);
+    return fallback(message);
   }
 }
 

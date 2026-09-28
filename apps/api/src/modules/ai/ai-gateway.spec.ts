@@ -13,6 +13,11 @@ import {
   resolveProviderMode,
   runAiFeature,
   skillsSuggestHeuristic,
+  OpenAiUnavailableError,
+  resetOpenAiCircuit,
+  OPENAI_CIRCUIT_OPEN_MS,
+  OPENAI_CIRCUIT_THRESHOLD,
+  OPENAI_DEFAULT_TIMEOUT_MS,
 } from '@cvstudio/ai-service';
 
 describe('@cvstudio/ai-service optimize-resume gateway', () => {
@@ -381,6 +386,7 @@ describe('@cvstudio/ai-service grammar check rules (AI-001 step 2)', () => {
 
 describe('@cvstudio/ai-service grammar check with OpenAI (AI-001 step 2)', () => {
   const env = { OPENAI_API_KEY: 'sk-test' };
+  beforeEach(() => resetOpenAiCircuit());
   const reply = (content: unknown, ok = true) =>
     jest.fn().mockResolvedValue({
       ok,
@@ -465,7 +471,10 @@ describe('@cvstudio/ai-service grammar check with OpenAI (AI-001 step 2)', () =>
       expect(response).toMatchObject({ ok: true, provider: 'heuristic' });
       const data = response.data as { correctedText: string; warnings: string[] };
       expect(data.correctedText).toBe('I led the team.');
-      expect(data.warnings.some((w) => w.startsWith('openai_fallback:'))).toBe(true);
+      // The client only learns that the fallback ran; the reason stays server-side.
+      expect(data.warnings).toContain('openai_fallback');
+      expect(data.warnings.join(' ')).not.toMatch(/127\.0\.0\.1|ECONNREFUSED|fetch failed/);
+      expect(response.providerError).toMatch(/OpenAI grammar check request failed: .*fetch failed/);
     } finally {
       process.env = previous;
     }
@@ -518,5 +527,108 @@ describe('@cvstudio/ai-service optimize with OpenAI (shared request helper)', ()
     await expect(
       optimizeResumeWithOpenAi({ bulletText: 'Did X' }, { env: { AI_API_KEY: 'k' }, fetchImpl })
     ).rejects.toThrow(/invalid JSON schema/);
+  });
+});
+
+describe('@cvstudio/ai-service OpenAI timeout and circuit breaker', () => {
+  const text = { text: 'I led a team.' };
+  const ok = () =>
+    jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => '',
+      json: async () => ({
+        choices: [
+          { message: { content: JSON.stringify({ correctedText: 'I led a team.', edits: [] }) } },
+        ],
+      }),
+    });
+  const status = (code: number) =>
+    jest.fn().mockResolvedValue({
+      ok: false,
+      status: code,
+      text: async () => '{"error":{"message":"Incorrect API key provided: sk-proj-****abcd"}}',
+      json: async () => ({}),
+    });
+  /** Never answers; rejects like fetch when the abort signal fires. */
+  const hanging = () =>
+    jest.fn(
+      (_url: string, init?: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+        })
+    );
+
+  beforeEach(() => resetOpenAiCircuit());
+  afterEach(() => jest.restoreAllMocks());
+
+  it('aborts a hanging OpenAI call after AI_REQUEST_TIMEOUT_MS', async () => {
+    const started = Date.now();
+    await expect(
+      grammarCheckWithOpenAi(text, 'en', {
+        env: { OPENAI_API_KEY: 'sk-test', AI_REQUEST_TIMEOUT_MS: '50' },
+        fetchImpl: hanging() as never,
+      })
+    ).rejects.toThrow(/timed out after 50 ms/);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it('uses a 30 s timeout by default', async () => {
+    const fetchImpl = ok();
+    await grammarCheckWithOpenAi(text, 'en', { env: { OPENAI_API_KEY: 'sk-test' }, fetchImpl });
+    const init = fetchImpl.mock.calls[0][1] as { signal?: AbortSignal };
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(OPENAI_DEFAULT_TIMEOUT_MS).toBe(30_000);
+  });
+
+  it('opens after consecutive 5xx/429 failures and skips OpenAI while open', async () => {
+    const env = { OPENAI_API_KEY: 'sk-test' };
+    const failing = status(503);
+    for (let i = 0; i < OPENAI_CIRCUIT_THRESHOLD; i++) {
+      await expect(grammarCheckWithOpenAi(text, 'en', { env, fetchImpl: failing })).rejects.toThrow(
+        /failed \(503\)/
+      );
+    }
+    const healthy = ok();
+    await expect(
+      grammarCheckWithOpenAi(text, 'en', { env, fetchImpl: healthy })
+    ).rejects.toBeInstanceOf(OpenAiUnavailableError);
+    expect(healthy).not.toHaveBeenCalled();
+
+    // After the open window, calls go through again and a success closes the circuit.
+    const now = Date.now();
+    jest.spyOn(Date, 'now').mockReturnValue(now + OPENAI_CIRCUIT_OPEN_MS + 1);
+    await expect(
+      grammarCheckWithOpenAi(text, 'en', { env, fetchImpl: healthy })
+    ).resolves.toBeDefined();
+    expect(healthy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not count client errors (400/401) as an outage', async () => {
+    const env = { OPENAI_API_KEY: 'sk-test' };
+    for (let i = 0; i < OPENAI_CIRCUIT_THRESHOLD + 2; i++) {
+      await expect(
+        grammarCheckWithOpenAi(text, 'en', { env, fetchImpl: status(401) })
+      ).rejects.toThrow(/failed \(401\)/);
+    }
+    const healthy = ok();
+    await grammarCheckWithOpenAi(text, 'en', { env, fetchImpl: healthy });
+    expect(healthy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a success resets the failure count', async () => {
+    const env = { OPENAI_API_KEY: 'sk-test' };
+    for (let i = 0; i < OPENAI_CIRCUIT_THRESHOLD - 1; i++) {
+      await expect(
+        grammarCheckWithOpenAi(text, 'en', { env, fetchImpl: status(500) })
+      ).rejects.toThrow();
+    }
+    await grammarCheckWithOpenAi(text, 'en', { env, fetchImpl: ok() });
+    await expect(
+      grammarCheckWithOpenAi(text, 'en', { env, fetchImpl: status(500) })
+    ).rejects.toThrow(/failed \(500\)/);
+    const healthy = ok();
+    await grammarCheckWithOpenAi(text, 'en', { env, fetchImpl: healthy });
+    expect(healthy).toHaveBeenCalledTimes(1);
   });
 });

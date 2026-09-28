@@ -46,7 +46,7 @@ type PlanRow = {
 export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   {
     name: 'Free',
-    description: '1 CV, 4 templates, no PDF export, no AI',
+    description: '1 CV, 4 templates, ATS score, no PDF export, no AI optimization',
     priceMonthly: 0,
     priceYearly: 0,
     cvLimit: 1,
@@ -119,6 +119,8 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
     { feature: 'downloadPdf', value: String(id !== 'free'), included: id !== 'free' },
     { feature: 'share', value: String(id !== 'free'), included: id !== 'free' },
     { feature: 'aiFeatures', value: String(plan.aiFeatures), included: plan.aiFeatures },
+    // Same rule as the 'ai:ats' entitlement: the ATS score is free on every plan.
+    { feature: 'atsCheck', value: 'true', included: true },
     {
       feature: 'templates',
       value: id === 'free' ? String(FREE_TEMPLATE_COUNT) : 'unlimited',

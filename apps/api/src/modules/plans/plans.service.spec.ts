@@ -71,6 +71,7 @@ describe('mapPlanToPublicDto', () => {
     expect(dto.entitlements.find((e) => e.feature === 'downloadPdf')?.included).toBe(false);
     expect(dto.entitlements.find((e) => e.feature === 'share')?.included).toBe(false);
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(false);
+    expect(dto.entitlements.find((e) => e.feature === 'atsCheck')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'templates')).toEqual({
       feature: 'templates',
       value: '4',

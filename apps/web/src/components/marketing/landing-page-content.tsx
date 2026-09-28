@@ -46,7 +46,7 @@ const testimonials = [
 const faqs = [
   {
     q: 'Le plan Free est-il vraiment utilisable ?',
-    a: 'Oui : 1 CV et 4 templates, modifiables en ligne. L’export PDF, le partage et l’IA sont sur Pro.',
+    a: 'Oui : 1 CV, 4 templates et le score ATS, modifiables en ligne. L’export PDF, le partage et l’optimisation IA sont sur Pro.',
   },
   {
     q: 'Mes données sont-elles sécurisées ?',

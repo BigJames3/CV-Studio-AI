@@ -207,6 +207,7 @@ export type UserProfile = {
   targetRole?: string | null;
   careerLevel?: CareerLevel | null;
   onboardingCompletedAt?: string | null;
+  lifecycleEmailsOptOut?: boolean;
 };
 
 export type CareerLevel = 'student' | 'junior' | 'confirmed' | 'senior';
@@ -233,6 +234,11 @@ export const usersApi = {
     apiClient<UserProfile>('/users/me', { method: 'PATCH', body }),
   updateOnboarding: (body: OnboardingInput) =>
     apiClient<UserProfile>('/users/me/onboarding', { method: 'PATCH', body }),
+  setLifecycleEmails: (enabled: boolean) =>
+    apiClient<UserProfile>('/users/me', {
+      method: 'PATCH',
+      body: { lifecycleEmailsOptOut: !enabled },
+    }),
   deleteMe: () =>
     apiClient<{
       deleted: boolean;
@@ -555,4 +561,14 @@ export const marketplaceApi = {
       country: string;
       displayName: string;
     }>('/marketplace/seller/payouts'),
+};
+
+/** Public: the signed link from a reminder e-mail is the proof (no session needed). */
+export const emailsApi = {
+  unsubscribe: (u: string, t: string) =>
+    apiClient<{ unsubscribed: boolean }>('/emails/unsubscribe', {
+      method: 'POST',
+      body: { u, t },
+      skipRefresh: true,
+    }),
 };

@@ -1,6 +1,6 @@
 import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { Test, TestingModule } from '@nestjs/testing';
+import { Test, TestingModule, TestingModuleBuilder } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
 import { GlobalExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
@@ -8,6 +8,8 @@ import { applyHttpSecurity } from '../src/common/http-security';
 
 export async function createTestApp(opts?: {
   enableTwoFactor?: boolean;
+  /** e.g. `(b) => b.overrideProvider(MailService).useValue(mock)` */
+  configure?: (builder: TestingModuleBuilder) => TestingModuleBuilder;
 }): Promise<INestApplication> {
   process.env.NODE_ENV = 'test';
   process.env.AUTH_RATE_LIMIT_DISABLED = 'true';
@@ -19,9 +21,8 @@ export async function createTestApp(opts?: {
   process.env.ENCRYPTION_KEY =
     process.env.ENCRYPTION_KEY ?? 'test-encryption-key-min-32-characters!!';
 
-  const moduleFixture: TestingModule = await Test.createTestingModule({
-    imports: [AppModule],
-  }).compile();
+  const builder = Test.createTestingModule({ imports: [AppModule] });
+  const moduleFixture: TestingModule = await (opts?.configure?.(builder) ?? builder).compile();
 
   const app = moduleFixture.createNestApplication<NestExpressApplication>({ rawBody: true });
   applyHttpSecurity(app);

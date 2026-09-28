@@ -18,6 +18,7 @@ import { PlansModule } from './modules/plans/plans.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { AiModule } from './modules/ai/ai.module';
+import { LifecycleEmailsModule } from './modules/lifecycle-emails/lifecycle-emails.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { HealthModule } from './modules/health/health.module';
@@ -61,6 +62,7 @@ import { shouldSkipThrottle } from './common/utils/throttle-skip';
     PaymentsModule,
     InvoicesModule,
     AiModule,
+    LifecycleEmailsModule,
     AnalyticsModule,
     MarketplaceModule,
     HealthModule,

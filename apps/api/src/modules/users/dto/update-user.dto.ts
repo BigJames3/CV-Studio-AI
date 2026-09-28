@@ -1,5 +1,13 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength, Matches, MinLength, ValidateIf } from 'class-validator';
+import {
+  IsBoolean,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Matches,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 
 export class UpdateUserDto {
   @ApiPropertyOptional()
@@ -40,4 +48,11 @@ export class UpdateUserDto {
   @MaxLength(2048)
   @Matches(/^https?:\/\/.+/, { message: 'avatarUrl must be an http(s) URL' })
   avatarUrl?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'true stops reminder and tip e-mails (billing notices still sent)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  lifecycleEmailsOptOut?: boolean;
 }

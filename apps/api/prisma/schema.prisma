@@ -211,6 +211,8 @@ model User {
   targetRole                  String?          @map("target_role") @db.VarChar(120)
   careerLevel                 String?          @map("career_level") @db.VarChar(32)
   onboardingCompletedAt       DateTime?        @map("onboarding_completed_at") @db.Timestamptz(6)
+  /// Reminder and tip e-mails (lifecycle-emails module). Billing notices ignore it.
+  lifecycleEmailsOptOut       Boolean          @default(false) @map("lifecycle_emails_opt_out")
   createdAt                   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt                   DateTime?        @map("deleted_at") @db.Timestamptz(6)
@@ -234,6 +236,7 @@ model User {
   teamMembers           TeamMember[]
   collabSessions        CollabSession[]
   collabSnapshots       CollabSnapshot[]     @relation("SnapshotAuthor")
+  lifecycleEmails       LifecycleEmail[]
 
   @@index([subscriptionTier], map: "idx_users_subscription_tier")
   @@index([createdAt], map: "idx_users_created_at")
@@ -984,4 +987,19 @@ model CollabSnapshot {
 
   @@index([cvId, createdAt(sort: Desc)], map: "idx_collab_snapshots_cv")
   @@map("collab_snapshots")
+}
+
+/// One row per lifecycle e-mail sent: each type goes once per user, and the latest sentAt
+/// spaces them out (see apps/api/src/modules/lifecycle-emails).
+model LifecycleEmail {
+  id     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId String   @map("user_id") @db.Uuid
+  type   String   @db.VarChar(40)
+  sentAt DateTime @default(now()) @map("sent_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([userId, type], map: "uq_lifecycle_emails_user_type")
+  @@index([userId, sentAt(sort: Desc)], map: "idx_lifecycle_emails_user_sent")
+  @@map("lifecycle_emails")
 }

@@ -18,6 +18,10 @@ spec:
       labels:
         app: api
         version: green
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9464'
+        prometheus.io/path: '/metrics'
     spec:
       serviceAccountName: api
       # Spread replicas over zones and nodes so one zone or node going down keeps the API up.
@@ -44,6 +48,9 @@ spec:
           ports:
             - containerPort: 3001
               name: http
+            # Prometheus metrics: not in the Service or the Ingress, scraped on the pod IP.
+            - containerPort: 9464
+              name: metrics
           # Same secrets and settings as blue: without them the API refuses to boot.
           envFrom:
             - secretRef:

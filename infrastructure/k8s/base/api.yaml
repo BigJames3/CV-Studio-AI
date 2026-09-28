@@ -19,7 +19,7 @@ spec:
         version: blue
       annotations:
         prometheus.io/scrape: 'true'
-        prometheus.io/port: '3001'
+        prometheus.io/port: '9464'
         prometheus.io/path: '/metrics'
     spec:
       serviceAccountName: api
@@ -48,6 +48,9 @@ spec:
           ports:
             - containerPort: 3001
               name: http
+            # Prometheus metrics: not in the Service or the Ingress, scraped on the pod IP.
+            - containerPort: 9464
+              name: metrics
           envFrom:
             - secretRef:
                 name: api-secrets

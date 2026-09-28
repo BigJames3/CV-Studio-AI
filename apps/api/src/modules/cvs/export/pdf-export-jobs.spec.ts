@@ -119,3 +119,48 @@ describe('PdfExportService async jobs — ownership (BOLA/IDOR)', () => {
     await expect(fresh.getJobBuffer('pdf_legacy', OWNER)).rejects.toBeInstanceOf(NotFoundException);
   });
 });
+
+describe('PdfExportService async jobs — storage', () => {
+  it('reads the status from Redis, so a pod never serves a stale copy', async () => {
+    const redis = makeRedis();
+    const apiPod = makeService(redis);
+    const { jobId } = await apiPod.enqueueFromCvId(OWNER, CV_ID);
+    await flushJob();
+
+    // Another pod (or a worker) updates the shared record.
+    const raw = JSON.parse(redis.store.get(`pdf:job:${jobId}`)!);
+    redis.store.set(`pdf:job:${jobId}`, JSON.stringify({ ...raw, status: 'failed' }));
+
+    await expect(apiPod.getJobStatus(jobId, OWNER)).resolves.toMatchObject({ status: 'failed' });
+  });
+
+  it('keeps jobs in memory only while Redis is unavailable', async () => {
+    const redis = makeRedis();
+    redis.set.mockRejectedValue(new Error('redis down'));
+    redis.get.mockRejectedValue(new Error('redis down'));
+    const service = makeService(redis);
+    const { jobId } = await service.enqueueFromCvId(OWNER, CV_ID);
+    await flushJob();
+
+    await expect(service.getJobStatus(jobId, OWNER)).resolves.toMatchObject({
+      status: 'completed',
+    });
+    const memory = (service as unknown as { memoryJobs: Map<string, unknown> }).memoryJobs;
+    expect(memory.has(jobId)).toBe(true);
+
+    // Redis is back: the next write moves the job there and frees the memory copy.
+    redis.set.mockImplementation(async (key: string, value: string) => {
+      redis.store.set(key, value);
+    });
+    redis.get.mockImplementation(async (key: string) => redis.store.get(key) ?? null);
+    await service.getJobBuffer(jobId, OWNER);
+    await (service as unknown as { patchJob: (id: string, p: object) => Promise<void> }).patchJob(
+      jobId,
+      {}
+    );
+    expect(memory.has(jobId)).toBe(false);
+    await expect(service.getJobStatus(jobId, OWNER)).resolves.toMatchObject({
+      status: 'completed',
+    });
+  });
+});

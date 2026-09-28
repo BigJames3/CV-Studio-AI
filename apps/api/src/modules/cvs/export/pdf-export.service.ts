@@ -12,7 +12,7 @@ import { EntitlementsService } from '../../subscriptions/entitlements.service';
 import { normalizeCvContent } from './normalize-cv-content';
 import { validateCvForExport } from './validate-cv-for-export';
 import { buildPdfHtml, suggestFilename } from './pdf-html.builder';
-import { PdfGeneratorService } from './pdf-generator.service';
+import { PdfRenderQueue } from './pdf-render-queue.service';
 import { optimizeImageForPdf } from './optimize-image';
 import type { ExportPdfOptions, PdfCvContent, PdfPageSize } from './pdf-content.types';
 
@@ -42,7 +42,7 @@ export class PdfExportService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly entitlements: EntitlementsService,
-    private readonly generator: PdfGeneratorService
+    private readonly renderer: PdfRenderQueue
   ) {}
 
   async renderFromContent(
@@ -76,7 +76,7 @@ export class PdfExportService {
       if (cached) {
         return { buffer: cached, filename, warnings: [] };
       }
-      const buffer = await this.generator.htmlToPdf(options.html, {
+      const buffer = await this.renderer.htmlToPdf(options.html, {
         ...options,
         wysiwyg: true,
         includeFooter: false,
@@ -120,7 +120,7 @@ export class PdfExportService {
       title: options.filename,
     });
 
-    const buffer = await this.generator.htmlToPdf(html, {
+    const buffer = await this.renderer.htmlToPdf(html, {
       ...options,
       filename: suggestFilename(cv, options.filename),
       siteUrl: options.siteUrl ?? process.env.APP_URL ?? 'https://cvstudio.ai',
@@ -279,8 +279,11 @@ export class PdfExportService {
     }
   }
 
+  /**
+   * Redis is the source of truth, so every API pod sees the same job. Memory only keeps
+   * jobs this pod could not write to Redis, and is emptied once a write succeeds.
+   */
   private async saveJob(job: StoredPdfJob): Promise<void> {
-    this.memoryJobs.set(job.jobId, job);
     try {
       const { buffer, ...rest } = job;
       await this.redis.set(
@@ -291,27 +294,25 @@ export class PdfExportService {
         }),
         JOB_TTL_SECONDS
       );
+      this.memoryJobs.delete(job.jobId);
     } catch {
-      /* memory fallback */
+      this.memoryJobs.set(job.jobId, job);
     }
   }
 
   private async getJob(jobId: string): Promise<StoredPdfJob | null> {
-    const mem = this.memoryJobs.get(jobId);
-    if (mem) return mem;
     try {
       const raw = await this.redis.get(`pdf:job:${jobId}`);
-      if (!raw) return null;
+      if (!raw) return this.memoryJobs.get(jobId) ?? null;
       const parsed = JSON.parse(raw) as StoredPdfJob & { bufferB64?: string };
       const { bufferB64: _b64, ...rest } = parsed;
       const job: StoredPdfJob = {
         ...rest,
         buffer: parsed.bufferB64 ? Buffer.from(parsed.bufferB64, 'base64') : undefined,
       };
-      this.memoryJobs.set(jobId, job);
       return job;
     } catch {
-      return null;
+      return this.memoryJobs.get(jobId) ?? null;
     }
   }
 

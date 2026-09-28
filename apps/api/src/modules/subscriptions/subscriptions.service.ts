@@ -259,10 +259,19 @@ export class SubscriptionsService {
       return this.changeStripePlan(userId, liveSub, dto, priceId, successUrl);
     }
 
+    const stripeCustomerId = await this.ensureStripeCustomerId(userId, user.email, existingSub);
+
+    // The database learns the subscription id from the webhook (or the success page): until
+    // then, a just-paid subscription only exists in Stripe. Ask Stripe before opening another
+    // Checkout, otherwise ordering a second plan right after the first bills both.
+    const unrecorded = await this.findLiveCustomerSubscription(stripeCustomerId);
+    if (unrecorded) {
+      return this.changeStripePlan(userId, unrecorded, dto, priceId, successUrl);
+    }
+
     const grantTrial =
       (user.subscriptionTier ?? 'free') === 'free' && !existingSub?.stripeSubscriptionId;
 
-    const stripeCustomerId = await this.ensureStripeCustomerId(userId, user.email, existingSub);
     await this.expireOpenCheckoutSessions(stripeCustomerId, userId);
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
@@ -448,6 +457,30 @@ export class SubscriptionsService {
       });
     }
     return sub && LIVE_STRIPE_STATUSES.has(sub.status) ? sub : null;
+  }
+
+  /** A live subscription of this Stripe customer, whether or not the database knows it yet. */
+  private async findLiveCustomerSubscription(
+    customerId: string
+  ): Promise<Stripe.Subscription | null> {
+    let subs: Stripe.ApiList<Stripe.Subscription>;
+    try {
+      subs = await this.stripe!.subscriptions.list({
+        customer: customerId,
+        status: 'all',
+        limit: 10,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Could not list Stripe subscriptions of ${customerId}`,
+        error instanceof Error ? error.stack : error
+      );
+      throw new ServiceUnavailableException({
+        code: 'STRIPE_UNAVAILABLE',
+        message: 'Could not verify your current subscription. Please try again later.',
+      });
+    }
+    return subs.data.find((sub) => LIVE_STRIPE_STATUSES.has(sub.status)) ?? null;
   }
 
   /**

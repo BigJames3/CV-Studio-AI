@@ -40,6 +40,7 @@ import {
   UpdateProfileDto,
   TwoFactorDisableDto,
 } from './dto/auth.dto';
+import { oauthFetch } from './oauth-fetch';
 
 export type RequestContext = SessionMeta & { ip: string };
 
@@ -1156,7 +1157,7 @@ export class AuthService {
       });
     }
 
-    const tokenRes = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+    const tokenRes = await oauthFetch('LinkedIn', 'https://www.linkedin.com/oauth/v2/accessToken', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -1183,7 +1184,7 @@ export class AuthService {
       });
     }
 
-    const profileRes = await fetch('https://api.linkedin.com/v2/userinfo', {
+    const profileRes = await oauthFetch('LinkedIn', 'https://api.linkedin.com/v2/userinfo', {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
     if (!profileRes.ok) {
@@ -1251,7 +1252,7 @@ export class AuthService {
         });
       }
 
-      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      const tokenRes = await oauthFetch('Google', 'https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({

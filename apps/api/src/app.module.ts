@@ -4,7 +4,8 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './database/prisma.module';
-import { RedisModule } from './redis/redis.module';
+import { RedisModule, RedisService } from './redis/redis.module';
+import { RedisThrottlerStorage } from './redis/redis-throttler.storage';
 import { MailModule } from './mail/mail.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { AuthModule } from './modules/auth/auth.module';
@@ -33,9 +34,14 @@ import { shouldSkipThrottle } from './common/utils/throttle-skip';
         '.env',
       ],
     }),
-    ThrottlerModule.forRoot({
-      throttlers: [{ ttl: 60_000, limit: 120 }],
-      skipIf: shouldSkipThrottle,
+    ThrottlerModule.forRootAsync({
+      inject: [RedisService],
+      useFactory: (redis: RedisService) => ({
+        throttlers: [{ ttl: 60_000, limit: 120 }],
+        skipIf: shouldSkipThrottle,
+        // Shared across replicas: in memory, the limit was multiplied by the number of pods.
+        storage: new RedisThrottlerStorage(redis),
+      }),
     }),
     ...(process.env.WORKER_KIND || process.env.NODE_ENV === 'test'
       ? []

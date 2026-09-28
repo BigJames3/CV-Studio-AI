@@ -5,6 +5,7 @@ import { PrismaService } from '../../database/prisma.module';
 import { FeatureGateService } from '../../common/services/feature-gate.service';
 import { AuditLogService } from '../../common/services/audit-log.service';
 import { resolveEffectiveTier, TIER_SOURCE_SELECT } from './effective-tier';
+import { upgradeDetails } from '../../common/utils/upgrade-details';
 
 /**
  * Server-side feature gates. Loads the effective tier from DB (JWT can be stale after Stripe
@@ -122,7 +123,7 @@ export class EntitlementsService {
       statusCode: 402,
       code: 'ENTITLEMENT_REQUIRED',
       message,
-      details: { feature, upgradeUrl: '/pricing' },
+      details: upgradeDetails(feature, tier),
     });
   }
 }

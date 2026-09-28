@@ -7,6 +7,10 @@ import type { CoverLetterInput, CoverLetterResult } from './prompts/cover-letter
 import { generateCoverLetterHeuristic } from './providers/heuristic-cover-letter';
 import type { AtsExplainInput, AtsExplainResult } from './prompts/ats-explain';
 import { explainAtsHeuristic } from './providers/heuristic-ats-explain';
+import { matchJobHeuristic } from './providers/heuristic-job-match';
+import { interviewPrepHeuristic } from './providers/heuristic-interview-prep';
+import { careerAdviceHeuristic } from './providers/heuristic-career-advice';
+import { skillsSuggestHeuristic } from './providers/heuristic-skills-suggest';
 
 export type AiRequest = {
   feature: AiFeature;
@@ -155,9 +159,53 @@ async function runAtsExplain(req: AiRequest): Promise<AiResponse> {
   };
 }
 
+function payloadObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function payloadString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+/** CV analysis features: deterministic, evidence-gated, no network call. */
+function runCvInsight(req: AiRequest): AiResponse {
+  const cvFacts = payloadObject(req.payload.cvFacts);
+  const jobDescription = payloadString(req.payload.jobDescription) ?? '';
+  const targetRole = payloadString(req.payload.targetRole);
+  const locale = req.locale;
+  let result: { ok: boolean; refusals?: string[] };
+  switch (req.feature) {
+    case 'job-match':
+      result = matchJobHeuristic({ cvFacts, jobDescription, locale });
+      break;
+    case 'interview':
+      result = interviewPrepHeuristic({
+        cvFacts,
+        jobDescription,
+        interviewType: payloadString(req.payload.interviewType),
+        locale,
+      });
+      break;
+    case 'career-advice':
+      result = careerAdviceHeuristic({ cvFacts, targetRole, locale });
+      break;
+    default:
+      result = skillsSuggestHeuristic({ cvFacts, targetRole, locale });
+  }
+  return {
+    ok: result.ok,
+    data: result,
+    model: 'heuristic-v1',
+    tokensUsed: 0,
+    provider: 'heuristic',
+    error: result.ok ? undefined : result.refusals?.join('; ') || `${req.feature} failed`,
+  };
+}
+
 /**
  * Multi-feature AI gateway.
- * Live: optimize-resume, cover-letter, ats (explain layer).
+ * Live: optimize-resume, cover-letter, ats (explain layer), job-match, interview,
+ * career-advice, skills-suggest.
  */
 export async function runAiFeature(req: AiRequest): Promise<AiResponse> {
   switch (req.feature) {
@@ -167,6 +215,11 @@ export async function runAiFeature(req: AiRequest): Promise<AiResponse> {
       return runCoverLetter(req);
     case 'ats':
       return runAtsExplain(req);
+    case 'job-match':
+    case 'interview':
+    case 'career-advice':
+    case 'skills-suggest':
+      return runCvInsight(req);
     default:
       return {
         ok: false,

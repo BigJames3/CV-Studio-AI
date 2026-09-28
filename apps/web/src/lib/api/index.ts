@@ -1,4 +1,4 @@
-import { apiClient, setLogoutInProgress } from './client';
+import { apiClient, ensureAccessToken, setLogoutInProgress } from './client';
 import { useAuthStore } from '@/stores/auth-store';
 import type { PublicBillingPlan } from '@cvstudio/shared-types';
 import type { MarketplaceListing } from '@/lib/marketplace/types';
@@ -24,8 +24,6 @@ export const queryKeys = {
   marketplaceListing: (id: string) => ['marketplace', 'listing', id] as const,
   sessions: ['auth', 'sessions'] as const,
   payments: ['payments', 'history'] as const,
-  paymentMethods: ['payments', 'methods'] as const,
-  geoCountry: ['geo', 'country'] as const,
 };
 
 export type AuthResponse = {
@@ -70,6 +68,21 @@ export const authApi = {
       skipRefresh: true,
     });
     return applyAuth(data);
+  },
+  /**
+   * Account this browser is signed in to, or null. Checked against the API rather than a
+   * cookie (a stale refresh cookie must not count), and never redirects: safe on /login.
+   */
+  currentUser: async (): Promise<{ id: string; email: string } | null> => {
+    if (typeof document !== 'undefined' && !document.cookie.includes('cv_session=1')) {
+      return null;
+    }
+    if (!(await ensureAccessToken())) return null;
+    try {
+      return await apiClient<{ id: string; email: string }>('/users/me', { skipRefresh: true });
+    } catch {
+      return null;
+    }
   },
   logout: async () => {
     setLogoutInProgress(true);
@@ -314,6 +327,7 @@ export const subscriptionsApi = {
         cancelAtPeriodEnd: boolean;
         currentPeriodEnd: string;
         currentPeriodStart: string;
+        stripeCustomerId?: string | null;
       } | null;
       tier: 'free' | 'pro' | 'business';
       entitlements: {
@@ -331,18 +345,12 @@ export const subscriptionsApi = {
       cvLimit: number;
       cvRemaining: number;
     }>('/subscriptions/me'),
-  checkout: (params: {
-    plan: 'pro' | 'business';
-    interval: 'month' | 'year';
-    paymentMethod?: 'stripe' | 'cinetpay';
-  }) =>
-    apiClient<{ url: string; mode?: string; transactionId?: string; paymentMethod?: string }>(
-      '/subscriptions/checkout',
-      {
-        method: 'POST',
-        body: params,
-      }
-    ),
+  checkout: (params: { plan: 'pro' | 'business'; interval: 'month' | 'year' }) =>
+    apiClient<{ url: string; mode?: string }>('/subscriptions/checkout', {
+      method: 'POST',
+      body: params,
+    }),
+  portal: () => apiClient<{ url: string }>('/subscriptions/me/portal', { method: 'POST' }),
   cancel: () =>
     apiClient<{
       status: string;
@@ -390,20 +398,11 @@ export type PaymentHistoryItem = {
 
 export const paymentsApi = {
   history: () => apiClient<{ items: PaymentHistoryItem[] }>('/payments/history'),
-  methods: () =>
-    apiClient<{ stripe: boolean; cinetpay: boolean; cinetpayFailClosed: boolean }>(
-      '/payments/methods'
-    ),
-  getStatus: (transactionId: string) =>
-    apiClient<{
-      status: string;
-      paymentMethod?: string;
-      transactionId: string;
-    }>(`/payments/status/${encodeURIComponent(transactionId)}`),
-};
-
-export const geoApi = {
-  country: () => apiClient<{ country: string | null; source: 'ip' | 'unknown' }>('/geo/country'),
+  confirmCheckout: (sessionId: string) =>
+    apiClient<{ confirmed: boolean }>('/payments/checkout/confirm', {
+      method: 'POST',
+      body: { sessionId },
+    }),
 };
 
 export const aiApi = {

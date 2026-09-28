@@ -20,7 +20,7 @@ This is an **interim** designation so a contact exists before EU data collection
 
 1. GDPR/CCPA compliance and DSAR coordination (`GET /users/me/export`, `DELETE /users/me`)
 2. Maintain the DPIA (`DPIA-SIGNED.md`)
-3. Vendor DPA tracking (Stripe, CinetPay, LLM, Sentry, PostHog)
+3. Vendor DPA tracking (Stripe, LLM, Sentry, PostHog)
 4. Incident escalation with Legal (72-hour supervisory notify)
 5. Privacy training for engineers (annual)
 

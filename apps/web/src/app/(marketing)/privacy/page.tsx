@@ -35,7 +35,7 @@ export default function PrivacyPage() {
             <li>
               CV : contenu que vous saisissez ou importez (expérience, formation, compétences)
             </li>
-            <li>Paiements : identifiants Stripe / CinetPay (pas de numéro de carte)</li>
+            <li>Paiements : identifiants Stripe (pas de numéro de carte)</li>
             <li>Usage : journaux techniques (IP, user-agent, horodatage) pour la sécurité</li>
             <li>IA : extraits de CV envoyés au fournisseur d’IA pour générer des suggestions</li>
           </ul>
@@ -48,9 +48,7 @@ export default function PrivacyPage() {
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li>Exécution du contrat : compte, édition de CV, export PDF, facturation</li>
             <li>Intérêt légitime : sécurité, prévention de la fraude, journaux d’audit</li>
-            <li>
-              Consentement : e-mails marketing, géolocalisation pour suggérer un moyen de paiement
-            </li>
+            <li>Consentement : e-mails marketing</li>
             <li>Obligation légale : conservation des factures</li>
           </ul>
         </section>
@@ -59,7 +57,6 @@ export default function PrivacyPage() {
           <h2 className="text-xl font-semibold text-content-primary">4. Destinataires</h2>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li>Stripe : paiements par carte (données carte hors de notre base)</li>
-            <li>CinetPay : paiements mobile money en Afrique</li>
             <li>
               Fournisseurs d’IA (OpenAI ou équivalent) : génération de contenu, sans entraînement
               sur vos données lorsque le contrat le permet

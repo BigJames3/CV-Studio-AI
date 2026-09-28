@@ -1,5 +1,10 @@
 import { create } from 'zustand';
-import { clearClientAuth, getAccessToken, setAccessToken } from '@/lib/api/client';
+import {
+  ACCOUNT_BROADCAST_KEY,
+  clearClientAuth,
+  getAccessToken,
+  setAccessToken,
+} from '@/lib/api/client';
 
 type AuthUser = {
   id: string;
@@ -26,6 +31,18 @@ export const useAuthStore = create<AuthState>((set) => ({
   setSession: (accessToken, user = null) => {
     setAccessToken(accessToken);
     set({ user });
+    // Every sign-in path (password, OAuth, 2FA, register) lands here: tell the other tabs,
+    // which still hold the previous account's token and data (see LogoutSync).
+    if (user?.id && typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(
+          ACCOUNT_BROADCAST_KEY,
+          JSON.stringify({ id: user.id, at: Date.now() })
+        );
+      } catch {
+        // Private mode / storage disabled: other tabs resync on their next reload.
+      }
+    }
   },
   clearSession: () => {
     clearClientAuth();

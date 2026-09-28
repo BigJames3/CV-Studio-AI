@@ -1,9 +1,14 @@
+import { canDownloadPDF, canShare } from '@cvstudio/shared-utils';
 import {
+  CATALOG_FALLBACK_ROWS,
+  FREE_TEMPLATE_COUNT,
   mapPlanToPublicDto,
   PLAN_CACHE_KEY,
   PlansService,
   TRIAL_PERIOD_DAYS,
+  UNSHIPPED_FEATURES,
 } from './plans.service';
+import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 
 const FREE = {
   name: 'Free',
@@ -63,15 +68,22 @@ describe('mapPlanToPublicDto', () => {
       included: true,
     });
     expect(dto.currency).toBe('EUR');
-    expect(dto.entitlements.find((e) => e.feature === 'downloadPdf')?.included).toBe(true);
+    expect(dto.entitlements.find((e) => e.feature === 'downloadPdf')?.included).toBe(false);
+    expect(dto.entitlements.find((e) => e.feature === 'share')?.included).toBe(false);
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(false);
+    expect(dto.entitlements.find((e) => e.feature === 'atsCheck')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'templates')).toEqual({
       feature: 'templates',
-      value: '5',
+      value: '4',
       included: true,
     });
-    expect(dto.entitlements.find((e) => e.feature === 'collaborate')?.included).toBe(false);
     expect(dto.entitlements.some((e) => /docx/i.test(e.feature))).toBe(false);
+  });
+
+  it('advertises exactly the non-premium official templates for Free', () => {
+    const free = TEMPLATE_SEEDS.filter((t) => !t.isPremium).length;
+    expect(FREE_TEMPLATE_COUNT).toBe(free);
+    expect(FREE_TEMPLATE_COUNT).toBe(4);
   });
 
   it('maps Pro with annual savings inputs and 14-day trial', () => {
@@ -91,18 +103,59 @@ describe('mapPlanToPublicDto', () => {
     expect(dto.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('5');
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'templates')?.value).toBe('unlimited');
-    expect(dto.entitlements.find((e) => e.feature === 'collaborate')?.included).toBe(false);
   });
 
-  it('maps Business entitlements including API', () => {
+  it('maps Business with the Pro features and 20 CVs', () => {
     const dto = mapPlanToPublicDto(BUSINESS);
     expect(dto.id).toBe('business');
     expect(dto.priceMonthly).toBe(29.99);
     expect(dto.priceAnnual).toBe(299);
-    expect(dto.entitlements.find((e) => e.feature === 'apiAccess')?.included).toBe(true);
-    expect(dto.entitlements.find((e) => e.feature === 'customDomain')?.included).toBe(true);
-    expect(dto.entitlements.find((e) => e.feature === 'collaborate')?.included).toBe(true);
+    expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('20');
+  });
+
+  it.each([FREE, PRO, BUSINESS, ...CATALOG_FALLBACK_ROWS])(
+    'never advertises unshipped features ($name)',
+    (row) => {
+      // BUSINESS sets customDomain/apiAccess in its row: the catalog must still hide them.
+      const dto = mapPlanToPublicDto(row);
+      const features = dto.entitlements.map((e) => e.feature);
+      for (const unshipped of UNSHIPPED_FEATURES) {
+        expect(features).not.toContain(unshipped);
+      }
+      expect(dto.description).not.toMatch(/collab|\bAPI\b|branding|analytics/i);
+    }
+  );
+});
+
+describe('plan descriptions only promise what ships', () => {
+  // Template counts are plan rules (Free: 5, paid: unlimited), but no made-up "50+" or portfolio.
+  it.each(CATALOG_FALLBACK_ROWS)('$name', (row) => {
+    expect(row.description).not.toMatch(/\d+\+ templates|portfolio/i);
+  });
+});
+
+describe('catalog matches the runtime PDF/share gate (FE-001)', () => {
+  it.each([
+    ['free', FREE],
+    ['pro', PRO],
+    ['business', BUSINESS],
+  ] as const)('%s', (tier, row) => {
+    const dto = mapPlanToPublicDto(row);
+    const user = { subscriptionTier: tier };
+    expect(dto.entitlements.find((e) => e.feature === 'downloadPdf')).toMatchObject({
+      included: canDownloadPDF(user),
+      value: String(canDownloadPDF(user)),
+    });
+    expect(dto.entitlements.find((e) => e.feature === 'share')).toMatchObject({
+      included: canShare(user),
+      value: String(canShare(user)),
+    });
+  });
+
+  it('no catalog description promises a PDF on the Free plan', () => {
+    const free = CATALOG_FALLBACK_ROWS.find((row) => row.name === 'Free');
+    expect(free?.description).not.toMatch(/(?<!no )PDF export/i);
   });
 });
 

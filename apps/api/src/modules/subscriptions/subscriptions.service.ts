@@ -4,16 +4,12 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
-  Optional,
-  Inject,
-  forwardRef,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import Stripe from 'stripe';
 import { PrismaService } from '../../database/prisma.module';
 import { EntitlementsService } from './entitlements.service';
-import { CheckoutDto, UpdateSubscriptionDto, CreateSubscriptionDto } from './dto/subscription.dto';
-import { CinetpayGateway } from '../payments/gateways/cinetpay.gateway';
+import { CheckoutDto, CreateSubscriptionDto } from './dto/subscription.dto';
 import {
   expandableStripeId,
   isNonPlaceholderSecret,
@@ -38,6 +34,14 @@ const LIVE_STRIPE_STATUSES = new Set<Stripe.Subscription.Status>([
 
 const PLAN_RANK: Record<PaidPlan, number> = { pro: 1, business: 2 };
 
+/**
+ * Stripe replaces {CHECKOUT_SESSION_ID} when it redirects back, so the billing page can ask the
+ * API to confirm that session with Stripe (POST /payments/checkout/confirm).
+ */
+function withCheckoutSessionId(url: string): string {
+  return `${url}${url.includes('?') ? '&' : '?'}session_id={CHECKOUT_SESSION_ID}`;
+}
+
 /** An upgrade costs more right away: higher tier, or same tier from monthly to yearly. */
 function isUpgrade(
   from: { plan: PaidPlan; interval: BillingInterval },
@@ -56,10 +60,7 @@ export class SubscriptionsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly entitlements: EntitlementsService,
-    @Optional()
-    @Inject(forwardRef(() => CinetpayGateway))
-    private readonly cinetpayGateway?: CinetpayGateway
+    private readonly entitlements: EntitlementsService
   ) {
     const key = stripeSecretForClient();
     if (key) {
@@ -84,7 +85,7 @@ export class SubscriptionsService {
   }
 
   /**
-   * Internal only (Stripe fail-open / CinetPay placeholder). Paid entitlements
+   * Internal only (Stripe fail-open). Paid entitlements
    * must be granted via applyPaidEntitlement after a verified webhook.
    */
   async create(userId: string, dto: CreateSubscriptionDto) {
@@ -108,10 +109,6 @@ export class SubscriptionsService {
     });
   }
 
-  async update(userId: string, _dto: UpdateSubscriptionDto) {
-    return this.me(userId);
-  }
-
   async cancel(userId: string) {
     const sub = await this.prisma.subscription.findUnique({ where: { userId } });
     if (!sub) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No subscription' });
@@ -129,6 +126,44 @@ export class SubscriptionsService {
         canceledAt: new Date(),
       },
     });
+  }
+
+  /**
+   * Stripe Customer Portal session: update the card, pay an unpaid invoice, download invoices.
+   * The portal must be activated once in the Stripe Dashboard (Settings → Billing → Customer portal).
+   */
+  async billingPortal(userId: string): Promise<{ url: string }> {
+    if (!this.stripe) {
+      throw new BadRequestException({
+        code: 'STRIPE_NOT_CONFIGURED',
+        message: 'Stripe is not configured (fail-closed). Billing portal unavailable.',
+      });
+    }
+
+    const sub = await this.prisma.subscription.findUnique({ where: { userId } });
+    if (!sub?.stripeCustomerId) {
+      throw new NotFoundException({
+        code: 'NO_BILLING_ACCOUNT',
+        message: 'No card payment has been made on this account yet.',
+      });
+    }
+
+    try {
+      const session = await this.stripe.billingPortal.sessions.create({
+        customer: sub.stripeCustomerId,
+        return_url: `${appOriginFromEnv()}/account/billing`,
+      });
+      return { url: session.url };
+    } catch (error) {
+      this.logger.error(
+        `Could not open the Stripe billing portal for ${sub.stripeCustomerId}`,
+        error instanceof Error ? error.stack : error
+      );
+      throw new ServiceUnavailableException({
+        code: 'BILLING_PORTAL_UNAVAILABLE',
+        message: 'The billing portal is unavailable. Please try again later.',
+      });
+    }
   }
 
   /** Immediate Stripe cancel for account erasure (GDPR). Does not throw if Stripe is down. */
@@ -174,12 +209,6 @@ export class SubscriptionsService {
   }
 
   async checkout(userId: string, dto: CheckoutDto) {
-    const paymentMethod = dto.paymentMethod ?? 'stripe';
-
-    if (paymentMethod === 'cinetpay') {
-      return this.checkoutCinetpay(userId, dto);
-    }
-
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
     });
@@ -238,7 +267,7 @@ export class SubscriptionsService {
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: 'subscription',
-      success_url: successUrl,
+      success_url: withCheckoutSessionId(successUrl),
       cancel_url: cancelUrl,
       client_reference_id: userId,
       customer: stripeCustomerId,
@@ -274,29 +303,35 @@ export class SubscriptionsService {
   async applyPaidEntitlement(params: {
     userId: string;
     plan: string;
-    provider: 'stripe' | 'cinetpay';
+    provider: 'stripe';
     status?: string;
     periodEnd: Date;
     periodStart?: Date;
     stripeSubscriptionId?: string;
     stripeCustomerId?: string;
-    cinetpayTransactionId?: string;
     cancelAtPeriodEnd?: boolean;
   }) {
-    const statusMap: Record<string, 'active' | 'canceled' | 'past_due' | 'trialing'> = {
-      active: 'active',
-      trialing: 'trialing',
-      past_due: 'past_due',
-      canceled: 'canceled',
-      unpaid: 'past_due',
-    };
+    // Stripe status → local status. `incomplete` (first payment not done) and `paused` grant
+    // no access; anything unknown fails closed instead of defaulting to `active`.
+    const statusMap: Record<string, 'active' | 'canceled' | 'past_due' | 'trialing' | 'suspended'> =
+      {
+        active: 'active',
+        trialing: 'trialing',
+        past_due: 'past_due',
+        canceled: 'canceled',
+        unpaid: 'past_due',
+        incomplete: 'suspended',
+        paused: 'suspended',
+        incomplete_expired: 'canceled',
+      };
 
-    const mappedStatus = statusMap[params.status ?? 'active'] ?? 'active';
+    const mappedStatus = statusMap[params.status ?? 'active'] ?? 'suspended';
     const isCanceled = mappedStatus === 'canceled';
+    const grantsAccess = !isCanceled && mappedStatus !== 'suspended';
     const cancelAtPeriodEnd = Boolean(params.cancelAtPeriodEnd) && !isCanceled;
     const periodStart = params.periodStart ?? new Date();
     const tier =
-      isCanceled || params.plan.toLowerCase() === 'free'
+      !grantsAccess || params.plan.toLowerCase() === 'free'
         ? 'free'
         : params.plan.toLowerCase() === 'business'
           ? 'business'
@@ -325,9 +360,6 @@ export class SubscriptionsService {
         : {}),
       ...(params.stripeCustomerId !== undefined
         ? { stripeCustomerId: params.stripeCustomerId }
-        : {}),
-      ...(params.cinetpayTransactionId !== undefined
-        ? { cinetpayTransactionId: params.cinetpayTransactionId }
         : {}),
     };
 
@@ -392,54 +424,6 @@ export class SubscriptionsService {
       stripeSubscriptionId: params.stripeSubscriptionId,
       stripeCustomerId: params.stripeCustomerId,
       cancelAtPeriodEnd: params.cancelAtPeriodEnd,
-    });
-  }
-
-  private async checkoutCinetpay(userId: string, dto: CheckoutDto) {
-    if (!this.cinetpayGateway) {
-      throw new BadRequestException({
-        code: 'CINETPAY_NOT_CONFIGURED',
-        message: 'CinetPay is not configured in this environment',
-      });
-    }
-
-    const existing = await this.prisma.subscription.findUnique({ where: { userId } });
-    if (await this.findLiveStripeSubscription(existing?.stripeSubscriptionId)) {
-      throw new ConflictException({
-        code: 'STRIPE_SUBSCRIPTION_ACTIVE',
-        message:
-          'You already have an active card subscription. Change plan with your card, or cancel it first.',
-      });
-    }
-
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId, deletedAt: null },
-    });
-    if (!user) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found' });
-
-    const plan = await this.prisma.plan.findUnique({
-      where: { name: this.planName(dto.plan) },
-    });
-    if (!plan) throw new NotFoundException({ code: 'PLAN_NOT_FOUND', message: 'Plan not found' });
-
-    const now = new Date();
-    const subscription = await this.prisma.subscription.upsert({
-      where: { userId },
-      create: {
-        userId,
-        planId: plan.id,
-        status: 'trialing',
-        currentPeriodStart: now,
-        currentPeriodEnd: now,
-      },
-      update: {},
-    });
-
-    return this.cinetpayGateway.createPayment(userId, {
-      plan: dto.plan,
-      interval: dto.interval,
-      subscriptionId: subscription.id,
-      returnUrl: dto.successUrl,
     });
   }
 

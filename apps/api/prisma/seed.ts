@@ -10,7 +10,7 @@ const prisma = new PrismaClient();
 const PLAN_SEEDS = [
   {
     name: 'Free',
-    description: '1 CV, 5 templates, PDF export, no AI',
+    description: '1 CV, 4 templates, ATS score, no PDF export, no AI optimization',
     priceMonthly: 0,
     priceYearly: 0,
     cvLimit: 1,
@@ -22,7 +22,7 @@ const PLAN_SEEDS = [
   },
   {
     name: 'Pro',
-    description: '5 CVs, 50+ templates, all AI features, ATS, portfolio',
+    description: '5 CVs, unlimited templates, AI optimization, ATS check',
     priceMonthly: 9.99,
     priceYearly: 99,
     cvLimit: 5,
@@ -34,7 +34,7 @@ const PLAN_SEEDS = [
   },
   {
     name: 'Business',
-    description: '20 CVs, everything in Pro + team collab, analytics, API, branding',
+    description: '20 CVs, everything in Pro',
     priceMonthly: 29.99,
     priceYearly: 299,
     cvLimit: 20,

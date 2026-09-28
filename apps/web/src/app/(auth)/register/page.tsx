@@ -14,12 +14,13 @@ import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 import { LinkedInSignInButton } from '@/components/auth/linkedin-sign-in-button';
 import { PasswordStrength } from '@/components/auth/password-strength';
 import { ApiError } from '@/lib/api/client';
+import { authErrorMessage } from '@/lib/auth/auth-error-message';
 import { track } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 
 const BENEFITS = [
-  '1 CV et export PDF sans filigrane',
-  '5 templates ATS (Modern, Creative, Executive…)',
+  '1 CV modifiable en ligne',
+  '4 templates (Modern, Creative, Startup, ATS)',
   'Aucune carte bancaire requise',
   'Essai Pro 14 jours au checkout',
 ] as const;
@@ -31,21 +32,6 @@ function FieldError({ id, message }: { id: string; message?: string }) {
       {message}
     </p>
   );
-}
-
-function registerErrorMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    if (error.code === 'EMAIL_TAKEN' || error.status === 409) {
-      return 'Cet email est déjà utilisé. Connectez-vous ou réinitialisez votre mot de passe.';
-    }
-    if (error.status === 429) {
-      return 'Trop de tentatives. Réessayez dans quelques minutes.';
-    }
-    if (error.message && !/already registered|must be/i.test(error.message)) {
-      return error.message;
-    }
-  }
-  return 'Impossible de créer le compte. Vérifiez les champs et réessayez.';
 }
 
 export default function RegisterPage() {
@@ -158,7 +144,7 @@ export default function RegisterPage() {
               data-testid="register-error"
               role="alert"
             >
-              {registerErrorMessage(registerMutation.error)}{' '}
+              {authErrorMessage(registerMutation.error, 'register')}{' '}
               {registerMutation.error instanceof ApiError &&
               (registerMutation.error.code === 'EMAIL_TAKEN' ||
                 registerMutation.error.status === 409) ? (

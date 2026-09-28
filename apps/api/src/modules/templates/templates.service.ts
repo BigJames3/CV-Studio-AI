@@ -7,6 +7,19 @@ import { TEMPLATE_SEEDS } from './template-seeds';
 /** Official catalog only — seller-owned marketplace templates never appear here. */
 const CATALOG_WHERE = { isPublished: true, createdBy: null } as const;
 
+/** Fields returned by the public routes: enough for a preview, never designData (SEC-006). */
+const PUBLIC_TEMPLATE_SELECT = {
+  id: true,
+  name: true,
+  description: true,
+  category: true,
+  previewImageUrl: true,
+  isPremium: true,
+  price: true,
+  rating: true,
+  downloadCount: true,
+} as const;
+
 type ListQuery = {
   limit?: number;
   premium?: boolean;
@@ -18,7 +31,7 @@ type ListQuery = {
 export class TemplatesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private mapSeed(seed: (typeof TEMPLATE_SEEDS)[number]) {
+  private mapPublicSeed(seed: (typeof TEMPLATE_SEEDS)[number]) {
     return {
       id: seed.id,
       name: seed.name,
@@ -30,6 +43,12 @@ export class TemplatesService {
       price: seed.price,
       rating: seed.rating,
       downloadCount: seed.downloadCount,
+    };
+  }
+
+  private mapSeed(seed: (typeof TEMPLATE_SEEDS)[number]) {
+    return {
+      ...this.mapPublicSeed(seed),
       isPublished: seed.isPublished,
       designData: seed.designData,
     };
@@ -102,15 +121,16 @@ export class TemplatesService {
     try {
       const template = await this.prisma.template.findFirst({
         where: { id, ...CATALOG_WHERE },
+        select: PUBLIC_TEMPLATE_SELECT,
       });
-      if (template) return template;
+      if (template) return this.withAccess(template);
     } catch {
       /* fallthrough */
     }
 
     const seed = TEMPLATE_SEEDS.find((t) => t.id === id);
     if (!seed) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Template not found' });
-    return this.mapSeed(seed);
+    return this.mapPublicSeed(seed);
   }
 
   async byCategory(category: string) {
@@ -121,11 +141,12 @@ export class TemplatesService {
           category: category as TemplateCategory,
         },
         orderBy: { rating: 'desc' },
+        select: PUBLIC_TEMPLATE_SELECT,
       });
       if (items.length > 0) return items.map((t) => this.withAccess(t));
     } catch {
       /* fallthrough */
     }
-    return TEMPLATE_SEEDS.filter((t) => t.category === category).map((s) => this.mapSeed(s));
+    return TEMPLATE_SEEDS.filter((t) => t.category === category).map((s) => this.mapPublicSeed(s));
   }
 }

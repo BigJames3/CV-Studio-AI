@@ -19,6 +19,7 @@ describe('Lifecycle e-mails (real Postgres)', () => {
   let service: LifecycleEmailsService;
   const mail = { send: jest.fn().mockResolvedValue(true) };
   const tag = `lc${Date.now()}`;
+  const planName = `Pro ${tag}`;
   const ids: Record<string, string> = {};
 
   async function user(
@@ -89,11 +90,20 @@ describe('Lifecycle e-mails (real Postgres)', () => {
     await user('optout', { createdAt: ago(2), optOut: true }); // nothing
     // Trial ending in 3 days, opted out of tips: the billing notice still goes.
     const trial = await user('trial', { createdAt: ago(11), optOut: true, cv: STARTED_CV });
-    const pro = await prisma.plan.findUniqueOrThrow({ where: { name: 'Pro' } });
+    // Own plan: the CI database is migrated but not seeded.
+    const plan = await prisma.plan.create({
+      data: {
+        name: planName,
+        description: 'Lifecycle e-mails e2e',
+        priceMonthly: 0,
+        priceYearly: 0,
+        cvLimit: 5,
+      },
+    });
     await prisma.subscription.create({
       data: {
         userId: trial.id,
-        planId: pro.id,
+        planId: plan.id,
         status: 'trialing',
         currentPeriodStart: ago(11),
         currentPeriodEnd: new Date(NOW.getTime() + 3 * DAY),
@@ -103,6 +113,7 @@ describe('Lifecycle e-mails (real Postgres)', () => {
 
   afterAll(async () => {
     await prisma.user.deleteMany({ where: { email: { startsWith: `${tag}.` } } });
+    await prisma.plan.deleteMany({ where: { name: planName } });
     await app.close();
   });
 
@@ -120,7 +131,7 @@ describe('Lifecycle e-mails (real Postgres)', () => {
     expect(subject('emptycv')).toContain('presque prêt');
     expect(subject('noats')).toContain('filtres des recruteurs');
     expect(subject('dormant')).toContain('vous attendent');
-    expect(subject('trial')).toMatch(/^Votre essai Pro se termine le/);
+    expect(subject('trial')).toMatch(new RegExp(`^Votre essai ${planName} se termine le`));
 
     // One-click unsubscribe header on reminders, none on the billing notice.
     expect(sent.find((s) => s.name === 'nocv')?.oneClick).toMatch(

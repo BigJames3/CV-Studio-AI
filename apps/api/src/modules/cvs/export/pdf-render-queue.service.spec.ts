@@ -23,6 +23,7 @@ jest.mock('bullmq', () => ({
 
 import { Queue } from 'bullmq';
 import { PdfRenderQueue } from './pdf-render-queue.service';
+import { metrics } from '../../../observability/metrics';
 
 const PDF = Buffer.from('%PDF-1.7 rendered');
 
@@ -118,5 +119,18 @@ describe('PdfRenderQueue', () => {
       concurrency: 3,
       connection: { maxRetriesPerRequest: null },
     });
+  });
+
+  it('records render durations by where and result', async () => {
+    const { renderer, generator } = makeRenderer();
+    await renderer.htmlToPdf('<p>ok</p>');
+    generator.htmlToPdf.mockRejectedValueOnce(new Error('crash'));
+    await expect(renderer.htmlToPdf('<p>ko</p>')).rejects.toThrow('crash');
+
+    const body = await metrics.render();
+    expect(body).toMatch(/^pdf_render_duration_seconds_count\{where="inline",result="ok"\} [1-9]/m);
+    expect(body).toMatch(
+      /^pdf_render_duration_seconds_count\{where="inline",result="error"\} [1-9]/m
+    );
   });
 });

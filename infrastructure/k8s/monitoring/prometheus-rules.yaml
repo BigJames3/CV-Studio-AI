@@ -1,0 +1,131 @@
+# SLO alerts for the API and PDF rendering (docs/infrastructure/SLO-SLI.md).
+#   kubectl apply -f infrastructure/k8s/monitoring/prometheus-rules.yaml
+# Metrics come from apps/api/src/observability/metrics.ts. Kubernetes, node and Prometheus
+# alerts (CrashLoopBackOff, OOM, target down...) come with kube-prometheus-stack.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cvstudio-slo
+  namespace: monitoring
+  labels:
+    release: kps
+spec:
+  groups:
+    - name: cvstudio-api-recording
+      interval: 30s
+      rules:
+        # 5xx ratio of API responses (health probes excluded) over several windows.
+        - record: cvstudio:api_error_ratio:rate5m
+          expr: |
+            sum(rate(http_request_duration_seconds_count{app="api",status=~"5..",route!~".*/health.*"}[5m]))
+            / sum(rate(http_request_duration_seconds_count{app="api",route!~".*/health.*"}[5m]))
+        - record: cvstudio:api_error_ratio:rate30m
+          expr: |
+            sum(rate(http_request_duration_seconds_count{app="api",status=~"5..",route!~".*/health.*"}[30m]))
+            / sum(rate(http_request_duration_seconds_count{app="api",route!~".*/health.*"}[30m]))
+        - record: cvstudio:api_error_ratio:rate1h
+          expr: |
+            sum(rate(http_request_duration_seconds_count{app="api",status=~"5..",route!~".*/health.*"}[1h]))
+            / sum(rate(http_request_duration_seconds_count{app="api",route!~".*/health.*"}[1h]))
+        - record: cvstudio:api_error_ratio:rate6h
+          expr: |
+            sum(rate(http_request_duration_seconds_count{app="api",status=~"5..",route!~".*/health.*"}[6h]))
+            / sum(rate(http_request_duration_seconds_count{app="api",route!~".*/health.*"}[6h]))
+        # p95 of interactive routes: PDF export and AI generation are slow by design and have
+        # their own objectives.
+        - record: cvstudio:api_latency_p95:rate5m
+          expr: |
+            histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{app="api",route!~"/api/v1/(ai/.*|cvs/.*export.*|health.*)|unmatched"}[5m])))
+
+    - name: cvstudio-api-slo
+      rules:
+        # Availability SLO 99.9% (error budget 0.1%), multi-window burn rate (Google SRE workbook).
+        - alert: ApiErrorBudgetFastBurn
+          expr: |
+            cvstudio:api_error_ratio:rate1h > (14.4 * 0.001)
+            and cvstudio:api_error_ratio:rate5m > (14.4 * 0.001)
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: API burns its monthly error budget 14x too fast (2% of the budget in 1 h)
+            description: '5xx ratio {{ $value | humanizePercentage }} over 1 h. Runbook: docs/infrastructure/DR-RUNBOOK.md'
+        - alert: ApiErrorBudgetSlowBurn
+          expr: |
+            cvstudio:api_error_ratio:rate6h > (6 * 0.001)
+            and cvstudio:api_error_ratio:rate30m > (6 * 0.001)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: API burns its monthly error budget 6x too fast (5% of the budget in 6 h)
+            description: '5xx ratio {{ $value | humanizePercentage }} over 6 h.'
+        - alert: ApiHighErrorRate
+          expr: |
+            cvstudio:api_error_ratio:rate5m > 0.01
+            and sum(rate(http_request_duration_seconds_count{app="api"}[5m])) > 0.1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: More than 1% of API responses are 5xx
+            description: '5xx ratio {{ $value | humanizePercentage }} over 5 min.'
+        - alert: ApiLatencyP95High
+          expr: cvstudio:api_latency_p95:rate5m > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: API p95 latency above 500 ms
+            description: 'p95 {{ $value | humanizeDuration }} on interactive routes (PDF and AI excluded).'
+        - alert: ApiEventLoopBlocked
+          expr: max by (pod) (nodejs_eventloop_lag_p99_seconds{app="api"}) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Event loop of {{ $labels.pod }} blocked (p99 lag above 500 ms)'
+            description: 'p99 lag {{ $value | humanizeDuration }}. Every request on this pod waits.'
+
+    - name: cvstudio-pdf
+      rules:
+        - alert: PdfNoWorker
+          expr: max(pdf_render_workers) == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: No PDF worker connected; the API renders PDFs inline
+            description: Exports still work, but Chromium runs in API pods. Check the worker-pdf Deployment.
+        - alert: PdfQueueBacklog
+          expr: max(pdf_render_queue_jobs{state="waiting"}) > 20
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'PDF render queue backlog ({{ $value }} waiting jobs)'
+            description: Scale worker-pdf or raise PDF_WORKER_CONCURRENCY. Requests time out after 60 s.
+        - alert: PdfRenderErrors
+          expr: |
+            sum(rate(pdf_render_duration_seconds_count{result="error",where!="worker"}[15m]))
+            / sum(rate(pdf_render_duration_seconds_count{where!="worker"}[15m])) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: More than 5% of PDF renders fail
+            description: 'Error ratio {{ $value | humanizePercentage }} (SLO: 99.5% of exports succeed).'
+
+    - name: cvstudio-nodes
+      rules:
+        # kube-prometheus-stack warns at 95% used; the SLO document asks for 90%.
+        - alert: NodeDiskAlmostFull
+          expr: |
+            (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"}
+              / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/"}) < 0.10
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Disk of node {{ $labels.instance }} more than 90% full'
+            description: '{{ $value | humanizePercentage }} free on /.'

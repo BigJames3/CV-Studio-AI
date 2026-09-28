@@ -9,6 +9,7 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { isJsonLogFormat, JsonLogger } from './observability/json-logger';
+import { startMetricsServer } from './observability/metrics';
 import { PdfBrowserPool } from './modules/cvs/export/pdf-generator.service';
 import { PdfRenderQueue } from './modules/cvs/export/pdf-render-queue.service';
 import { RedisService } from './redis/redis.module';
@@ -34,6 +35,8 @@ async function bootstrap() {
   const worker = app.get(PdfRenderQueue).startWorker(concurrency);
   await worker.waitUntilReady();
   logger.log(`Chromium warm — PDF worker consuming the queue (concurrency ${concurrency})`);
+
+  startMetricsServer();
 
   const redis = app.get(RedisService);
   // Heartbeat key for k8s / ops

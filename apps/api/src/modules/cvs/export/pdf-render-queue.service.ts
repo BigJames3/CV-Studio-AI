@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { Queue, QueueEvents, Worker, type ConnectionOptions } from 'bullmq';
 import { PdfGeneratorService } from './pdf-generator.service';
 import type { ExportPdfOptions } from './pdf-content.types';
+import { Gauge, metrics, pdfRenderDuration } from '../../../observability/metrics';
 
 export const PDF_RENDER_QUEUE = 'pdf-render';
 
@@ -54,15 +55,29 @@ export class PdfRenderQueue implements OnModuleInit, OnModuleDestroy {
     const connection = redisConnection();
     this.queue = new Queue<RenderJobData, string>(PDF_RENDER_QUEUE, { connection });
     this.events = new QueueEvents(PDF_RENDER_QUEUE, { connection });
+    this.registerQueueMetrics();
     this.logger.log('PDF rendering goes through the BullMQ queue');
   }
 
   /** Same contract as PdfGeneratorService.htmlToPdf, wherever the rendering happens. */
   async htmlToPdf(html: string, options: ExportPdfOptions = {}): Promise<Buffer> {
-    if (!this.queue || !this.events || !(await this.hasWorkers())) {
-      return this.generator.htmlToPdf(html, options);
+    const queued = Boolean(this.queue && this.events) && (await this.hasWorkers());
+    const end = pdfRenderDuration.startTimer();
+    const where = queued ? 'queue' : 'inline';
+    try {
+      const pdf = queued
+        ? await this.renderInWorker(html, options)
+        : await this.generator.htmlToPdf(html, options);
+      end({ where, result: 'ok' });
+      return pdf;
+    } catch (error) {
+      end({ where, result: 'error' });
+      throw error;
     }
-    const job = await this.queue.add(
+  }
+
+  private async renderInWorker(html: string, options: ExportPdfOptions): Promise<Buffer> {
+    const job = await this.queue!.add(
       'render',
       { html, options },
       {
@@ -74,8 +89,23 @@ export class PdfRenderQueue implements OnModuleInit, OnModuleDestroy {
         removeOnFail: { age: 3600, count: 200 },
       }
     );
-    const pdfBase64 = await job.waitUntilFinished(this.events, RENDER_TIMEOUT_MS);
+    const pdfBase64 = await job.waitUntilFinished(this.events!, RENDER_TIMEOUT_MS);
     return Buffer.from(pdfBase64, 'base64');
+  }
+
+  /** Read at scrape time. Every API pod reports the same shared queue: use max() in queries. */
+  private registerQueueMetrics() {
+    metrics.register(
+      new Gauge('pdf_render_queue_jobs', 'Jobs in the pdf-render queue by state.', async () => {
+        const counts = await this.queue!.getJobCounts('waiting', 'active', 'delayed', 'failed');
+        return Object.entries(counts).map(([state, value]) => ({ labels: { state }, value }));
+      })
+    );
+    metrics.register(
+      new Gauge('pdf_render_workers', 'PDF workers connected to the queue.', async () => [
+        { value: await this.queue!.getWorkersCount() },
+      ])
+    );
   }
 
   /** Called by the PDF worker process only. */
@@ -83,8 +113,15 @@ export class PdfRenderQueue implements OnModuleInit, OnModuleDestroy {
     this.worker = new Worker<RenderJobData, string>(
       PDF_RENDER_QUEUE,
       async (job) => {
-        const pdf = await this.generator.htmlToPdf(job.data.html, job.data.options);
-        return pdf.toString('base64');
+        const end = pdfRenderDuration.startTimer();
+        try {
+          const pdf = await this.generator.htmlToPdf(job.data.html, job.data.options);
+          end({ where: 'worker', result: 'ok' });
+          return pdf.toString('base64');
+        } catch (error) {
+          end({ where: 'worker', result: 'error' });
+          throw error;
+        }
       },
       { connection: redisConnection(), concurrency }
     );

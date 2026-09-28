@@ -6,9 +6,11 @@ import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { httpLoggingMiddleware } from './common/middleware/http-logging.middleware';
+import { httpMetricsMiddleware } from './common/middleware/http-metrics.middleware';
 import { requestIdMiddleware } from './common/middleware/request-id.middleware';
 import { bootstrapObservability } from './observability';
 import { isJsonLogFormat, JsonLogger, logLevelsFromEnv } from './observability/json-logger';
+import { startMetricsServer } from './observability/metrics';
 import { closeSentry } from './observability/sentry';
 import { shutdownPostHog } from './observability/posthog';
 import { applyHttpSecurity, shouldEnableSwagger } from './common/http-security';
@@ -31,8 +33,8 @@ async function bootstrap() {
   app.useBodyParser('urlencoded', { limit: '1.5mb', extended: true });
 
   applyHttpSecurity(app);
-  // Before Nest's router, so 401/403/429/404 responses are logged with a request id too.
-  app.use(requestIdMiddleware, httpLoggingMiddleware);
+  // Before Nest's router, so 401/403/429/404 responses are measured and logged too.
+  app.use(requestIdMiddleware, httpMetricsMiddleware, httpLoggingMiddleware);
   app.enableCors({
     origin: process.env.CORS_ORIGINS?.split(',') ?? [
       'http://localhost:3000',
@@ -82,6 +84,7 @@ async function bootstrap() {
   const port = Number(process.env.PORT ?? 3001);
   app.enableShutdownHooks();
   await app.listen(port);
+  startMetricsServer();
   new Logger('Bootstrap').log(
     `API listening on :${port}${shouldEnableSwagger() ? ' — Swagger /docs' : ' — Swagger disabled'}`
   );

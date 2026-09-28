@@ -1,0 +1,29 @@
+# Scrape targets for kube-prometheus-stack (it ignores prometheus.io/* annotations).
+# Applied after the Helm chart (the PodMonitor CRD comes with it):
+#   kubectl apply -f infrastructure/k8s/monitoring/podmonitors.yaml
+# The metrics port (9464) is not in any Service or Ingress: Prometheus scrapes pod IPs.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cvstudio-api
+  namespace: monitoring
+  labels:
+    release: kps
+spec:
+  namespaceSelector:
+    matchNames: [cvstudio]
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [api, worker-pdf]
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      relabelings:
+        # `app` (api / worker-pdf) and `version` (blue / green) become series labels.
+        - sourceLabels: [__meta_kubernetes_pod_label_app]
+          targetLabel: app
+        - sourceLabels: [__meta_kubernetes_pod_label_version]
+          targetLabel: version

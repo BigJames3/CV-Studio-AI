@@ -9,7 +9,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
   {
     id: 'free',
     name: 'Gratuit',
-    description: '1 CV, 5 templates, no PDF export, no AI',
+    description: '1 CV, 4 templates, no PDF export, no AI',
     position: 0,
     priceMonthly: 0,
     priceAnnual: null,
@@ -23,7 +23,7 @@ export const FALLBACK_PLANS: BillingPlan[] = [
       { feature: 'downloadPdf', value: 'false', included: false },
       { feature: 'share', value: 'false', included: false },
       { feature: 'aiFeatures', value: 'false', included: false },
-      { feature: 'templates', value: '5', included: true },
+      { feature: 'templates', value: '4', included: true },
     ],
   },
   {

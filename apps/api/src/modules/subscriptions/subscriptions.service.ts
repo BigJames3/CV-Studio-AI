@@ -24,7 +24,7 @@ type PaidPlan = 'pro' | 'business';
 type BillingInterval = 'month' | 'year';
 
 /** Stripe statuses that still bill (or will bill) the customer. */
-const LIVE_STRIPE_STATUSES = new Set<Stripe.Subscription.Status>([
+export const LIVE_STRIPE_STATUSES = new Set<Stripe.Subscription.Status>([
   'active',
   'trialing',
   'past_due',

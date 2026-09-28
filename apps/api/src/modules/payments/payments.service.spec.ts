@@ -8,6 +8,7 @@ import {
 import { StripeWebhookStoreService } from './stripe-webhook-store.service';
 import { StripeAlertService } from './stripe-alert.service';
 import type Stripe from 'stripe';
+import * as observability from '../../observability';
 
 function mockCheckoutEvent(
   overrides: {
@@ -114,8 +115,8 @@ describe('PaymentsService webhook fail-closed', () => {
       metadata,
       items: { data: [{ price: { id: priceId } }] },
     });
-    (service as unknown as { stripe: { subscriptions: { retrieve: typeof retrieve } } }).stripe = {
-      subscriptions: { retrieve },
+    (service as unknown as { stripe: unknown }).stripe = {
+      subscriptions: { retrieve, list: jest.fn().mockResolvedValue({ data: [] }) },
     };
     return retrieve;
   }
@@ -563,7 +564,7 @@ describe('PaymentsService webhook fail-closed', () => {
               ...session,
             });
       (service as unknown as { stripe: Record<string, unknown> }).stripe = {
-        subscriptions: { retrieve: retrieveSub },
+        subscriptions: { retrieve: retrieveSub, list: jest.fn().mockResolvedValue({ data: [] }) },
         checkout: { sessions: { retrieve: retrieveSession } },
       };
       return retrieveSession;
@@ -815,11 +816,17 @@ describe('PaymentsService webhook fail-closed', () => {
     });
   });
   describe('one live Stripe subscription per user', () => {
+    let alert: jest.SpyInstance;
     beforeEach(() => {
       prisma.subscription.findUnique.mockReset().mockResolvedValue(null);
+      alert = jest.spyOn(observability, 'emitSecurityAlert').mockImplementation();
     });
+    afterEach(() => alert.mockRestore());
 
-    function attachStripe(previous: Record<string, unknown> | Error) {
+    function attachStripe(
+      previous: Record<string, unknown> | Error,
+      customerSubs: Array<Record<string, unknown>> = []
+    ) {
       const current = {
         id: 'sub_1',
         customer: 'cus_1',
@@ -836,9 +843,70 @@ describe('PaymentsService webhook fail-closed', () => {
         return previous;
       });
       const cancel = jest.fn().mockResolvedValue({ id: 'sub_old', status: 'canceled' });
-      (service as unknown as { stripe: unknown }).stripe = { subscriptions: { retrieve, cancel } };
-      return { retrieve, cancel };
+      const list = jest.fn().mockResolvedValue({ data: [current, ...customerSubs] });
+      (service as unknown as { stripe: unknown }).stripe = {
+        subscriptions: { retrieve, cancel, list },
+      };
+      return { retrieve, cancel, list };
     }
+
+    it('cancels live subscriptions the database never knew about (duplicate Checkouts)', async () => {
+      // Real case: three Pro Checkouts then a Business one, none recorded before the next.
+      const { cancel, list } = attachStripe(new Error('not used'), [
+        { id: 'sub_pro_a', status: 'trialing' },
+        { id: 'sub_pro_b', status: 'active' },
+        { id: 'sub_pro_c', status: 'past_due' },
+        { id: 'sub_ended', status: 'canceled' },
+      ]);
+
+      await service.processEventWithRetry(mockCheckoutEvent({ plan: 'business' }));
+
+      expect(list).toHaveBeenCalledWith(
+        expect.objectContaining({ customer: 'cus_1', status: 'all' })
+      );
+      expect(cancel.mock.calls.map(([id]) => id).sort()).toEqual([
+        'sub_pro_a',
+        'sub_pro_b',
+        'sub_pro_c',
+      ]);
+      expect(cancel).toHaveBeenCalledWith('sub_pro_a', { prorate: true });
+      expect(cancel).not.toHaveBeenCalledWith('sub_1', expect.anything());
+      expect(Math.max(...cancel.mock.invocationCallOrder)).toBeLessThan(
+        subscriptions.applyPaidEntitlement.mock.invocationCallOrder[0]
+      );
+      expect(subscriptions.applyPaidEntitlement).toHaveBeenCalledWith(
+        expect.objectContaining({ stripeSubscriptionId: 'sub_1', plan: 'business' })
+      );
+      expect(alert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'PAY-04',
+          extra: expect.objectContaining({ kept: 'sub_1' }),
+        })
+      );
+    });
+
+    it('fails (and is retried) when Stripe cannot list the customer subscriptions', async () => {
+      const { list } = attachStripe(new Error('not used'));
+      list.mockRejectedValue(new Error('Stripe down'));
+      silenceBackoff();
+
+      await expect(
+        service.processEventWithRetry(mockCheckoutEvent({ plan: 'business' }))
+      ).rejects.toThrow('Stripe down');
+      expect(subscriptions.applyPaidEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('cancels the database one only once when Stripe lists it too', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({ stripeSubscriptionId: 'sub_old' });
+      const { cancel } = attachStripe({ id: 'sub_old', status: 'active' }, [
+        { id: 'sub_old', status: 'active' },
+      ]);
+
+      await service.processEventWithRetry(mockCheckoutEvent({ plan: 'business' }));
+
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(cancel).toHaveBeenCalledWith('sub_old', { prorate: true });
+    });
 
     it('cancels the previous live subscription when a second checkout completes', async () => {
       prisma.subscription.findUnique.mockResolvedValue({ stripeSubscriptionId: 'sub_old' });
@@ -847,6 +915,8 @@ describe('PaymentsService webhook fail-closed', () => {
       await service.processEventWithRetry(mockCheckoutEvent({ plan: 'business' }));
 
       expect(cancel).toHaveBeenCalledWith('sub_old', { prorate: true });
+      // Replacing the recorded subscription is a plan change, not a duplicate: no alert.
+      expect(alert).not.toHaveBeenCalled();
       expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(
         subscriptions.applyPaidEntitlement.mock.invocationCallOrder[0]
       );

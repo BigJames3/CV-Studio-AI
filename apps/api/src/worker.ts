@@ -8,11 +8,14 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { isJsonLogFormat, JsonLogger } from './observability/json-logger';
 import { PdfBrowserPool } from './modules/cvs/export/pdf-generator.service';
 import { PdfRenderQueue } from './modules/cvs/export/pdf-render-queue.service';
 import { RedisService } from './redis/redis.module';
 
 async function bootstrap() {
+  const jsonLogger = isJsonLogFormat() ? new JsonLogger() : null;
+  if (jsonLogger) Logger.overrideLogger(jsonLogger);
   const logger = new Logger('PdfWorker');
   const kind = process.env.WORKER_KIND ?? 'pdf';
   if (kind !== 'pdf') {
@@ -20,7 +23,7 @@ async function bootstrap() {
   }
 
   const app = await NestFactory.createApplicationContext(AppModule, {
-    logger: ['error', 'warn', 'log'],
+    logger: jsonLogger ?? ['error', 'warn', 'log'],
   });
 
   const pool = app.get(PdfBrowserPool);

@@ -1,29 +1,27 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
-import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { httpLoggingMiddleware } from './common/middleware/http-logging.middleware';
+import { requestIdMiddleware } from './common/middleware/request-id.middleware';
 import { bootstrapObservability } from './observability';
+import { isJsonLogFormat, JsonLogger, logLevelsFromEnv } from './observability/json-logger';
 import { closeSentry } from './observability/sentry';
 import { shutdownPostHog } from './observability/posthog';
 import { applyHttpSecurity, shouldEnableSwagger } from './common/http-security';
 import { assertAuthSecrets } from './modules/auth/auth-secrets';
 
 async function bootstrap() {
+  // LOG_FORMAT=json: one JSON object per line, from the very first log (Sentry/PostHog init).
+  const jsonLogger = isJsonLogFormat() ? new JsonLogger() : null;
+  if (jsonLogger) Logger.overrideLogger(jsonLogger);
   bootstrapObservability();
-  const logLevel = (process.env.LOG_LEVEL ??
-    (process.env.NODE_ENV === 'production' ? 'log' : 'debug')) as
-    'log' | 'error' | 'warn' | 'debug' | 'verbose';
-  const loggerLevels: Array<'log' | 'error' | 'warn' | 'debug' | 'verbose'> =
-    logLevel === 'debug' || logLevel === 'verbose'
-      ? ['error', 'warn', 'log', 'debug']
-      : ['error', 'warn', 'log'];
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
-    logger: loggerLevels,
+    logger: jsonLogger ?? logLevelsFromEnv(),
   });
 
   assertAuthSecrets();
@@ -33,6 +31,8 @@ async function bootstrap() {
   app.useBodyParser('urlencoded', { limit: '1.5mb', extended: true });
 
   applyHttpSecurity(app);
+  // Before Nest's router, so 401/403/429/404 responses are logged with a request id too.
+  app.use(requestIdMiddleware, httpLoggingMiddleware);
   app.enableCors({
     origin: process.env.CORS_ORIGINS?.split(',') ?? [
       'http://localhost:3000',
@@ -53,7 +53,7 @@ async function bootstrap() {
     })
   );
   app.useGlobalFilters(new GlobalExceptionFilter());
-  app.useGlobalInterceptors(new LoggingInterceptor(), new TransformInterceptor());
+  app.useGlobalInterceptors(new TransformInterceptor());
 
   if (shouldEnableSwagger()) {
     const swaggerConfig = new DocumentBuilder()
@@ -82,8 +82,7 @@ async function bootstrap() {
   const port = Number(process.env.PORT ?? 3001);
   app.enableShutdownHooks();
   await app.listen(port);
-  // eslint-disable-next-line no-console
-  console.log(
+  new Logger('Bootstrap').log(
     `API listening on :${port}${shouldEnableSwagger() ? ' — Swagger /docs' : ' — Swagger disabled'}`
   );
 }

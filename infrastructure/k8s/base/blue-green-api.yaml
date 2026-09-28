@@ -54,6 +54,9 @@ spec:
             # Chromium work goes to the worker-pdf Deployment (inline fallback if none is up).
             - name: PDF_RENDER_MODE
               value: queue
+            # One JSON object per line: Fluent Bit (Merge_Log) indexes level, status, requestId...
+            - name: LOG_FORMAT
+              value: json
           readinessProbe:
             httpGet:
               path: /api/v1/health/ready

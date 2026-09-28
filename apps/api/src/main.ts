@@ -5,7 +5,8 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
-import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { httpLoggingMiddleware } from './common/middleware/http-logging.middleware';
+import { requestIdMiddleware } from './common/middleware/request-id.middleware';
 import { bootstrapObservability } from './observability';
 import { isJsonLogFormat, JsonLogger, logLevelsFromEnv } from './observability/json-logger';
 import { closeSentry } from './observability/sentry';
@@ -30,6 +31,8 @@ async function bootstrap() {
   app.useBodyParser('urlencoded', { limit: '1.5mb', extended: true });
 
   applyHttpSecurity(app);
+  // Before Nest's router, so 401/403/429/404 responses are logged with a request id too.
+  app.use(requestIdMiddleware, httpLoggingMiddleware);
   app.enableCors({
     origin: process.env.CORS_ORIGINS?.split(',') ?? [
       'http://localhost:3000',
@@ -50,7 +53,7 @@ async function bootstrap() {
     })
   );
   app.useGlobalFilters(new GlobalExceptionFilter());
-  app.useGlobalInterceptors(new LoggingInterceptor(), new TransformInterceptor());
+  app.useGlobalInterceptors(new TransformInterceptor());
 
   if (shouldEnableSwagger()) {
     const swaggerConfig = new DocumentBuilder()

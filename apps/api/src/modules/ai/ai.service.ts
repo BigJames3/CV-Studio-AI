@@ -14,6 +14,7 @@ import {
   type AtsExplainResult,
   type CareerAdviceResult,
   type GrammarCheckResult,
+  type LinkedInImportResult,
   type InterviewPrepResult,
   type JobMatchResult,
   type SkillsSuggestResult,
@@ -347,15 +348,48 @@ export class AiService {
     return this.runCvInsight(userId, dto.cvId, 'skills-suggest', { targetRole: dto.targetRole });
   }
 
+  /**
+   * LinkedIn data export → draft CV content (not saved: the client creates the CV from it).
+   * Deterministic mapping with no model call, so it does not use an AI quota. The account
+   * identity fills the name, email and photo the export does not carry.
+   */
   async linkedInImport(userId: string, dto: LinkedInImportDto) {
-    return {
-      status: 'queued',
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { firstName: true, lastName: true, email: true, avatarUrl: true },
+    });
+    const gateway = await runAiFeature({
       feature: 'linkedin-import',
-      promptId: 'linkedin_import',
-      model: this.modelFor('linkedin-import'),
-      jobId: `li_${userId}_${Date.now()}`,
-      hasProfileJson: Boolean(dto.profileJson),
-      message: 'Prefer deterministic map + optional LLM polish',
+      userId,
+      payload: {
+        files: dto.files,
+        fallbackIdentity: user
+          ? {
+              fullName: [user.firstName, user.lastName].filter(Boolean).join(' '),
+              email: user.email,
+              photoUrl: user.avatarUrl,
+            }
+          : undefined,
+      },
+    });
+
+    const data = gateway.data as LinkedInImportResult | undefined;
+    if (!gateway.ok || !data?.ok) {
+      throw new BadRequestException({
+        code: 'LINKEDIN_EXPORT_EMPTY',
+        message: data?.refusals?.join('; ') || gateway.error || 'LinkedIn import failed',
+      });
+    }
+
+    return {
+      status: 'completed',
+      feature: 'linkedin-import',
+      content: data.content,
+      stats: data.stats,
+      recognizedFiles: data.recognizedFiles,
+      warnings: data.warnings,
+      model: gateway.model ?? 'deterministic-v1',
+      provider: gateway.provider ?? 'heuristic',
     };
   }
 

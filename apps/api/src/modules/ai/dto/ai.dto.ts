@@ -146,15 +146,15 @@ export class SkillsSuggestDto {
 }
 
 export class LinkedInImportDto {
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty({
+    description:
+      'CSV text of the LinkedIn data export files, by file name ' +
+      '(Profile.csv, Positions.csv, Education.csv, Skills.csv, Languages.csv, ' +
+      'Certifications.csv, Projects.csv, Email Addresses.csv, PhoneNumbers.csv).',
+    example: { 'Positions.csv': 'Company Name,Title,Description,Location,Started On,Finished On' },
+  })
   @IsObject()
-  profileJson?: Record<string, unknown>;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  accessToken?: string;
+  files!: Record<string, string>;
 }
 
 export class ParsePdfDto {

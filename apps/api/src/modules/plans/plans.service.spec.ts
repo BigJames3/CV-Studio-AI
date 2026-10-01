@@ -74,7 +74,7 @@ describe('mapPlanToPublicDto', () => {
     expect(dto.entitlements.find((e) => e.feature === 'atsCheck')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'templates')).toEqual({
       feature: 'templates',
-      value: '4',
+      value: '10',
       included: true,
     });
     expect(dto.entitlements.some((e) => /docx/i.test(e.feature))).toBe(false);
@@ -83,7 +83,7 @@ describe('mapPlanToPublicDto', () => {
   it('advertises exactly the non-premium official templates for Free', () => {
     const free = TEMPLATE_SEEDS.filter((t) => !t.isPremium).length;
     expect(FREE_TEMPLATE_COUNT).toBe(free);
-    expect(FREE_TEMPLATE_COUNT).toBe(4);
+    expect(FREE_TEMPLATE_COUNT).toBe(10);
   });
 
   it('maps Pro with annual savings inputs and 14-day trial', () => {

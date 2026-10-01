@@ -61,6 +61,7 @@ export function Photo({
           height: size,
           borderRadius: '9999px',
           objectFit: 'cover',
+          flexShrink: 0,
           border: borderColor ? `3px solid ${borderColor}` : undefined,
         }}
       />
@@ -74,6 +75,7 @@ export function Photo({
         width: size,
         height: size,
         borderRadius: '9999px',
+        flexShrink: 0,
         background: borderColor ?? '#e5e7eb',
         color: '#fff',
         display: 'flex',

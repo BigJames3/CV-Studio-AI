@@ -1,6 +1,21 @@
 /** Shared CV + template customization types (Sprint 4) */
 
-export type TemplateKey = 'modern' | 'creative' | 'executive' | 'startup' | 'ats';
+export type TemplateKey =
+  | 'modern'
+  | 'creative'
+  | 'executive'
+  | 'startup'
+  | 'ats'
+  | 'classic'
+  | 'banner'
+  | 'compact'
+  | 'developer'
+  | 'health'
+  | 'minimal'
+  | 'elegant'
+  | 'timeline'
+  | 'sidebar'
+  | 'infographic';
 
 export type DensityPreset = 'compact' | 'normal' | 'spacious';
 

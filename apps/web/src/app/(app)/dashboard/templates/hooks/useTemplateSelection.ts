@@ -2,11 +2,12 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { TEMPLATE_CATALOG, categoryToKey, getTemplateById } from '@/lib/templates/catalog';
+import { TEMPLATE_CATALOG, getTemplateById, templateKeyOf } from '@/lib/templates/catalog';
 import type { TemplateCustomization, TemplateKey, TemplateListItem } from '@/lib/templates/types';
 import { cvsApi } from '@/lib/api';
 import { ApiError } from '@/lib/api/client';
 import { SAMPLE_CV } from '@/lib/templates/sample-cv';
+import { emptyContent } from '@/stores/editor-store';
 import { templateAccessType } from '@cvstudio/shared-utils';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
 
@@ -28,7 +29,7 @@ export function useTemplateSelection(initialId?: string) {
     [selectedId, templates]
   );
 
-  const templateKey: TemplateKey = categoryToKey(String(selected.category));
+  const templateKey: TemplateKey = templateKeyOf(selected);
 
   const selectTemplate = useCallback((t: TemplateListItem) => {
     setSelectedId(t.id);
@@ -62,18 +63,8 @@ export function useTemplateSelection(initialId?: string) {
     setCreating(true);
     setError(null);
     try {
-      const content = {
-        ...SAMPLE_CV,
-        identity: { ...SAMPLE_CV.identity, fullName: '' },
-        summary: { text: '' },
-        experiences: [],
-        education: [],
-        skills: [],
-        languages: [],
-        templateKey,
-        customization,
-        schemaVersion: 1,
-      };
+      // Start empty: the sample CV is only for previews, never the candidate's own data.
+      const content = { ...emptyContent(templateKey), customization };
       const cv = (await cvsApi.create({
         title: `CV — ${selected.name}`,
         templateId: selected.id,

@@ -6,6 +6,7 @@ import {
   EducationBlock,
   ExperienceBlock,
   LanguagesBlock,
+  MoreSections,
   ProjectsBlock,
   ReferencesBlock,
   SkillsBlock,
@@ -83,6 +84,7 @@ export function CompactTemplate({ data, customization: c }: TemplateProps) {
         <main>
           <ExperienceBlock data={data} c={c} theme={theme} variant="compact" />
           <ProjectsBlock data={data} c={c} theme={theme} />
+          <MoreSections data={data} c={c} theme={theme} />
         </main>
         <aside>
           <SkillsBlock data={data} c={c} theme={theme} />

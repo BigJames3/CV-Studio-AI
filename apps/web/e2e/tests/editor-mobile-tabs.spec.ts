@@ -11,6 +11,8 @@ const SECTIONS = [
   'projects',
   'certificates',
   'references',
+  'activities',
+  'more',
 ] as const;
 
 const FORM_BY_SECTION: Record<(typeof SECTIONS)[number], string> = {
@@ -23,6 +25,8 @@ const FORM_BY_SECTION: Record<(typeof SECTIONS)[number], string> = {
   projects: 'projects-form',
   certificates: 'certificates-form',
   references: 'references-form',
+  activities: 'activities-form',
+  more: 'more-info-form',
 };
 
 async function noPageOverflow(page: import('@playwright/test').Page) {

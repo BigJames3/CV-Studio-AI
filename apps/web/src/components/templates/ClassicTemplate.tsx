@@ -6,6 +6,7 @@ import {
   EducationBlock,
   ExperienceBlock,
   LanguagesBlock,
+  MoreSections,
   ProjectsBlock,
   ReferencesBlock,
   SkillsBlock,
@@ -70,6 +71,7 @@ export function ClassicTemplate({ data, customization: c }: TemplateProps) {
       <CertificationsBlock data={data} c={c} theme={theme} />
       <LanguagesBlock data={data} theme={theme} variant="inline" />
       <ProjectsBlock data={data} c={c} theme={theme} />
+      <MoreSections data={data} c={c} theme={theme} />
       <ReferencesBlock data={data} c={c} theme={theme} />
     </div>
   );

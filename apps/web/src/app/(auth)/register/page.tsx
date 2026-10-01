@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 
 const BENEFITS = [
   '1 CV modifiable en ligne',
-  '4 templates (Modern, Creative, Startup, ATS)',
+  '10 modèles de CV gratuits (Classique, Moderne, ATS…)',
   'Aucune carte bancaire requise',
   'Essai Pro 14 jours au checkout',
 ] as const;

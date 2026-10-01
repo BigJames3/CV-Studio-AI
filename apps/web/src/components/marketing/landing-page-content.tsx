@@ -11,7 +11,7 @@ const features = [
     body: 'Formulaire à gauche, aperçu live à droite. Autosave toutes les 5 secondes.',
   },
   {
-    title: '5 templates pro',
+    title: '15 modèles de CV',
     body: 'Modern, Creative, Executive, Startup et ATS — personnalisables couleurs et polices.',
   },
   {
@@ -46,7 +46,7 @@ const testimonials = [
 const faqs = [
   {
     q: 'Le plan Free est-il vraiment utilisable ?',
-    a: 'Oui : 1 CV, 4 templates et le score ATS, modifiables en ligne. L’export PDF, le partage et l’optimisation IA sont sur Pro.',
+    a: 'Oui : 1 CV, 10 modèles et le score ATS, modifiables en ligne. L’export PDF, le partage et l’optimisation IA sont sur Pro.',
   },
   {
     q: 'Mes données sont-elles sécurisées ?',

@@ -5,10 +5,13 @@ import { getCvLimit } from '@cvstudio/shared-utils';
 import { PrismaService } from '../../database/prisma.module';
 import { RedisService } from '../../redis/redis.module';
 import { isNonPlaceholderSecret } from '../payments/payment-env';
+import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 
 export const PLAN_CACHE_KEY = 'plans:all';
 export const PLAN_CACHE_TTL_SECONDS = 3600;
 export const TRIAL_PERIOD_DAYS = 14;
+/** Free users get every non-premium official template: derived, so the catalog cannot drift. */
+export const FREE_TEMPLATE_COUNT = TEMPLATE_SEEDS.filter((t) => !t.isPremium).length;
 
 export type PlanSlug = 'free' | 'pro' | 'business';
 export type PlanEntitlementDto = BillingCatalogEntitlement;
@@ -43,7 +46,7 @@ type PlanRow = {
 export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   {
     name: 'Free',
-    description: '1 CV, 5 templates, PDF export, no AI',
+    description: '1 CV, 4 templates, ATS score, no PDF export, no AI optimization',
     priceMonthly: 0,
     priceYearly: 0,
     cvLimit: 1,
@@ -55,7 +58,7 @@ export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   },
   {
     name: 'Pro',
-    description: '5 CVs, 50+ templates, all AI features, ATS, portfolio',
+    description: '5 CVs, unlimited templates, AI optimization, ATS check',
     priceMonthly: 9.99,
     priceYearly: 99,
     cvLimit: 5,
@@ -67,7 +70,7 @@ export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   },
   {
     name: 'Business',
-    description: '20 CVs, everything in Pro + team collab, analytics, API, branding',
+    description: '20 CVs, everything in Pro',
     priceMonthly: 29.99,
     priceYearly: 299,
     cvLimit: 20,
@@ -94,6 +97,9 @@ function slugFromName(name: string): PlanSlug {
   throw new Error(`Unknown plan name: ${name}`);
 }
 
+/** Plan columns kept in the database but not shipped: the catalog must not list them. */
+export const UNSHIPPED_FEATURES = ['collaborate', 'customDomain', 'apiAccess'] as const;
+
 export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
   const id = slugFromName(plan.name);
   const priceMonthly = toNumber(plan.priceMonthly);
@@ -101,37 +107,35 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
   const cvLimit = getCvLimit(id);
   const paid = priceMonthly > 0;
 
+  // Team collaboration, custom domain and API access have no route yet: never advertise them,
+  // whatever the plan row says (see UNSHIPPED_FEATURES).
   const entitlements: PlanEntitlementDto[] = [
     {
       feature: 'cvLimit',
       value: String(cvLimit),
       included: true,
     },
-    { feature: 'downloadPdf', value: 'true', included: true },
-    { feature: 'share', value: 'true', included: true },
+    // Same rule as canDownloadPDF / canShare: PDF and sharing are paid features.
+    { feature: 'downloadPdf', value: String(id !== 'free'), included: id !== 'free' },
+    { feature: 'share', value: String(id !== 'free'), included: id !== 'free' },
     { feature: 'aiFeatures', value: String(plan.aiFeatures), included: plan.aiFeatures },
+    // Same rule as the 'ai:ats' entitlement: the ATS score is free on every plan.
+    { feature: 'atsCheck', value: 'true', included: true },
     {
       feature: 'templates',
-      value: id === 'free' ? '5' : 'unlimited',
+      value: id === 'free' ? String(FREE_TEMPLATE_COUNT) : 'unlimited',
       included: true,
-    },
-    {
-      feature: 'collaborate',
-      value: String(id === 'business'),
-      included: id === 'business',
     },
     {
       feature: 'prioritySupport',
       value: String(plan.prioritySupport),
       included: plan.prioritySupport,
     },
-    { feature: 'customDomain', value: String(plan.customDomain), included: plan.customDomain },
     {
       feature: 'marketplaceAccess',
       value: String(plan.marketplaceAccess),
       included: plan.marketplaceAccess,
     },
-    { feature: 'apiAccess', value: String(plan.apiAccess), included: plan.apiAccess },
   ];
 
   return {

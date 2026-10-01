@@ -40,7 +40,7 @@ describe('resolveEffectiveTier', () => {
     expect(resolveEffectiveTier(source, NOW)).toBe('pro');
   });
 
-  it('downgrades an "active" subscription whose period ended (expired CinetPay)', () => {
+  it('downgrades an "active" subscription whose period ended', () => {
     for (const tier of ['pro', 'business']) {
       const source = {
         subscriptionTier: tier,

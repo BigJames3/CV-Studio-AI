@@ -1,8 +1,7 @@
-import { Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { PATH_METADATA } from '@nestjs/common/constants';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
-import { CinetpayGateway } from './gateways/cinetpay.gateway';
 import { IS_PUBLIC_KEY, type AuthUser } from '../../common/decorators';
 
 const user: AuthUser = {
@@ -15,13 +14,8 @@ const user: AuthUser = {
 describe('PaymentsController', () => {
   const payments = {
     history: jest.fn(),
-    getStatus: jest.fn(),
     handleStripeWebhook: jest.fn(),
-    availableMethods: jest.fn(),
-  };
-  const cinetpayGateway = {
-    handleCinetpayNotify: jest.fn(),
-    getPaymentStatus: jest.fn(),
+    confirmCheckoutSession: jest.fn(),
   };
 
   let controller: PaymentsController;
@@ -30,81 +24,39 @@ describe('PaymentsController', () => {
     jest.clearAllMocks();
     const module = await Test.createTestingModule({
       controllers: [PaymentsController],
-      providers: [
-        { provide: PaymentsService, useValue: payments },
-        { provide: CinetpayGateway, useValue: cinetpayGateway },
-      ],
+      providers: [{ provide: PaymentsService, useValue: payments }],
     }).compile();
     controller = module.get(PaymentsController);
   });
 
-  describe('POST /payments/webhook/cinetpay', () => {
-    it('accepts a CinetPay notify body and always returns 200 payload', async () => {
-      cinetpayGateway.handleCinetpayNotify.mockResolvedValue({ received: true });
+  it('GET /payments/history returns the signed-in user history', async () => {
+    payments.history.mockResolvedValue({ items: [] });
+    await expect(controller.history(user)).resolves.toEqual({ items: [] });
+    expect(payments.history).toHaveBeenCalledWith('user-1');
+  });
 
-      const result = await controller.cinetpayWebhook({
-        body: { cpm_trans_id: 'cv_abc_1', cpm_status: 'ACCEPTED' },
-        method: 'POST',
-      });
+  it('POST /payments/checkout/confirm confirms the session for the signed-in user', async () => {
+    payments.confirmCheckoutSession.mockResolvedValue({ confirmed: true });
+    await expect(controller.confirmCheckout(user, { sessionId: 'cs_test_1' })).resolves.toEqual({
+      confirmed: true,
+    });
+    expect(payments.confirmCheckoutSession).toHaveBeenCalledWith('user-1', 'cs_test_1');
+  });
 
-      expect(result).toEqual({ received: true });
-      expect(cinetpayGateway.handleCinetpayNotify).toHaveBeenCalledWith(
-        { cpm_trans_id: 'cv_abc_1', cpm_status: 'ACCEPTED' },
-        'POST'
+  it('exposes only history, checkout confirmation and the Stripe webhook (CinetPay removed)', () => {
+    const routes = Object.getOwnPropertyNames(PaymentsController.prototype)
+      .filter((name) => name !== 'constructor')
+      .map((name) =>
+        Reflect.getMetadata(
+          PATH_METADATA,
+          (PaymentsController.prototype as unknown as Record<string, object>)[name]
+        )
       );
-    });
-
-    it('returns received=true even if the gateway throws (idempotent)', async () => {
-      cinetpayGateway.handleCinetpayNotify.mockRejectedValue(new Error('boom'));
-
-      await expect(
-        controller.cinetpayWebhook({
-          body: { cpm_trans_id: 'cv_abc_1' },
-          method: 'POST',
-        })
-      ).resolves.toEqual({ received: true });
-    });
-
-    it('logs the transaction id', async () => {
-      cinetpayGateway.handleCinetpayNotify.mockResolvedValue({ received: true });
-      const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-
-      await controller.cinetpayWebhook({
-        body: { cpm_trans_id: 'cv_log_99' },
-        method: 'POST',
-      });
-
-      expect(log).toHaveBeenCalledWith(expect.stringContaining('cv_log_99'));
-      log.mockRestore();
-    });
-
-    it('GET ping is public and returns 200 payload', async () => {
-      cinetpayGateway.handleCinetpayNotify.mockResolvedValue({ received: true });
-      await expect(controller.cinetpayWebhookPing()).resolves.toEqual({ received: true });
-      expect(cinetpayGateway.handleCinetpayNotify).toHaveBeenCalledWith({}, 'GET');
-      expect(
-        Reflect.getMetadata(IS_PUBLIC_KEY, PaymentsController.prototype.cinetpayWebhookPing)
-      ).toBe(true);
-    });
+    expect(routes.sort()).toEqual(['checkout/confirm', 'history', 'webhook']);
   });
 
-  describe('GET /payments/methods', () => {
-    it('returns configured providers', async () => {
-      payments.availableMethods.mockReturnValue({
-        stripe: true,
-        cinetpay: false,
-        cinetpayFailClosed: true,
-      });
-      expect(controller.paymentMethods()).toEqual({
-        stripe: true,
-        cinetpay: false,
-        cinetpayFailClosed: true,
-      });
-    });
-  });
-
-  describe('POST /payments/webhook (Stripe — regression)', () => {
-    it('stays on the Stripe handler and never calls CinetPay', async () => {
+  describe('POST /payments/webhook (Stripe)', () => {
+    it('passes the raw body and signature to the Stripe handler', async () => {
       payments.handleStripeWebhook.mockResolvedValue({ received: true });
       const raw = Buffer.from('{"id":"evt_test"}');
 
@@ -112,7 +64,12 @@ describe('PaymentsController', () => {
 
       expect(result).toEqual({ received: true });
       expect(payments.handleStripeWebhook).toHaveBeenCalledWith(raw, 'whsec_test');
-      expect(cinetpayGateway.handleCinetpayNotify).not.toHaveBeenCalled();
+    });
+
+    it('rejects a request without signature', () => {
+      const raw = Buffer.from('{}');
+      expect(() => controller.webhook({ rawBody: raw, body: raw }, '')).toThrow();
+      expect(payments.handleStripeWebhook).not.toHaveBeenCalled();
     });
 
     it('remains @Public (Stripe servers have no JWT)', () => {
@@ -123,38 +80,6 @@ describe('PaymentsController', () => {
       expect(
         Reflect.getMetadata('THROTTLER:SKIPdefault', PaymentsController.prototype.webhook)
       ).toBe(true);
-    });
-  });
-
-  describe('GET /payments/status/:transactionId', () => {
-    it('returns status, paymentMethod, and transactionId', async () => {
-      payments.getStatus.mockResolvedValue({
-        status: 'pending',
-        paymentMethod: 'cinetpay',
-        transactionId: 'cv_abc_1',
-      });
-
-      await expect(controller.getPaymentStatus(user, 'cv_abc_1')).resolves.toEqual({
-        status: 'pending',
-        paymentMethod: 'cinetpay',
-        transactionId: 'cv_abc_1',
-      });
-      expect(payments.getStatus).toHaveBeenCalledWith('user-1', 'cv_abc_1');
-    });
-
-    it('returns not_found for an unknown transaction', async () => {
-      payments.getStatus.mockResolvedValue({ status: 'not_found', transactionId: 'missing' });
-
-      await expect(controller.getPaymentStatus(user, 'missing')).resolves.toEqual({
-        status: 'not_found',
-        transactionId: 'missing',
-      });
-    });
-
-    it('requires auth so polling stays scoped to the signed-in user', () => {
-      expect(
-        Reflect.getMetadata(IS_PUBLIC_KEY, PaymentsController.prototype.getPaymentStatus)
-      ).toBeFalsy();
     });
   });
 });

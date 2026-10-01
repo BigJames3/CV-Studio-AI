@@ -31,10 +31,7 @@ Légende : **P0** bloquant prod · **P1** bloquant public payant · **P2** aprè
 - [ ] `deleteMe` annule / schedule cancel Stripe
 - [ ] Stripe **test** validé avec `4242…` de bout en bout
 - [ ] Stripe **live** : décision explicite (ne pas cocher par défaut)
-- [ ] CinetPay : `CINETPAY_API_KEY` / `CINETPAY_SITE_ID` / `API_URL` / `APP_URL` / `CINETPAY_FAIL_CLOSED`
-- [ ] Fail-closed : clés CinetPay vides → billing n’affiche que Stripe (`GET /payments/methods`)
-- [ ] Webhook CinetPay testé (`POST /api/v1/payments/webhook/cinetpay` notify mock)
-- [ ] Cron expire-pending : logs après 1 h (Nest `@Cron` et/ou CronJob k8s)
+- [ ] Fail-closed : clés Stripe absentes → checkout 400 `STRIPE_NOT_CONFIGURED`, webhook 503
 
 ### 1.3 Legal / GDPR (P1 public UE)
 
@@ -74,7 +71,7 @@ Légende : **P0** bloquant prod · **P1** bloquant public payant · **P2** aprè
 - [ ] `CORS_ORIGINS` / `APP_URL`
 - [ ] `SMTP_*` + `MAIL_FROM` domaine vérifié
 - [ ] `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` + 4 prices
-- [ ] `CINETPAY_API_KEY` / `CINETPAY_SITE_ID` / `API_URL` / `APP_URL` / `CINETPAY_FAIL_CLOSED`
+- [ ] `API_URL` / `APP_URL`
 - [ ] `SENTRY_DSN` (SDK `@sentry/node` branché)
 - [ ] `POSTHOG_API_KEY` / `POSTHOG_HOST`
 - [ ] `ANALYTICS_MARKETING_SPEND_MONTHLY` (0 = CAC null)
@@ -126,7 +123,6 @@ Légende : **P0** bloquant prod · **P1** bloquant public payant · **P2** aprè
 - [ ] Vérifier health API + page `/` web
 - [ ] Enregistrer webhook Stripe sur l’URL **staging**, puis prod
 - [ ] 1 paiement test Stripe sur staging
-- [ ] 1 paiement test CinetPay (sandbox + notify) **ou** fail-closed volontaire (clés vides)
 - [ ] Rollback plan écrit (previous image / previous function + [production-rollback.md](../runbooks/production-rollback.md))
 
 **Ne pas** cocher « automatic deploy on push main » tant que les P0 ne sont pas mergés.

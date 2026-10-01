@@ -10,8 +10,8 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "dev": "turbo run dev --parallel --filter=@cvstudio/api --filter=@cvstudio/web",
-    "dev:all": "turbo run dev --parallel",
+    "dev": "turbo run dev --filter=@cvstudio/api --filter=@cvstudio/web",
+    "dev:all": "turbo run dev",
     "dev:api": "turbo run dev --filter=@cvstudio/api",
     "dev:web": "turbo run dev --filter=@cvstudio/web",
     "dev:mobile": "turbo run start --filter=@cvstudio/mobile",
@@ -39,6 +39,7 @@
     "db:migrate": "pnpm --filter @cvstudio/api exec prisma migrate dev",
     "db:migrate:deploy": "pnpm --filter @cvstudio/api exec prisma migrate deploy",
     "db:seed": "pnpm --filter @cvstudio/api exec prisma db seed",
+    "stripe:check": "pnpm --filter @cvstudio/api stripe:check",
     "db:studio": "pnpm --filter @cvstudio/api exec prisma studio",
     "db:reset": "pnpm --filter @cvstudio/api exec prisma migrate reset",
     "docker:up": "docker compose up -d postgres redis mailpit",

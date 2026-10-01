@@ -1,4 +1,10 @@
-import { PaymentsService, mapStripePriceToPlan, resolvePaidPlan } from './payments.service';
+import {
+  PaymentsService,
+  invoiceSubscriptionId,
+  mapStripePriceToPlan,
+  resolvePaidPlan,
+  subscriptionPeriod,
+} from './payments.service';
 import { StripeWebhookStoreService } from './stripe-webhook-store.service';
 import { StripeAlertService } from './stripe-alert.service';
 import type Stripe from 'stripe';
@@ -175,6 +181,54 @@ describe('PaymentsService webhook fail-closed', () => {
       process.env.NODE_ENV = prevEnv;
       process.env.STRIPE_FAIL_CLOSED = prevFail;
     }
+  });
+
+  describe('webhook signature (account + Connect endpoints)', () => {
+    const payload = JSON.stringify({ id: 'evt_sig', object: 'event', type: 'account.updated' });
+
+    function signedWith(secret: string) {
+      const stripe = (service as unknown as { stripe: Stripe }).stripe;
+      return stripe.webhooks.generateTestHeaderString({ payload, secret });
+    }
+
+    beforeEach(() => {
+      process.env.STRIPE_CONNECT_WEBHOOK_SECRET = 'whsec_connect';
+      jest.spyOn(service, 'processEventWithRetry').mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      delete process.env.STRIPE_CONNECT_WEBHOOK_SECRET;
+    });
+
+    it('accepts an event signed by the account endpoint secret', async () => {
+      await expect(
+        service.handleStripeWebhook(Buffer.from(payload), signedWith('whsec_real'))
+      ).resolves.toEqual({ received: true });
+      expect(service.processEventWithRetry).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'evt_sig' })
+      );
+    });
+
+    it('accepts an event signed by the Connect endpoint secret', async () => {
+      await expect(
+        service.handleStripeWebhook(Buffer.from(payload), signedWith('whsec_connect'))
+      ).resolves.toEqual({ received: true });
+    });
+
+    it('rejects a Connect event when STRIPE_CONNECT_WEBHOOK_SECRET is not set', async () => {
+      delete process.env.STRIPE_CONNECT_WEBHOOK_SECRET;
+      await expect(
+        service.handleStripeWebhook(Buffer.from(payload), signedWith('whsec_connect'))
+      ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'INVALID_WEBHOOK' }) });
+      expect(service.processEventWithRetry).not.toHaveBeenCalled();
+    });
+
+    it('rejects an event signed by an unknown secret', async () => {
+      await expect(
+        service.handleStripeWebhook(Buffer.from(payload), signedWith('whsec_attacker'))
+      ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'INVALID_WEBHOOK' }) });
+      expect(service.processEventWithRetry).not.toHaveBeenCalled();
+    });
   });
 
   it('skips already processed events (idempotency)', async () => {
@@ -364,6 +418,253 @@ describe('PaymentsService webhook fail-closed', () => {
       expect.objectContaining({ amount: 19.99, currency: 'USD' })
     );
     expect(webhookStore.markProcessed).toHaveBeenCalledWith('evt_fail');
+  });
+
+  describe('events rendered in a newer Stripe API version (2025-03-31.basil+)', () => {
+    beforeEach(() => {
+      subscriptions.applyPaidEntitlement.mockReset().mockResolvedValue(undefined);
+      prisma.subscription.findUnique.mockReset().mockResolvedValue(null);
+    });
+
+    it('reads the billing period from the subscription item', async () => {
+      const event = mockSubscriptionEvent({ cancelAtPeriodEnd: false, plan: 'pro' });
+      const sub = event.data.object as unknown as Record<string, unknown>;
+      delete sub.current_period_start;
+      delete sub.current_period_end;
+      sub.items = {
+        data: [
+          {
+            price: { id: 'price_pro_month' },
+            current_period_start: 1_800_000_000,
+            current_period_end: 1_802_592_000,
+          },
+        ],
+      };
+
+      await service.processEventWithRetry(event);
+
+      expect(subscriptions.applyPaidEntitlement).toHaveBeenCalledWith(
+        expect.objectContaining({
+          periodStart: new Date(1_800_000_000 * 1000),
+          periodEnd: new Date(1_802_592_000 * 1000),
+        })
+      );
+    });
+
+    it('finds the subscription of an invoice through invoice.parent', async () => {
+      prisma.subscription.findFirst.mockResolvedValue({ id: 'local-sub', userId: 'user-1' });
+      prisma.payment.create.mockResolvedValue({});
+      prisma.invoice.upsert.mockResolvedValue({});
+
+      await service.processEventWithRetry({
+        id: 'evt_basil_invoice',
+        type: 'invoice.paid',
+        data: {
+          object: {
+            id: 'in_basil',
+            number: 'INV-43',
+            parent: { subscription_details: { subscription: 'sub_1' } },
+            amount_paid: 999,
+            currency: 'eur',
+            created: 1_800_000_000,
+          },
+        },
+      } as never);
+
+      expect(prisma.subscription.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { stripeSubscriptionId: 'sub_1' } })
+      );
+      expect(prisma.payment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ transactionId: 'in_basil', currency: 'EUR' }),
+        })
+      );
+    });
+  });
+
+  describe('invoice received before checkout.session.completed', () => {
+    beforeEach(() => {
+      subscriptions.applyPaidEntitlement.mockReset().mockResolvedValue(undefined);
+      prisma.subscription.findUnique.mockReset().mockResolvedValue(null);
+    });
+
+    const invoiceEvent = {
+      id: 'evt_early_invoice',
+      type: 'invoice.paid',
+      data: {
+        object: {
+          id: 'in_first',
+          number: 'INV-1',
+          subscription: 'sub_1',
+          amount_paid: 0,
+          currency: 'eur',
+          created: 1_700_000_000,
+        },
+      },
+    } as never;
+
+    it('syncs the subscription from Stripe, then records the payment', async () => {
+      prisma.subscription.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue({ id: 'local-sub', userId: 'user-1' });
+      prisma.subscription.findUnique.mockResolvedValue(null);
+      prisma.payment.create.mockResolvedValue({});
+      prisma.invoice.upsert.mockResolvedValue({});
+      const retrieve = attachStripeRetrieve('price_pro_month', false, { userId: 'user-1' });
+
+      await service.processEventWithRetry(invoiceEvent);
+
+      expect(retrieve).toHaveBeenCalledWith('sub_1');
+      expect(subscriptions.applyPaidEntitlement).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-1', plan: 'pro', stripeSubscriptionId: 'sub_1' })
+      );
+      expect(prisma.payment.create).toHaveBeenCalled();
+      expect(webhookStore.markProcessed).toHaveBeenCalledWith('evt_early_invoice');
+    });
+
+    it('still fails when the Stripe subscription names no user', async () => {
+      prisma.subscription.findFirst.mockResolvedValue(null);
+      attachStripeRetrieve('price_pro_month', false, {});
+      silenceBackoff();
+
+      await expect(service.processEventWithRetry(invoiceEvent)).rejects.toThrow(
+        /Subscription not found/
+      );
+      expect(subscriptions.applyPaidEntitlement).not.toHaveBeenCalled();
+      expect(prisma.payment.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('confirmCheckoutSession (return from Stripe Checkout)', () => {
+    const paidInvoice = {
+      id: 'in_first',
+      number: 'INV-1',
+      status: 'paid',
+      subscription: 'sub_1',
+      amount_paid: 0,
+      currency: 'eur',
+      created: 1_700_000_000,
+    };
+
+    function attachSession(session: Record<string, unknown> | Error) {
+      const retrieveSub = attachStripeRetrieve('price_pro_month', false, { userId: 'user-1' });
+      const retrieveSession =
+        session instanceof Error
+          ? jest.fn().mockRejectedValue(session)
+          : jest.fn().mockResolvedValue({
+              id: 'cs_test_1',
+              mode: 'subscription',
+              status: 'complete',
+              client_reference_id: 'user-1',
+              metadata: { userId: 'user-1', plan: 'pro' },
+              customer: 'cus_1',
+              subscription: 'sub_1',
+              invoice: paidInvoice,
+              ...session,
+            });
+      (service as unknown as { stripe: Record<string, unknown> }).stripe = {
+        subscriptions: { retrieve: retrieveSub },
+        checkout: { sessions: { retrieve: retrieveSession } },
+      };
+      return retrieveSession;
+    }
+
+    beforeEach(() => {
+      subscriptions.applyPaidEntitlement.mockReset().mockResolvedValue(undefined);
+      prisma.subscription.findUnique.mockReset().mockResolvedValue(null);
+      prisma.subscription.findFirst
+        .mockReset()
+        .mockResolvedValue({ id: 'local-sub', userId: 'user-1' });
+      prisma.payment.create.mockReset().mockResolvedValue({});
+      prisma.invoice.upsert.mockReset().mockResolvedValue({});
+    });
+
+    it('reads the session from Stripe, grants the plan and records the first invoice', async () => {
+      const retrieveSession = attachSession({});
+
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_1')).resolves.toEqual({
+        confirmed: true,
+      });
+
+      expect(retrieveSession).toHaveBeenCalledWith('cs_test_1', { expand: ['invoice'] });
+      expect(subscriptions.applyPaidEntitlement).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-1', plan: 'pro', stripeSubscriptionId: 'sub_1' })
+      );
+      expect(prisma.invoice.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { invoiceNumber: 'INV-1' } })
+      );
+    });
+
+    it("refuses another user's session without revealing it", async () => {
+      attachSession({ client_reference_id: 'user-2', metadata: { userId: 'user-2' } });
+
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_1')).rejects.toMatchObject({
+        response: { code: 'CHECKOUT_SESSION_NOT_FOUND' },
+      });
+      expect(subscriptions.applyPaidEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('refuses a one-off (marketplace) payment session', async () => {
+      attachSession({ mode: 'payment', metadata: { type: 'marketplace', userId: 'user-1' } });
+
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_1')).rejects.toMatchObject({
+        response: { code: 'CHECKOUT_SESSION_NOT_FOUND' },
+      });
+      expect(subscriptions.applyPaidEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('grants nothing while the session is not complete', async () => {
+      attachSession({ status: 'open', invoice: null });
+
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_1')).resolves.toEqual({
+        confirmed: false,
+      });
+      expect(subscriptions.applyPaidEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('does not record an unpaid invoice', async () => {
+      attachSession({ invoice: { ...paidInvoice, status: 'open' } });
+
+      await service.confirmCheckoutSession('user-1', 'cs_test_1');
+      expect(subscriptions.applyPaidEntitlement).toHaveBeenCalled();
+      expect(prisma.invoice.upsert).not.toHaveBeenCalled();
+    });
+
+    it('maps an unknown session to 404 and a Stripe outage to 503', async () => {
+      attachSession(
+        Object.assign(new Error('No such checkout.session'), { code: 'resource_missing' })
+      );
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_x')).rejects.toMatchObject({
+        response: { code: 'CHECKOUT_SESSION_NOT_FOUND' },
+      });
+
+      attachSession(new Error('socket hang up'));
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_x')).rejects.toMatchObject({
+        response: { code: 'STRIPE_UNAVAILABLE' },
+      });
+    });
+
+    it('treats a row created at the same moment by the webhook as confirmed', async () => {
+      attachSession({});
+      const { Prisma } = jest.requireActual('@prisma/client');
+      subscriptions.applyPaidEntitlement.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+          code: 'P2002',
+          clientVersion: 'test',
+        })
+      );
+
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_1')).resolves.toEqual({
+        confirmed: true,
+      });
+    });
+
+    it('fails closed when Stripe is not configured', async () => {
+      (service as unknown as { stripe: null }).stripe = null;
+      await expect(service.confirmCheckoutSession('user-1', 'cs_test_1')).rejects.toMatchObject({
+        response: { code: 'STRIPE_NOT_CONFIGURED' },
+      });
+    });
   });
 
   describe('P0-1: Lock Processing', () => {
@@ -606,56 +907,40 @@ describe('StripeWebhookStoreService helpers', () => {
   });
 });
 
-describe('PaymentsService.getStatus', () => {
-  const prisma = {
-    payment: { findUnique: jest.fn() },
-  };
-
-  const service = new PaymentsService(
-    prisma as never,
-    { applyPaidEntitlement: jest.fn() } as never,
-    { sendPaymentFailed: jest.fn() } as never,
-    {} as never,
-    { captureException: jest.fn() } as never
-  );
-
-  beforeEach(() => {
-    jest.clearAllMocks();
+describe('Stripe API version helpers', () => {
+  it('subscriptionPeriod prefers the subscription fields, then the first item', () => {
+    expect(
+      subscriptionPeriod({
+        id: 'sub_old',
+        current_period_start: 10,
+        current_period_end: 20,
+      } as unknown as Stripe.Subscription)
+    ).toEqual({ start: new Date(10_000), end: new Date(20_000) });
+    expect(
+      subscriptionPeriod({
+        id: 'sub_new',
+        items: { data: [{ current_period_start: 30, current_period_end: 40 }] },
+      } as unknown as Stripe.Subscription)
+    ).toEqual({ start: new Date(30_000), end: new Date(40_000) });
+    expect(() =>
+      subscriptionPeriod({ id: 'sub_x', items: { data: [] } } as unknown as Stripe.Subscription)
+    ).toThrow(/no billing period/);
   });
 
-  it('returns payment status for the owning user', async () => {
-    prisma.payment.findUnique.mockResolvedValue({
-      status: 'pending',
-      paymentMethod: 'cinetpay',
-      subscription: { userId: 'user-1' },
-    });
-
-    await expect(service.getStatus('user-1', 'tx_123')).resolves.toEqual({
-      status: 'pending',
-      paymentMethod: 'cinetpay',
-      transactionId: 'tx_123',
-    });
-  });
-
-  it('hides payments owned by another user', async () => {
-    prisma.payment.findUnique.mockResolvedValue({
-      status: 'completed',
-      paymentMethod: 'cinetpay',
-      subscription: { userId: 'user-1' },
-    });
-
-    await expect(service.getStatus('other-user', 'tx_123')).resolves.toEqual({
-      status: 'not_found',
-      transactionId: 'tx_123',
-    });
-  });
-
-  it('returns not_found when the transaction is missing', async () => {
-    prisma.payment.findUnique.mockResolvedValue(null);
-
-    await expect(service.getStatus('user-1', 'missing')).resolves.toEqual({
-      status: 'not_found',
-      transactionId: 'missing',
-    });
+  it('invoiceSubscriptionId reads invoice.subscription or invoice.parent', () => {
+    expect(invoiceSubscriptionId({ subscription: 'sub_a' } as unknown as Stripe.Invoice)).toBe(
+      'sub_a'
+    );
+    expect(
+      invoiceSubscriptionId({ subscription: { id: 'sub_b' } } as unknown as Stripe.Invoice)
+    ).toBe('sub_b');
+    expect(
+      invoiceSubscriptionId({
+        parent: { subscription_details: { subscription: 'sub_c' } },
+      } as unknown as Stripe.Invoice)
+    ).toBe('sub_c');
+    expect(
+      invoiceSubscriptionId({ id: 'in_one_off' } as unknown as Stripe.Invoice)
+    ).toBeUndefined();
   });
 });

@@ -68,7 +68,7 @@ describe('CvsService feature gates', () => {
     expect(prisma.cv.create).toHaveBeenCalled();
   });
 
-  it('create blocks premium template for free/pro', async () => {
+  it('create blocks premium template when the plan lacks it (free)', async () => {
     prisma.template.findFirst.mockResolvedValue({ isPremium: true });
     entitlements.assertCan
       .mockResolvedValueOnce(undefined)
@@ -76,6 +76,70 @@ describe('CvsService feature gates', () => {
     await expect(
       service.create('u1', { title: 'Exec', templateId: '11111111-1111-4111-8111-111111111103' })
     ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(entitlements.assertCan).toHaveBeenCalledWith(
+      'u1',
+      'templates:pro',
+      'This template requires a Pro or Business plan'
+    );
+  });
+
+  describe('premium template picked in the editor (content.templateKey)', () => {
+    const denyPremium = () =>
+      entitlements.assertCan.mockImplementation(async (_userId: string, feature: string) => {
+        if (feature === 'templates:pro') {
+          throw new ForbiddenException({ code: 'ENTITLEMENT_REQUIRED' });
+        }
+      });
+
+    it('update blocks switching to a premium template without the plan', async () => {
+      denyPremium();
+      await expect(
+        service.update('u1', 'cv-1', { content: { templateKey: 'executive' } })
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(entitlements.assertCan).toHaveBeenCalledWith(
+        'u1',
+        'templates:pro',
+        'This template requires a Pro or Business plan'
+      );
+      expect(prisma.cv.update).not.toHaveBeenCalled();
+    });
+
+    it('update allows switching to a premium template with the plan', async () => {
+      await service.update('u1', 'cv-1', { content: { templateKey: 'executive' } });
+      expect(entitlements.assertCan).toHaveBeenCalledWith(
+        'u1',
+        'templates:pro',
+        expect.any(String)
+      );
+      expect(prisma.cv.update).toHaveBeenCalled();
+    });
+
+    it('update keeps a CV that already uses a premium template editable', async () => {
+      denyPremium();
+      prisma.cv.findFirst.mockResolvedValueOnce({
+        id: 'cv-1',
+        userId: 'u1',
+        content: { templateKey: 'executive' },
+        deletedAt: null,
+      });
+      await service.update('u1', 'cv-1', { content: { templateKey: 'executive' } });
+      expect(prisma.cv.update).toHaveBeenCalled();
+    });
+
+    it('update never gates free templates', async () => {
+      denyPremium();
+      await service.update('u1', 'cv-1', { content: { templateKey: 'ats' } });
+      expect(entitlements.assertCan).not.toHaveBeenCalled();
+      expect(prisma.cv.update).toHaveBeenCalled();
+    });
+
+    it('create blocks a premium templateKey in the initial content', async () => {
+      denyPremium();
+      await expect(
+        service.create('u1', { title: 'Exec', content: { templateKey: 'executive' } })
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.cv.create).not.toHaveBeenCalled();
+    });
   });
 
   it('share denies free users', async () => {

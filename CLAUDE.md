@@ -13,7 +13,7 @@ pnpm 9.15.0 workspaces (`apps/*`, `packages/*`) orchestrated by Turborepo 2. Nod
 | `apps/mobile` (`@cvstudio/mobile`)            | Expo app (partial, Phase 4).                                                     |
 | `packages/ai-service`                         | Multi-model AI gateway, built to `dist/` and consumed by the API.                |
 | `packages/ui`                                 | shadcn/Radix design system + Storybook + Vitest. `shared-ui` just re-exports it. |
-| `packages/shared-types`, `shared-utils`       | Shared TS used by api and web (source-exported via `./src/index.ts`).            |
+| `packages/shared-types`, `shared-utils`       | Shared TS used by api and web, built to CommonJS in `dist/`.                     |
 | `packages/eslint-config`, `typescript-config` | Shared configs.                                                                  |
 
 Most docs (`docs/`, README) are written in French. Canonical specs: `docs/ARCHITECTURE-CV-STUDIO-AI.md`, `docs/API-CV-STUDIO-AI.md`, `docs/FRONTEND-CV-STUDIO-AI.md`, `docs/DATABASE-CV-STUDIO-AI.md`, `docs/INFRASTRUCTURE-CV-STUDIO-AI.md`. Architecture decisions live in `docs/adr/`.
@@ -35,7 +35,7 @@ pnpm format                         # prettier --write
 pnpm lint:fix                       # NOTE: actually `prettier --check`, it does not fix anything
 ```
 
-Turbo `lint`, `typecheck`, `test` and `build` all depend on `^build`, so upstream packages (`ai-service`, `shared-*`) get built first.
+Turbo `dev`, `lint`, `typecheck`, `test` and `build` all depend on `^build`, so upstream packages (`ai-service`, `shared-*`) get built first. `pnpm dev` does not watch them: after editing `packages/*`, restart it.
 
 ### Running a single package / test
 
@@ -64,13 +64,13 @@ The schema is `apps/api/prisma/schema.prisma` (the single source of truth; `docs
 
 ## API architecture (apps/api)
 
-- `src/main.ts`: global prefix `/api`, URI versioning (default `v1`, so routes are `/api/v1/...`), strict `ValidationPipe` (`whitelist` + `forbidNonWhitelisted`), 1.5 MB body limit, `rawBody: true` (needed for Stripe/CinetPay webhook signature checks), Swagger gated by `shouldEnableSwagger()`, and `assertAuthSecrets()` fails boot on weak or missing secrets.
+- `src/main.ts`: global prefix `/api`, URI versioning (default `v1`, so routes are `/api/v1/...`), strict `ValidationPipe` (`whitelist` + `forbidNonWhitelisted`), 1.5 MB body limit, `rawBody: true` (needed for the Stripe webhook signature check), Swagger gated by `shouldEnableSwagger()`, and `assertAuthSecrets()` fails boot on weak or missing secrets.
 - **Response envelope**: `TransformInterceptor` wraps every response as `{ success, data, meta: { timestamp, version, requestId } }` unless the handler already returns an object with `success`, a `StreamableFile` or a `Buffer`. `GlobalExceptionFilter` shapes errors.
 - **Auth is global**: `JwtAuthGuard` and `ThrottlerGuard` are registered as `APP_GUARD` in `app.module.ts`. Public endpoints must opt out with `@Public()` from `src/common/decorators`.
-- Feature modules live in `src/modules/*` (auth, users, cvs, templates, subscriptions, plans, payments, invoices, ai, analytics, marketplace, health, geo). Cross-cutting code (guards, filters, interceptors, middleware, feature gating) is in `src/common`. Infrastructure lives in `src/database` (Prisma), `src/redis`, `src/cache`, `src/mail`, `src/queue` and `src/observability` (Sentry, PostHog).
+- Feature modules live in `src/modules/*` (auth, users, cvs, templates, subscriptions, plans, payments, invoices, ai, analytics, marketplace, health). Cross-cutting code (guards, filters, interceptors, middleware, feature gating) is in `src/common`. Infrastructure lives in `src/database` (Prisma), `src/redis`, `src/cache`, `src/mail`, `src/queue` and `src/observability` (Sentry, PostHog).
 - **Two entrypoints from one codebase**: `main.ts` is the HTTP API. `worker.ts` (`WORKER_KIND=pdf node dist/worker.js`) is a PDF worker that keeps a warm Chromium pool (`PdfBrowserPool` in `modules/cvs/export`). In local dev, PDF jobs are processed inline by the API. `ScheduleModule` (cron) is disabled when `WORKER_KIND` is set or `NODE_ENV=test`.
 - Env loading: `.env.test` (only when `NODE_ENV=test`), then `.env.local`, then `.env`. Copy `apps/api/.env.example` and `apps/web/.env.example` to start.
-- Payments: Stripe and CinetPay. Webhook handling is fail-closed (see `docs/STRIPE-WEBHOOK-FAIL-CLOSED.md`, `docs/PAYMENT_GATEWAY_SETUP.md`). Maintenance scripts: `payments:expire-pending` and `webhook:retry-dlq`.
+- Payments: Stripe only (CinetPay was removed). Webhook handling is fail-closed (see `docs/STRIPE-WEBHOOK-FAIL-CLOSED.md`, `docs/PAYMENT_GATEWAY_SETUP.md`). Maintenance scripts: `webhook:retry-dlq`, and `pnpm stripe:check` (read-only check of keys, prices, webhooks and customer portal).
 
 ## Web architecture (apps/web)
 

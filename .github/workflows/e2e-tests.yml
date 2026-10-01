@@ -64,9 +64,6 @@ jobs:
       E2E_API_URL: http://localhost:3001/api/v1
       PLAYWRIGHT_BASE_URL: http://localhost:3000
       AUTH_RATE_LIMIT_DISABLED: 'true'
-      CINETPAY_API_KEY: test_api_key
-      CINETPAY_SITE_ID: test_site_id
-      CINETPAY_FAIL_CLOSED: 'true'
       STRIPE_FAIL_CLOSED: '1'
       STRIPE_SECRET_KEY: ${{ inputs.stripe && secrets.E2E_STRIPE_SECRET_KEY || 'sk_test_xxx' }}
       STRIPE_WEBHOOK_SECRET: ${{ inputs.stripe && secrets.E2E_STRIPE_WEBHOOK_SECRET || 'whsec_xxx' }}
@@ -121,9 +118,6 @@ jobs:
             echo "APP_URL=${APP_URL}"
             echo "AUTH_RATE_LIMIT_DISABLED=true"
             echo "THROTTLE_DISABLED=true"
-            echo "CINETPAY_API_KEY=${CINETPAY_API_KEY}"
-            echo "CINETPAY_SITE_ID=${CINETPAY_SITE_ID}"
-            echo "CINETPAY_FAIL_CLOSED=${CINETPAY_FAIL_CLOSED}"
             echo "STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}"
             echo "STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}"
             echo "SMTP_HOST=${SMTP_HOST}"

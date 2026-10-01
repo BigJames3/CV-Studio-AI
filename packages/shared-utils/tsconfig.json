@@ -4,6 +4,7 @@
     "lib": ["ES2022"],
     "types": ["node"],
     "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
     "rootDir": "src",
     "composite": true,
     "module": "CommonJS",

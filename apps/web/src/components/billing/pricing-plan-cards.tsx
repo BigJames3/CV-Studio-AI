@@ -5,12 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { plansApi, queryKeys } from '@/lib/api';
-import {
-  FALLBACK_PLANS,
-  SUPPORT_BUSINESS_MAILTO,
-  formatFeatureName,
-  formatPlanPrice,
-} from '@/lib/billing/plans-catalog';
+import { FALLBACK_PLANS, formatFeatureName, formatPlanPrice } from '@/lib/billing/plans-catalog';
 import { cn } from '@/lib/utils';
 
 export function PricingPlanCards() {
@@ -83,25 +78,15 @@ export function PricingPlanCards() {
                 </li>
               ))}
             </ul>
-            {plan.id === 'business' ? (
-              <a
-                href={SUPPORT_BUSINESS_MAILTO}
+            <Link href="/register" className="mt-8 block">
+              <Button
+                className="w-full"
+                variant={isRecommended ? 'primary' : 'secondary'}
                 data-testid={`pricing-cta-${plan.id}`}
-                className="mt-8 inline-flex min-h-10 w-full items-center justify-center rounded-md border border-border bg-transparent px-4 text-sm font-medium text-content-primary hover:bg-[color:var(--cv-color-neutral-100)]"
               >
-                Contactez le support
-              </a>
-            ) : (
-              <Link href="/register" className="mt-8 block">
-                <Button
-                  className="w-full"
-                  variant={isRecommended ? 'primary' : 'secondary'}
-                  data-testid={`pricing-cta-${plan.id}`}
-                >
-                  {plan.id === 'free' ? 'Commencer gratuitement' : `Passer à ${plan.name}`}
-                </Button>
-              </Link>
-            )}
+                {plan.id === 'free' ? 'Commencer gratuitement' : `Passer à ${plan.name}`}
+              </Button>
+            </Link>
           </div>
         );
       })}

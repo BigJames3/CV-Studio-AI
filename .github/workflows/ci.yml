@@ -68,9 +68,6 @@ jobs:
       JWT_ACCESS_SECRET: ci-access-secret-min-32-characters!!
       JWT_REFRESH_SECRET: ci-refresh-secret-min-32-characters!
       AUTH_RATE_LIMIT_DISABLED: 'true'
-      CINETPAY_API_KEY: test_api_key
-      CINETPAY_SITE_ID: test_site_id
-      CINETPAY_FAIL_CLOSED: 'true'
       APP_URL: http://localhost:3000
       API_URL: http://localhost:3001
       PORT: '3001'

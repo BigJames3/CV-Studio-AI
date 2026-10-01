@@ -26,7 +26,7 @@ Roster: [IR_ROSTER.md](./IR_ROSTER.md)
 
 - Timeline (UTC), systems, data categories, actor
 - Correlate `X-Request-Id`
-- Stripe / CinetPay dashboards for payment events
+- Stripe dashboard for payment events
 
 ## 4. Recover
 

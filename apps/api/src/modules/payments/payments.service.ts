@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   BadRequestException,
+  NotFoundException,
   ServiceUnavailableException,
   Inject,
   Optional,
@@ -15,10 +16,10 @@ import { MailService } from '../../mail/mail.service';
 import { StripeWebhookStoreService } from './stripe-webhook-store.service';
 import { StripeAlertService } from './stripe-alert.service';
 import {
-  availablePaymentMethods,
   expandableStripeId,
   isNonPlaceholderSecret,
   stripeSecretForClient,
+  stripeWebhookSecrets,
 } from './payment-env';
 import { emitSecurityAlert } from '../../observability';
 import { MarketplaceService } from '../marketplace/marketplace.service';
@@ -62,58 +63,57 @@ export class PaymentsService {
     return { items };
   }
 
-  async getStatus(userId: string, transactionId: string) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { transactionId },
-      include: { subscription: true },
-    });
-
-    if (!payment || payment.subscription.userId !== userId) {
-      return { status: 'not_found' as const, transactionId };
-    }
-
-    return {
-      status: payment.status,
-      paymentMethod: payment.paymentMethod,
-      transactionId,
-    };
-  }
-
-  availableMethods() {
-    return availablePaymentMethods();
-  }
-
   /**
-   * Mark payments stuck in `pending` for longer than `maxAgeMs` as failed.
-   * Late ACCEPTED notifies still grant (completeAcceptedPayment accepts failed → completed).
+   * The billing page calls this when Stripe redirects back from Checkout. The session is read
+   * from Stripe (the redirect alone proves nothing) and fulfilled exactly like
+   * checkout.session.completed, so the plan is active even when the webhook is late or was not
+   * delivered. Idempotent with the webhook.
    */
-  async expireStalePending(maxAgeMs = 60 * 60 * 1000) {
-    const cutoff = new Date(Date.now() - maxAgeMs);
-    const expired = await this.prisma.payment.updateMany({
-      where: {
-        status: 'pending',
-        createdAt: { lt: cutoff },
-      },
-      data: {
-        status: 'failed',
-        failedReason: 'Payment confirmation timeout (> 60 minutes)',
-      },
-    });
-    if (expired.count > 0) {
-      this.logger.log(
-        JSON.stringify({
-          message: 'Expired pending payments',
-          count: expired.count,
-          cutoff: cutoff.toISOString(),
-        })
-      );
+  async confirmCheckoutSession(userId: string, sessionId: string): Promise<{ confirmed: boolean }> {
+    if (!this.stripe) {
+      throw new BadRequestException({
+        code: 'STRIPE_NOT_CONFIGURED',
+        message: 'Stripe is not configured (fail-closed).',
+      });
     }
-    return { count: expired.count };
+
+    const notFound = new NotFoundException({
+      code: 'CHECKOUT_SESSION_NOT_FOUND',
+      message: 'Checkout session not found',
+    });
+    let session: Stripe.Checkout.Session;
+    try {
+      session = await this.stripe.checkout.sessions.retrieve(sessionId, { expand: ['invoice'] });
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code === 'resource_missing') throw notFound;
+      this.logger.warn(`Checkout confirm failed for ${sessionId}: ${(error as Error).message}`);
+      throw new ServiceUnavailableException({
+        code: 'STRIPE_UNAVAILABLE',
+        message: 'Stripe is unavailable, the payment will be confirmed by webhook.',
+      });
+    }
+
+    const owner = session.client_reference_id ?? session.metadata?.userId;
+    if (owner !== userId || session.mode !== 'subscription') throw notFound;
+    if (session.status !== 'complete') return { confirmed: false };
+
+    try {
+      await this.onCheckoutCompleted(session);
+      const invoice = session.invoice;
+      if (invoice && typeof invoice !== 'string' && invoice.status === 'paid') {
+        await this.onInvoicePaid(invoice);
+      }
+    } catch (error) {
+      // The webhook created the same row at the same moment: it is confirmed either way.
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) {
+        throw error;
+      }
+    }
+    return { confirmed: true };
   }
 
   async handleStripeWebhook(rawBody: Buffer, signature: string) {
-    const secret = process.env.STRIPE_WEBHOOK_SECRET;
-    if (!this.stripe || !isNonPlaceholderSecret(secret)) {
+    if (!this.stripe || !isNonPlaceholderSecret(process.env.STRIPE_WEBHOOK_SECRET)) {
       this.alerts.captureException(
         new Error('Stripe webhook received but Stripe is not configured'),
         {
@@ -127,10 +127,18 @@ export class PaymentsService {
       });
     }
 
-    let event: Stripe.Event;
-    try {
-      event = this.stripe.webhooks.constructEvent(rawBody, signature, secret);
-    } catch (err) {
+    // One endpoint for account events, an optional second one for Connect events: accept either.
+    let event: Stripe.Event | undefined;
+    let err: unknown;
+    for (const secret of stripeWebhookSecrets()) {
+      try {
+        event = this.stripe.webhooks.constructEvent(rawBody, signature, secret);
+        break;
+      } catch (e) {
+        err = e;
+      }
+    }
+    if (!event) {
       this.logger.error(`Webhook signature verification failed: ${(err as Error).message}`);
       emitSecurityAlert({
         id: 'SEC-05',
@@ -340,13 +348,14 @@ export class PaymentsService {
 
     await this.cancelSupersededSubscription(userId, stripeSub.id);
 
+    const period = subscriptionPeriod(stripeSub);
     await this.subscriptions.applyPaidEntitlement({
       userId,
       plan,
       provider: 'stripe',
       status: stripeSub.status,
-      periodStart: new Date(stripeSub.current_period_start * 1000),
-      periodEnd: new Date(stripeSub.current_period_end * 1000),
+      periodStart: period.start,
+      periodEnd: period.end,
       stripeSubscriptionId: stripeSub.id,
       stripeCustomerId,
       cancelAtPeriodEnd: Boolean(stripeSub.cancel_at_period_end),
@@ -405,13 +414,14 @@ export class PaymentsService {
       }
     }
 
+    const period = subscriptionPeriod(stripeSub);
     await this.subscriptions.applyPaidEntitlement({
       userId,
       plan: planName,
       provider: 'stripe',
       status: isFullyCanceled ? 'canceled' : stripeSub.status,
-      periodStart: new Date(stripeSub.current_period_start * 1000),
-      periodEnd: new Date(stripeSub.current_period_end * 1000),
+      periodStart: period.start,
+      periodEnd: period.end,
       stripeSubscriptionId: stripeSub.id,
       stripeCustomerId: expandableStripeId(stripeSub.customer),
       cancelAtPeriodEnd,
@@ -448,19 +458,39 @@ export class PaymentsService {
     );
   }
 
-  private async onInvoicePaid(invoice: Stripe.Invoice) {
-    const stripeSubId =
-      typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+  /**
+   * Local subscription billed by an invoice. Stripe often sends invoice.* before
+   * checkout.session.completed: when the row is missing, sync the subscription from Stripe first
+   * (it carries userId in its metadata) instead of failing into the DLQ.
+   */
+  private async findInvoiceSubscription(invoice: Stripe.Invoice, eventType: string) {
+    const stripeSubId = invoiceSubscriptionId(invoice);
     if (!stripeSubId) {
-      throw new Error(`invoice.paid missing subscription (invoice=${invoice.id})`);
+      throw new Error(`${eventType} missing subscription (invoice=${invoice.id})`);
     }
 
-    const sub = await this.prisma.subscription.findFirst({
-      where: { stripeSubscriptionId: stripeSubId },
-    });
+    const find = () =>
+      this.prisma.subscription.findFirst({
+        where: { stripeSubscriptionId: stripeSubId },
+        include: { user: true },
+      });
+
+    let sub = await find();
+    if (!sub && this.stripe) {
+      const stripeSub = await this.stripe.subscriptions.retrieve(stripeSubId);
+      if (stripeSub.metadata?.userId) {
+        await this.onSubscriptionChanged(stripeSub);
+        sub = await find();
+      }
+    }
     if (!sub) {
       throw new Error(`Subscription not found for Stripe ID: ${stripeSubId}`);
     }
+    return sub;
+  }
+
+  private async onInvoicePaid(invoice: Stripe.Invoice) {
+    const sub = await this.findInvoiceSubscription(invoice, 'invoice.paid');
 
     try {
       await this.prisma.payment.create({
@@ -508,19 +538,7 @@ export class PaymentsService {
   }
 
   private async onInvoiceFailed(invoice: Stripe.Invoice) {
-    const stripeSubId =
-      typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
-    if (!stripeSubId) {
-      throw new Error(`invoice.payment_failed missing subscription (invoice=${invoice.id})`);
-    }
-
-    const sub = await this.prisma.subscription.findFirst({
-      where: { stripeSubscriptionId: stripeSubId },
-      include: { user: true },
-    });
-    if (!sub) {
-      throw new Error(`Subscription not found for Stripe ID: ${stripeSubId}`);
-    }
+    const sub = await this.findInvoiceSubscription(invoice, 'invoice.payment_failed');
 
     await this.prisma.subscription.update({
       where: { id: sub.id },
@@ -615,4 +633,37 @@ export function resolvePaidPlan(
     `Unknown plan for price ${priceId ?? 'missing'} (session ${session.id}). ` +
       `Please ensure STRIPE_PRICE_PRO_* and STRIPE_PRICE_BUSINESS_* are configured correctly.`
   );
+}
+
+/*
+ * Webhook payloads are rendered in the API version of the Stripe account (or of the endpoint),
+ * not in the version pinned by this SDK. Since 2025-03-31.basil the billing period lives on the
+ * subscription items and an invoice points to its subscription through `parent`. Read both.
+ */
+
+type VersionedSubscriptionItem = Stripe.SubscriptionItem & {
+  current_period_start?: number;
+  current_period_end?: number;
+};
+
+export function subscriptionPeriod(stripeSub: Stripe.Subscription): { start: Date; end: Date } {
+  const item = stripeSub.items?.data?.[0] as VersionedSubscriptionItem | undefined;
+  const start = stripeSub.current_period_start ?? item?.current_period_start;
+  const end = stripeSub.current_period_end ?? item?.current_period_end;
+  if (!start || !end) {
+    throw new Error(`Stripe subscription ${stripeSub.id} has no billing period`);
+  }
+  return { start: new Date(start * 1000), end: new Date(end * 1000) };
+}
+
+export function invoiceSubscriptionId(invoice: Stripe.Invoice): string | undefined {
+  const legacy = invoice.subscription;
+  if (legacy) return typeof legacy === 'string' ? legacy : legacy.id;
+  const parent = (
+    invoice as {
+      parent?: { subscription_details?: { subscription?: string | { id: string } | null } | null };
+    }
+  ).parent?.subscription_details?.subscription;
+  if (!parent) return undefined;
+  return typeof parent === 'string' ? parent : parent.id;
 }

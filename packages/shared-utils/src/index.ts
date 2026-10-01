@@ -48,8 +48,9 @@ export function canShare(user: FeatureGateUser): boolean {
   return canDownloadPDF(user);
 }
 
+/** Premium templates are included in Pro and Business. */
 export function canAccessProTemplates(user: FeatureGateUser): boolean {
-  return normalizeTier(user.subscriptionTier) === 'business';
+  return normalizeTier(user.subscriptionTier) !== 'free';
 }
 
 export function canAccessBusinessTemplates(user: FeatureGateUser): boolean {
@@ -61,9 +62,9 @@ export function canAccessAdvancedFeatures(user: FeatureGateUser): boolean {
 }
 
 export function getAvailableTemplateTypes(user: FeatureGateUser): TemplateAccessType[] {
-  if (normalizeTier(user.subscriptionTier) === 'business') {
-    return ['free', 'pro', 'business'];
-  }
+  const tier = normalizeTier(user.subscriptionTier);
+  if (tier === 'business') return ['free', 'pro', 'business'];
+  if (tier === 'pro') return ['free', 'pro'];
   return ['free'];
 }
 
@@ -139,57 +140,6 @@ export function slugify(input: string) {
     .replace(/[^\w\s-]/g, '')
     .replace(/[\s_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
-}
-
-export type PaymentProvider = 'stripe' | 'cinetpay';
-
-export type GeoLocationSource = 'user-profile' | 'browser-ip' | 'unknown';
-
-export type GeoDetectPlan =
-  { action: 'profile'; countryCode: string } | { action: 'skip' } | { action: 'fetch-ip' };
-
-/** WAEMU: Benin, Burkina Faso, Côte d'Ivoire, Guinea-Bissau, Mali, Niger, Senegal, Togo */
-export const WAEMU_COUNTRIES = ['BJ', 'BF', 'CI', 'GW', 'ML', 'NE', 'SN', 'TG'] as const;
-
-/** CEMAC: Cameroon, Central African Republic, Chad, Congo, Equatorial Guinea, Gabon */
-export const CEMAC_COUNTRIES = ['CM', 'CF', 'TD', 'CG', 'GQ', 'GA'] as const;
-
-/** Extra CinetPay-supported countries beyond WAEMU/CEMAC. */
-export const CINETPAY_EXTRA_COUNTRIES = ['CD', 'GN'] as const;
-
-export const AFRICAN_MOBILE_PAYMENT_ZONES = [...WAEMU_COUNTRIES, ...CEMAC_COUNTRIES] as const;
-
-const CINETPAY_COUNTRIES = new Set<string>([
-  ...AFRICAN_MOBILE_PAYMENT_ZONES,
-  ...CINETPAY_EXTRA_COUNTRIES,
-]);
-
-export function isCinetpayCountry(countryCode?: string | null): boolean {
-  if (!countryCode) return false;
-  return CINETPAY_COUNTRIES.has(countryCode.trim().toUpperCase());
-}
-
-export function suggestPaymentMethod(countryCode?: string | null): PaymentProvider {
-  return isCinetpayCountry(countryCode) ? 'cinetpay' : 'stripe';
-}
-
-/**
- * Decide how to resolve country for payment suggestions.
- * Profile always wins. DNT / declined / undecided consent skip IP lookup.
- */
-export function planCountryDetection(input: {
-  userCountryCode?: string | null;
-  doNotTrack: boolean;
-  consent: boolean | null;
-}): GeoDetectPlan {
-  const code = input.userCountryCode?.trim().toUpperCase();
-  if (code && /^[A-Z]{2}$/.test(code)) {
-    return { action: 'profile', countryCode: code };
-  }
-  if (input.doNotTrack || input.consent !== true) {
-    return { action: 'skip' };
-  }
-  return { action: 'fetch-ip' };
 }
 
 export const emailSchema = z.string().email();

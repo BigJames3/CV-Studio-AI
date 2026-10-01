@@ -19,7 +19,6 @@ import { AiModule } from './modules/ai/ai.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { HealthModule } from './modules/health/health.module';
-import { GeoModule } from './modules/geo/geo.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { FeatureGateModule } from './common/feature-gate.module';
 import { shouldSkipThrottle } from './common/utils/throttle-skip';
@@ -57,7 +56,6 @@ import { shouldSkipThrottle } from './common/utils/throttle-skip';
     AnalyticsModule,
     MarketplaceModule,
     HealthModule,
-    GeoModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

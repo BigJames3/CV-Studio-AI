@@ -12,8 +12,8 @@ export class ExpireSubscriptionsJob {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Every hour: persist `free` on users whose paid tier has lapsed (expired CinetPay period,
-   * missed Stripe webhook, canceled/suspended, past_due beyond grace).
+   * Every hour: persist `free` on users whose paid tier has lapsed (missed Stripe webhook,
+   * canceled/suspended, past_due beyond grace).
    * Entitlements already enforce this at read time; this keeps the stored tier, the JWT
    * claims issued on refresh and the analytics in line. The subscription row is left as is
    * so a late renewal webhook can restore the tier.

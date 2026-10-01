@@ -260,6 +260,24 @@ describe('CvsService feature gates', () => {
       });
     });
 
+    it('checks a premium template switch against the owner plan, not the editor', async () => {
+      prisma.cv.findFirst.mockResolvedValue({ ...teamCv, content: { templateKey: 'modern' } });
+      teams.cvAccess.mockResolvedValue('editor');
+
+      await service.update('member', 'cv-1', { content: { templateKey: 'executive' } });
+
+      expect(entitlements.assertCan).toHaveBeenCalledWith(
+        'owner',
+        'templates:pro',
+        expect.any(String)
+      );
+      expect(entitlements.assertCan).not.toHaveBeenCalledWith(
+        'member',
+        expect.anything(),
+        expect.anything()
+      );
+    });
+
     it('keeps team viewers read-only', async () => {
       prisma.cv.findFirst.mockResolvedValue(teamCv);
       teams.cvAccess.mockResolvedValue('viewer');

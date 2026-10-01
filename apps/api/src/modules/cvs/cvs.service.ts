@@ -172,12 +172,9 @@ export class CvsService {
         updatedAt: true,
       },
     });
+    // Views are counted by POST /public/cvs/:slug/view from the visitor's browser: this read
+    // is cached by the web page, so counting here missed most visits.
     if (!cv) return null;
-
-    await this.prisma.cv.update({
-      where: { id: cv.id },
-      data: { viewCount: { increment: 1 } },
-    });
 
     return {
       ...cv,
@@ -224,7 +221,8 @@ export class CvsService {
     }
     const shareUrl = `${appUrl}/s/${cv.publicUrl}`;
     const QRCode = await import('qrcode');
-    const qrCodeDataUrl = await QRCode.toDataURL(shareUrl, { margin: 1, width: 220 });
+    // `src=qr` lets analytics tell QR scans from shared links.
+    const qrCodeDataUrl = await QRCode.toDataURL(`${shareUrl}?src=qr`, { margin: 1, width: 220 });
     return {
       isPublic: true,
       publicUrl: cv.publicUrl,

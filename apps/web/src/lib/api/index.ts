@@ -18,6 +18,7 @@ export const queryKeys = {
   plans: ['plans'] as const,
   invoices: ['invoices'] as const,
   analyticsDashboard: ['analytics', 'dashboard'] as const,
+  cvAnalytics: (days: number) => ['analytics', 'cvs', days] as const,
   marketplace: ['marketplace', 'templates'] as const,
   marketplaceCatalog: (filters?: { q?: string; category?: string; sort?: string }) =>
     ['marketplace', 'templates', filters ?? {}] as const,
@@ -300,6 +301,30 @@ export const cvsApi = {
       error?: string;
       filename?: string;
     }>(`/cvs/exports/${jobId}`),
+};
+
+export type ViewSource =
+  'direct' | 'qr' | 'linkedin' | 'email' | 'search' | 'social' | 'job_board' | 'other';
+
+export type CvAnalyticsReport = {
+  days: 7 | 30 | 90;
+  since: string;
+  totals: { views: number; dailyVisitors: number; publicCvs: number };
+  series: Array<{ date: string; views: number }>;
+  sources: Array<{ source: ViewSource; views: number }>;
+  cvs: Array<{
+    id: string;
+    title: string;
+    isPublic: boolean;
+    views: number;
+    dailyVisitors: number;
+    lastViewedAt: string | null;
+  }>;
+};
+
+export const analyticsApi = {
+  /** Business: views, daily visitors and sources of my CVs. */
+  cvs: (days: 7 | 30 | 90) => apiClient<CvAnalyticsReport>(`/analytics/cvs?days=${days}`),
 };
 
 export const templatesApi = {

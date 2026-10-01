@@ -20,9 +20,7 @@ const PREMIUM_TEMPLATE_MESSAGE = 'This template requires a Pro or Business plan'
 
 /** Editor keys (`content.templateKey`) of the premium official templates, e.g. `executive`. */
 const PREMIUM_TEMPLATE_KEYS: ReadonlySet<string> = new Set(
-  TEMPLATE_SEEDS.filter((t) => t.isPremium).map((t) =>
-    t.category === 'ats_optimized' ? 'ats' : t.category
-  )
+  TEMPLATE_SEEDS.filter((t) => t.isPremium).map((t) => String(t.designData.key))
 );
 
 function contentTemplateKey(content: unknown): string | undefined {

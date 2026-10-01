@@ -8,6 +8,16 @@ import { CreativeTemplate } from './CreativeTemplate';
 import { ExecutiveTemplate } from './ExecutiveTemplate';
 import { StartupTemplate } from './StartupTemplate';
 import { ATSTemplate } from './ATSTemplate';
+import { ClassicTemplate } from './ClassicTemplate';
+import { BannerTemplate } from './BannerTemplate';
+import { CompactTemplate } from './CompactTemplate';
+import { DeveloperTemplate } from './DeveloperTemplate';
+import { HealthTemplate } from './HealthTemplate';
+import { MinimalTemplate } from './MinimalTemplate';
+import { ElegantTemplate } from './ElegantTemplate';
+import { TimelineTemplate } from './TimelineTemplate';
+import { SidebarTemplate } from './SidebarTemplate';
+import { InfographicTemplate } from './InfographicTemplate';
 
 const RENDERERS = {
   modern: ModernTemplate,
@@ -15,7 +25,17 @@ const RENDERERS = {
   executive: ExecutiveTemplate,
   startup: StartupTemplate,
   ats: ATSTemplate,
-} as const;
+  classic: ClassicTemplate,
+  banner: BannerTemplate,
+  compact: CompactTemplate,
+  developer: DeveloperTemplate,
+  health: HealthTemplate,
+  minimal: MinimalTemplate,
+  elegant: ElegantTemplate,
+  timeline: TimelineTemplate,
+  sidebar: SidebarTemplate,
+  infographic: InfographicTemplate,
+} satisfies Record<TemplateKey, unknown>;
 
 export function TemplateWrapper({
   templateKey,
@@ -30,7 +50,8 @@ export function TemplateWrapper({
   className?: string;
   paper?: boolean;
 }) {
-  const design = TEMPLATE_DESIGN_DATA[templateKey];
+  // A key this build does not know (e.g. saved by a newer version) falls back to Modern.
+  const design = TEMPLATE_DESIGN_DATA[templateKey] ?? TEMPLATE_DESIGN_DATA.modern;
   const merged = mergeCustomization(design.defaults, {
     ...data.customization,
     ...customization,
@@ -44,7 +65,7 @@ export function TemplateWrapper({
     merged.textColor = '#000000';
   }
 
-  const Renderer = RENDERERS[templateKey];
+  const Renderer = RENDERERS[templateKey] ?? ModernTemplate;
 
   return (
     <div

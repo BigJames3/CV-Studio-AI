@@ -91,6 +91,26 @@ describe('CvsService feature gates', () => {
         }
       });
 
+    it.each(['elegant', 'timeline', 'sidebar', 'infographic'])(
+      'update blocks the new premium template %s without the plan',
+      async (templateKey) => {
+        denyPremium();
+        await expect(
+          service.update('u1', 'cv-1', { content: { templateKey } })
+        ).rejects.toBeInstanceOf(ForbiddenException);
+      }
+    );
+
+    it.each(['classic', 'banner', 'compact', 'developer', 'health', 'minimal'])(
+      'update allows the new free template %s on any plan',
+      async (templateKey) => {
+        denyPremium();
+        await expect(
+          service.update('u1', 'cv-1', { content: { templateKey } })
+        ).resolves.toBeDefined();
+      }
+    );
+
     it('update blocks switching to a premium template without the plan', async () => {
       denyPremium();
       await expect(

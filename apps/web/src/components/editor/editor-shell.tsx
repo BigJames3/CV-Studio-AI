@@ -25,6 +25,8 @@ import {
   SkillsForm,
   SummaryForm,
 } from '@/components/editor/section-forms';
+import { ActivitiesForm, MoreInfoForm } from '@/components/editor/extra-section-forms';
+import { EDITOR_SECTIONS } from '@/components/editor/editor-sections';
 import '@/styles/print.css';
 
 /** Access tier per editor key, e.g. `executive` → `pro`. */
@@ -35,17 +37,7 @@ const TEMPLATE_ACCESS = new Map(
 /** Display name per editor key, e.g. `sidebar` → « Sidebar sombre ». */
 const TEMPLATE_NAMES = new Map(TEMPLATE_CATALOG.map((t) => [templateKeyOf(t), t.name]));
 
-const SECTIONS: { id: SectionId; label: string; short: string }[] = [
-  { id: 'identity', label: 'Profil', short: 'Pro' },
-  { id: 'summary', label: 'Résumé', short: 'Rés' },
-  { id: 'experience', label: 'Expérience', short: 'Exp' },
-  { id: 'education', label: 'Formation', short: 'For' },
-  { id: 'skills', label: 'Skills', short: 'Ski' },
-  { id: 'languages', label: 'Langues', short: 'Lan' },
-  { id: 'projects', label: 'Projets', short: 'Prj' },
-  { id: 'certificates', label: 'Certificats', short: 'Cer' },
-  { id: 'references', label: 'Références', short: 'Réf' },
-];
+const SECTIONS = EDITOR_SECTIONS;
 
 function ActiveSectionForm({ section }: { section: SectionId }) {
   switch (section) {
@@ -67,6 +59,10 @@ function ActiveSectionForm({ section }: { section: SectionId }) {
       return <CertificatesForm />;
     case 'references':
       return <ReferencesForm />;
+    case 'activities':
+      return <ActivitiesForm />;
+    case 'more':
+      return <MoreInfoForm />;
     default:
       return null;
   }

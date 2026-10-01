@@ -21,6 +21,7 @@ export function MinimalTemplate({ data, customization: c }: TemplateProps) {
   const { identity } = data;
   return (
     <div
+      data-cv-flow=""
       style={{
         ...densityStyle(c.density),
         padding: '2.6rem 2.6rem',

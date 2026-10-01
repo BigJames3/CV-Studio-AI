@@ -71,7 +71,7 @@ export function CreativeTemplate({ data, customization: c }: TemplateProps) {
         </div>
       </header>
 
-      <div style={{ padding: '1.5rem 1.75rem' }}>
+      <div data-cv-flow="body" style={{ padding: '1.5rem 1.75rem' }}>
         {c.showSummary && summary.text ? (
           <section style={{ marginBottom: 'var(--cv-section-gap)' }}>
             <h2

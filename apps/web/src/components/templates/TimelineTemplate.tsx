@@ -21,6 +21,7 @@ export function TimelineTemplate({ data, customization: c }: TemplateProps) {
   const { identity } = data;
   return (
     <div
+      data-cv-flow=""
       style={{
         ...densityStyle(c.density),
         padding: '2rem 2.2rem',

@@ -23,7 +23,7 @@ export function HealthTemplate({ data, customization: c }: TemplateProps) {
     <div
       style={{
         ...densityStyle(c.density),
-        minHeight: '297mm',
+        minHeight: 'var(--cv-paper-height, 297mm)',
         background: c.backgroundColor,
         color: c.textColor,
         fontFamily: c.bodyFont,
@@ -32,7 +32,7 @@ export function HealthTemplate({ data, customization: c }: TemplateProps) {
       }}
     >
       <div style={{ background: c.accentColor }} />
-      <div style={{ padding: '2rem 2.2rem' }}>
+      <div data-cv-flow="" style={{ padding: '2rem 2.2rem' }}>
         <header
           style={{
             display: 'flex',

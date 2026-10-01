@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -41,8 +42,16 @@ export class SubscriptionsController {
   }
 
   @Patch('me')
-  update(@CurrentUser() user: AuthUser, @Body() dto: UpdateSubscriptionDto) {
-    return this.subscriptions.update(user.id, dto);
+  @ApiOperation({
+    deprecated: true,
+    summary: 'Disabled — change plan with POST /subscriptions/checkout',
+  })
+  update(@CurrentUser() user: AuthUser, @Body() _dto: UpdateSubscriptionDto) {
+    this.logger.warn(`Blocked PATCH /subscriptions/me by user ${user.id}`);
+    throw new BadRequestException({
+      code: 'USE_CHECKOUT',
+      message: 'To change plan, use POST /subscriptions/checkout.',
+    });
   }
 
   @Delete('me/cancel')
@@ -51,9 +60,16 @@ export class SubscriptionsController {
   }
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('me/portal')
+  @ApiOperation({ summary: 'Open the Stripe Customer Portal (update card, invoices)' })
+  billingPortal(@CurrentUser() user: AuthUser) {
+    return this.subscriptions.billingPortal(user.id);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('checkout')
   @ApiOperation({
-    summary: 'Create checkout session (Stripe default, or CinetPay when paymentMethod=cinetpay)',
+    summary: 'Create a Stripe checkout session, or change plan in place for a Stripe subscriber',
   })
   checkout(@CurrentUser() user: AuthUser, @Body() dto: CheckoutDto) {
     return this.subscriptions.checkout(user.id, dto);

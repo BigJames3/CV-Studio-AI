@@ -3,6 +3,7 @@
 import { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -14,6 +15,7 @@ import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 import { LinkedInSignInButton } from '@/components/auth/linkedin-sign-in-button';
 import { sanitizeNextPath } from '@/lib/safe-next';
 import { authApi } from '@/lib/api';
+import { authErrorMessage } from '@/lib/auth/auth-error-message';
 
 const totpSchema = z.object({
   totp: z.string().min(6, 'Code requis').max(16),
@@ -35,6 +37,32 @@ function LoginPageInner() {
   const [oauthTempToken, setOauthTempToken] = useState<string | null>(null);
 
   const nextPath = sanitizeNextPath(search.get('next'));
+  const qc = useQueryClient();
+  // Already signed in: offer to continue or switch account instead of a second sign-in.
+  const [signedInAs, setSignedInAs] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void authApi.currentUser().then((user) => {
+      if (!cancelled) setSignedInAs(user?.email ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function switchAccount() {
+    setSwitching(true);
+    try {
+      await authApi.logout();
+    } catch {
+      // Cookies are cleared client-side even if the API call fails.
+    }
+    qc.clear();
+    setSignedInAs(null);
+    setSwitching(false);
+  }
 
   useEffect(() => {
     const pending = sessionStorage.getItem('oauth_temp_token');
@@ -57,7 +85,28 @@ function LoginPageInner() {
         </Link>
       </p>
 
-      {pendingCredentials || oauthTempToken ? (
+      {signedInAs && !pendingCredentials && !oauthTempToken ? (
+        <div
+          className="mt-8 space-y-4 rounded-lg border border-border p-4"
+          data-testid="already-signed-in"
+        >
+          <p className="text-sm">
+            Vous êtes déjà connecté avec <strong>{signedInAs}</strong>.
+          </p>
+          <Button className="w-full" onClick={() => router.replace(nextPath)}>
+            Continuer vers mon espace
+          </Button>
+          <Button
+            variant="secondary"
+            className="w-full"
+            disabled={switching}
+            onClick={() => void switchAccount()}
+            data-testid="switch-account"
+          >
+            {switching ? 'Déconnexion…' : 'Changer de compte'}
+          </Button>
+        </div>
+      ) : pendingCredentials || oauthTempToken ? (
         <form
           className="mt-8 space-y-4"
           onSubmit={totpForm.handleSubmit(async (values) => {
@@ -105,7 +154,11 @@ function LoginPageInner() {
           >
             Retour
           </button>
-          {login.isError && <p className="text-sm text-error">Code invalide ou session expirée.</p>}
+          {login.isError && (
+            <p className="text-sm text-error" role="alert">
+              {authErrorMessage(login.error, 'totp')}
+            </p>
+          )}
         </form>
       ) : (
         <>
@@ -153,7 +206,7 @@ function LoginPageInner() {
             </Button>
             {login.isError && (
               <p className="text-sm text-error" data-testid="login-error" role="alert">
-                Identifiants invalides ou API indisponible.
+                {authErrorMessage(login.error, 'login')}
               </p>
             )}
           </form>

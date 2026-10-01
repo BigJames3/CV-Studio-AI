@@ -12,10 +12,23 @@ import { CreateCvDto, UpdateCvDto, PublishCvDto, ListCvsQueryDto } from './dto/c
 import { PdfExportService } from './export/pdf-export.service';
 import { TeamsService, type CvAccess } from '../teams/teams.service';
 import { EMPTY_CV_CONTENT, normalizeCvContent } from './cv-content.util';
+import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 import { randomBytes } from 'crypto';
 
 const EMPTY_CONTENT = EMPTY_CV_CONTENT as Prisma.InputJsonValue;
 const CV_CREATE_LIMIT_MESSAGE = 'CV creation limit reached for your plan';
+const PREMIUM_TEMPLATE_MESSAGE = 'This template requires a Pro or Business plan';
+
+/** Editor keys (`content.templateKey`) of the premium official templates, e.g. `executive`. */
+const PREMIUM_TEMPLATE_KEYS: ReadonlySet<string> = new Set(
+  TEMPLATE_SEEDS.filter((t) => t.isPremium).map((t) =>
+    t.category === 'ats_optimized' ? 'ats' : t.category
+  )
+);
+
+function contentTemplateKey(content: unknown): string | undefined {
+  return normalizeCvContent(content).templateKey;
+}
 
 @Injectable()
 export class CvsService {
@@ -69,6 +82,7 @@ export class CvsService {
 
   async create(userId: string, dto: CreateCvDto) {
     await this.assertTemplateAccess(userId, dto.templateId);
+    await this.assertTemplateKeyAccess(userId, contentTemplateKey(dto.content));
 
     return this.createWithinQuota(userId, {
       userId,
@@ -163,6 +177,14 @@ export class CvsService {
     const cv = await this.getAccessible(userId, id, 'edit');
     // Premium templates follow the CV owner's plan, whoever edits.
     await this.assertTemplateAccess(cv.userId, dto.templateId);
+    if (dto.content !== undefined) {
+      // The editor switches template through content.templateKey, not templateId. A CV that
+      // already uses a premium template (e.g. after a downgrade) stays editable.
+      const nextKey = contentTemplateKey(dto.content);
+      if (nextKey !== contentTemplateKey(cv.content)) {
+        await this.assertTemplateKeyAccess(cv.userId, nextKey);
+      }
+    }
     const content =
       dto.content !== undefined
         ? (normalizeCvContent(dto.content) as Prisma.InputJsonValue)
@@ -361,10 +383,11 @@ export class CvsService {
       select: { isPremium: true },
     });
     if (!template?.isPremium) return;
-    await this.entitlements.assertCan(
-      userId,
-      'templates:pro',
-      'This template requires a Business plan'
-    );
+    await this.entitlements.assertCan(userId, 'templates:pro', PREMIUM_TEMPLATE_MESSAGE);
+  }
+
+  private async assertTemplateKeyAccess(userId: string, templateKey?: string) {
+    if (!templateKey || !PREMIUM_TEMPLATE_KEYS.has(templateKey)) return;
+    await this.entitlements.assertCan(userId, 'templates:pro', PREMIUM_TEMPLATE_MESSAGE);
   }
 }

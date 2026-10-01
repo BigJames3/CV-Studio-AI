@@ -72,16 +72,8 @@ export class BillingPage {
     await this.page.getByTestId('checkout-pro-month').click();
   }
 
-  async startBusinessSupport() {
-    await expect(this.page.getByTestId('billing-business-support')).toBeVisible();
-    await expect(this.page.getByTestId('billing-business-support')).toHaveAttribute(
-      'href',
-      /mailto:support@cvstudio\.ai/
-    );
-  }
-
   async startBusinessCheckout() {
-    await this.startBusinessSupport();
+    await this.page.getByTestId('checkout-business-month').click();
   }
 
   async waitForCheckoutReturn() {

@@ -12,7 +12,9 @@ import { AtsPanel } from '@/components/editor/ats-panel';
 import { TeamShareSelect } from '@/components/team/team-share-select';
 import type { CvAccess } from '@/lib/api';
 import type { TemplateKey } from '@/lib/templates/types';
-import { TEMPLATE_DESIGN_DATA } from '@/lib/templates/catalog';
+import { TEMPLATE_CATALOG, TEMPLATE_DESIGN_DATA, categoryToKey } from '@/lib/templates/catalog';
+import { templateAccessType } from '@cvstudio/shared-utils';
+import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { SAMPLE_CV } from '@/lib/templates/sample-cv';
 import {
   CertificatesForm,
@@ -26,6 +28,14 @@ import {
   SummaryForm,
 } from '@/components/editor/section-forms';
 import '@/styles/print.css';
+
+/** Access tier per editor key, e.g. `executive` → `pro`. */
+const TEMPLATE_ACCESS = new Map(
+  TEMPLATE_CATALOG.map((t) => [
+    categoryToKey(String(t.category)),
+    t.accessTier ?? templateAccessType(t.isPremium),
+  ])
+);
 
 const SECTIONS: { id: SectionId; label: string; short: string }[] = [
   { id: 'identity', label: 'Profil', short: 'Pro' },
@@ -91,6 +101,17 @@ export function EditorShell({
     setTemplateKey,
     patchCustomization,
   } = useEditorStore();
+  const { canUseTemplateType, showUpgrade } = useFeatureGate();
+
+  const isLocked = (k: TemplateKey) => !canUseTemplateType(TEMPLATE_ACCESS.get(k) ?? 'free');
+  const selectTemplate = (k: TemplateKey) => {
+    // Same rule as the API (templates:pro): premium templates need a paid plan.
+    if (k !== templateKey && isLocked(k)) {
+      showUpgrade('templates:pro');
+      return;
+    }
+    setTemplateKey(k);
+  };
 
   useEffect(() => {
     if (!resumeId.startsWith('local-')) return;
@@ -159,11 +180,12 @@ export function EditorShell({
             <select
               className="rounded-md border border-border bg-surface-card px-2 py-1 text-sm"
               value={templateKey}
-              onChange={(e) => setTemplateKey(e.target.value as TemplateKey)}
+              onChange={(e) => selectTemplate(e.target.value as TemplateKey)}
+              data-testid="editor-template-select"
             >
               {(Object.keys(TEMPLATE_DESIGN_DATA) as TemplateKey[]).map((k) => (
                 <option key={k} value={k}>
-                  {k}
+                  {isLocked(k) ? `${k} (Pro)` : k}
                 </option>
               ))}
             </select>

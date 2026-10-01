@@ -6,7 +6,7 @@ export function isNonPlaceholderSecret(value?: string | null): value is string {
   if (lower.includes('xxx')) return false;
   if (lower.includes('placeholder')) return false;
   if (lower === 'missing') return false;
-  if (v.includes('your_api_key') || v.includes('your_site_id')) return false;
+  if (v.includes('your_api_key')) return false;
   return true;
 }
 
@@ -28,10 +28,14 @@ export function stripeSecretForClient(): string | null {
   return key;
 }
 
-export function isCinetpayConfiguredFromEnv() {
-  return (
-    isNonPlaceholderSecret(process.env.CINETPAY_API_KEY) &&
-    isNonPlaceholderSecret(process.env.CINETPAY_SITE_ID)
+/**
+ * Signing secrets of the webhook endpoints that post to POST /payments/webhook.
+ * Stripe signs "your account" events and "connected accounts" (Connect, e.g. account.updated)
+ * events from two separate endpoints, each with its own secret.
+ */
+export function stripeWebhookSecrets(): string[] {
+  return [process.env.STRIPE_WEBHOOK_SECRET, process.env.STRIPE_CONNECT_WEBHOOK_SECRET].filter(
+    isNonPlaceholderSecret
   );
 }
 
@@ -46,20 +50,9 @@ export function isStripeFailClosed() {
   return true;
 }
 
-/** Default true in production. Explicit false/0/off disables fail-closed. */
-export function isCinetpayFailClosed() {
-  const raw = process.env.CINETPAY_FAIL_CLOSED?.trim().toLowerCase();
-  if (raw === 'false' || raw === '0' || raw === 'off') return false;
-  if (raw === 'true' || raw === '1' || raw === 'on') return true;
-  return process.env.NODE_ENV === 'production';
-}
-
+/** Payment providers configured in this environment (exposed by the health check). */
 export function availablePaymentMethods() {
-  return {
-    stripe: Boolean(stripeSecretForClient()),
-    cinetpay: isCinetpayConfiguredFromEnv(),
-    cinetpayFailClosed: isCinetpayFailClosed(),
-  };
+  return { stripe: Boolean(stripeSecretForClient()) };
 }
 
 /** Stripe expandable field → id (`cus_…` / `sub_…`). */

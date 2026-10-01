@@ -43,10 +43,6 @@ const featureNames: Record<string, { title: string; description: string }> = {
     title: '✨ Génération IA',
     description: 'La génération de contenu IA est réservée aux utilisateurs Premium.',
   },
-  'marketplace:buy': {
-    title: 'Marketplace Pro',
-    description: 'L’achat de templates créateurs est réservé aux plans Pro et Business.',
-  },
 };
 
 const PREMIUM_BENEFITS = [

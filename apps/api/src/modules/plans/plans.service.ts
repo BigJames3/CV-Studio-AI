@@ -53,7 +53,7 @@ export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
     aiFeatures: false,
     prioritySupport: false,
     customDomain: false,
-    marketplaceAccess: false,
+    marketplaceAccess: true,
     apiAccess: false,
   },
   {
@@ -131,11 +131,8 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
       value: String(plan.prioritySupport),
       included: plan.prioritySupport,
     },
-    {
-      feature: 'marketplaceAccess',
-      value: String(plan.marketplaceAccess),
-      included: plan.marketplaceAccess,
-    },
+    // Marketplace licences are one-off purchases open to every plan (`marketplace:buy`).
+    { feature: 'marketplaceAccess', value: 'true', included: true },
   ];
 
   return {

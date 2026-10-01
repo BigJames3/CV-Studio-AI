@@ -17,7 +17,7 @@ const PLAN_SEEDS = [
     aiFeatures: false,
     prioritySupport: false,
     customDomain: false,
-    marketplaceAccess: false,
+    marketplaceAccess: true,
     apiAccess: false,
   },
   {

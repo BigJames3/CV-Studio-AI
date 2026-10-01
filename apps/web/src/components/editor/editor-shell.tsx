@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useEditorStore, emptyContent, type SectionId } from '@/stores/editor-store';
 import { useAutosave, useDebouncedValue } from '@/hooks';
+import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { TemplateWrapper } from '@/components/templates/TemplateWrapper';
@@ -12,7 +13,6 @@ import { AtsPanel } from '@/components/editor/ats-panel';
 import type { TemplateKey } from '@/lib/templates/types';
 import { TEMPLATE_CATALOG, TEMPLATE_DESIGN_DATA, templateKeyOf } from '@/lib/templates/catalog';
 import { templateAccessType } from '@cvstudio/shared-utils';
-import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { SAMPLE_CV } from '@/lib/templates/sample-cv';
 import {
   CertificatesForm,
@@ -86,7 +86,7 @@ export function EditorShell({ resumeId }: { resumeId: string }) {
     setTemplateKey,
     patchCustomization,
   } = useEditorStore();
-  const { canUseTemplateType, showUpgrade } = useFeatureGate();
+  const { canUseTemplateType, canPrint, showUpgrade } = useFeatureGate();
 
   const isLocked = (k: TemplateKey) => !canUseTemplateType(TEMPLATE_ACCESS.get(k) ?? 'free');
   const selectTemplate = (k: TemplateKey) => {
@@ -149,9 +149,21 @@ export function EditorShell({ resumeId }: { resumeId: string }) {
 
   useAutosave(resumeId);
   const previewContent = useDebouncedValue(content, 150);
+  // Ctrl+P bypasses the print button: print.css swaps the page for this notice instead.
+  const printLocked = !canPrint && !resumeId.startsWith('local-');
 
   return (
-    <div className="editor-shell flex h-[calc(100dvh-3.5rem)] flex-col" data-testid="cv-editor">
+    <div
+      className="editor-shell flex h-[calc(100dvh-3.5rem)] flex-col"
+      data-testid="cv-editor"
+      data-print-locked={printLocked ? 'true' : undefined}
+    >
+      {printLocked ? (
+        <p className="cv-print-locked-notice hidden" data-testid="print-locked-notice">
+          L’impression est réservée aux plans Pro et Business. Passez à Pro depuis CV Studio AI pour
+          imprimer ou télécharger votre CV.
+        </p>
+      ) : null}
       <div className="flex items-center justify-between border-b border-border bg-surface-card px-3 py-2">
         <div className="flex items-center gap-3">
           <div className="text-sm text-content-secondary" aria-live="polite">

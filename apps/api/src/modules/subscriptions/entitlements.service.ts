@@ -74,7 +74,8 @@ export class EntitlementsService {
       'ai:cover_letter': ['pro', 'business'],
       'ai:ats': ['free', 'pro', 'business'],
       'ai:interview': ['pro', 'business'],
-      'marketplace:buy': ['pro', 'business'],
+      // One-off purchase: no subscription required.
+      'marketplace:buy': ['free', 'pro', 'business'],
       'api:access': ['business'],
     };
 

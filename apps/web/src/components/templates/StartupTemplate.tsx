@@ -167,9 +167,8 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
             ))}
           </section>
         ) : null}
+        <MoreSections data={data} c={c} theme={themeFrom(c, 'caps')} />
       </div>
-
-      <MoreSections data={data} c={c} theme={themeFrom(c, 'caps')} />
 
       <aside
         style={{

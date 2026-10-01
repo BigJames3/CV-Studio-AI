@@ -10,7 +10,7 @@ import { TemplateWrapper } from '@/components/templates/TemplateWrapper';
 import { ExportPDFButton } from '@/components/cv-editor/ExportPDFButton';
 import { AtsPanel } from '@/components/editor/ats-panel';
 import type { TemplateKey } from '@/lib/templates/types';
-import { TEMPLATE_CATALOG, TEMPLATE_DESIGN_DATA, categoryToKey } from '@/lib/templates/catalog';
+import { TEMPLATE_CATALOG, TEMPLATE_DESIGN_DATA, templateKeyOf } from '@/lib/templates/catalog';
 import { templateAccessType } from '@cvstudio/shared-utils';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { SAMPLE_CV } from '@/lib/templates/sample-cv';
@@ -29,11 +29,11 @@ import '@/styles/print.css';
 
 /** Access tier per editor key, e.g. `executive` → `pro`. */
 const TEMPLATE_ACCESS = new Map(
-  TEMPLATE_CATALOG.map((t) => [
-    categoryToKey(String(t.category)),
-    t.accessTier ?? templateAccessType(t.isPremium),
-  ])
+  TEMPLATE_CATALOG.map((t) => [templateKeyOf(t), t.accessTier ?? templateAccessType(t.isPremium)])
 );
+
+/** Display name per editor key, e.g. `sidebar` → « Sidebar sombre ». */
+const TEMPLATE_NAMES = new Map(TEMPLATE_CATALOG.map((t) => [templateKeyOf(t), t.name]));
 
 const SECTIONS: { id: SectionId; label: string; short: string }[] = [
   { id: 'identity', label: 'Profil', short: 'Pro' },
@@ -174,7 +174,9 @@ export function EditorShell({ resumeId }: { resumeId: string }) {
             >
               {(Object.keys(TEMPLATE_DESIGN_DATA) as TemplateKey[]).map((k) => (
                 <option key={k} value={k}>
-                  {isLocked(k) ? `${k} (Pro)` : k}
+                  {isLocked(k)
+                    ? `${TEMPLATE_NAMES.get(k) ?? k} (Pro)`
+                    : (TEMPLATE_NAMES.get(k) ?? k)}
                 </option>
               ))}
             </select>

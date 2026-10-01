@@ -2,6 +2,8 @@
 
 import type { TemplateListItem } from '@/lib/templates/types';
 import { cn } from '@/lib/utils';
+import { templateKeyOf } from '@/lib/templates/catalog';
+import { TemplateThumbnail } from '@/components/templates/TemplateThumbnail';
 
 export function TemplateCard({
   template,
@@ -30,22 +32,13 @@ export function TemplateCard({
         locked && 'cursor-not-allowed opacity-50'
       )}
     >
-      <div
-        className="mb-3 aspect-[3/4] overflow-hidden rounded-lg bg-[color:var(--cv-color-neutral-100)]"
-        style={{
-          backgroundImage: `linear-gradient(145deg, ${template.designData?.defaults.primaryColor ?? '#2563eb'}22, transparent 60%)`,
-        }}
-      >
-        <div className="flex h-full flex-col justify-end p-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-content-secondary">
-            {template.category.replace('_', ' ')}
-          </span>
-          <span className="text-sm font-semibold">{template.name}</span>
-        </div>
+      <div className="mb-3 aspect-[210/297] overflow-hidden rounded-lg border border-border bg-white">
+        <TemplateThumbnail templateKey={templateKeyOf(template)} />
       </div>
+      <p className="text-sm font-semibold">{template.name}</p>
       <p className="line-clamp-2 text-xs text-content-secondary">{template.description}</p>
       <div className="mt-2 flex items-center justify-between text-xs text-content-secondary">
-        <span>★ {template.rating.toFixed(1)}</span>
+        {template.rating > 0 ? <span>★ {template.rating.toFixed(1)}</span> : <span>Nouveau</span>}
         {locked ? (
           <span className="rounded-full bg-secondary/10 px-2 py-0.5 font-semibold text-secondary">
             🔒 {lockLabel}

@@ -23,7 +23,7 @@ export function ElegantTemplate({ data, customization: c }: TemplateProps) {
     <div
       style={{
         ...densityStyle(c.density),
-        minHeight: '297mm',
+        minHeight: 'var(--cv-paper-height, 297mm)',
         background: c.backgroundColor,
         color: c.textColor,
         fontFamily: c.bodyFont,
@@ -32,6 +32,7 @@ export function ElegantTemplate({ data, customization: c }: TemplateProps) {
       }}
     >
       <aside
+        data-cv-flow=""
         style={{
           background: '#faf7f2',
           padding: '2.2rem 1.4rem',
@@ -59,7 +60,7 @@ export function ElegantTemplate({ data, customization: c }: TemplateProps) {
         <LanguagesBlock data={data} theme={theme} />
         <CertificationsBlock data={data} c={c} theme={theme} />
       </aside>
-      <main style={{ padding: '2.4rem 2rem' }}>
+      <main data-cv-flow="" style={{ padding: '2.4rem 2rem' }}>
         <h1
           style={{
             margin: 0,

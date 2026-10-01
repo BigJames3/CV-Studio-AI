@@ -36,6 +36,7 @@ export function ModernTemplate({ data, customization: c }: TemplateProps) {
       }}
     >
       <aside
+        data-cv-flow=""
         style={{
           background: '#f8fafc',
           padding: '2rem 1.25rem',
@@ -94,7 +95,7 @@ export function ModernTemplate({ data, customization: c }: TemplateProps) {
         ) : null}
       </aside>
 
-      <main style={{ padding: '2rem 1.75rem' }}>
+      <main data-cv-flow="" style={{ padding: '2rem 1.75rem' }}>
         <h1 style={{ margin: 0, fontFamily: c.headerFont, fontSize: '1.75rem', fontWeight: 700 }}>
           {identity.fullName || 'Your Name'}
         </h1>

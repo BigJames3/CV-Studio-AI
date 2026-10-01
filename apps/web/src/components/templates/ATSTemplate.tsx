@@ -25,6 +25,7 @@ export function ATSTemplate({ data, customization: c }: TemplateProps) {
 
   return (
     <div
+      data-cv-flow=""
       style={{
         ...densityStyle(c.density),
         padding: '0.5in',

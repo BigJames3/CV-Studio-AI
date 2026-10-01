@@ -24,6 +24,7 @@ export function ExecutiveTemplate({ data, customization: c }: TemplateProps) {
 
   return (
     <div
+      data-cv-flow=""
       style={{
         ...densityStyle(c.density),
         padding: '1.75rem 2rem',

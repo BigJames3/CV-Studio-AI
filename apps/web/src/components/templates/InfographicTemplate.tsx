@@ -71,6 +71,7 @@ export function InfographicTemplate({ data, customization: c }: TemplateProps) {
         </div>
       </header>
       <div
+        data-cv-flow="body"
         style={{
           padding: '0.4rem 1.6rem 1.8rem',
           display: 'grid',
@@ -88,12 +89,12 @@ export function InfographicTemplate({ data, customization: c }: TemplateProps) {
         </main>
         <aside>
           {hasSkills ? (
-            <div style={{ ...card, marginTop: 'var(--cv-section-gap)' }}>
+            <div data-cv-flow="" style={{ ...card, marginTop: 'var(--cv-section-gap)' }}>
               <SkillsBlock data={data} c={c} theme={theme} variant="bars" />
             </div>
           ) : null}
           {hasDetails ? (
-            <div style={{ ...card, marginTop: 12 }}>
+            <div data-cv-flow="" style={{ ...card, marginTop: 12 }}>
               <LanguagesBlock data={data} theme={theme} />
               <EducationBlock data={data} c={c} theme={theme} />
               <CertificationsBlock data={data} c={c} theme={theme} />

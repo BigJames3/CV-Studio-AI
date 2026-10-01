@@ -30,7 +30,7 @@ export function SidebarTemplate({ data, customization: c }: TemplateProps) {
     <div
       style={{
         ...densityStyle(c.density),
-        minHeight: '297mm',
+        minHeight: 'var(--cv-paper-height, 297mm)',
         background: c.backgroundColor,
         color: c.textColor,
         fontFamily: c.bodyFont,
@@ -38,7 +38,10 @@ export function SidebarTemplate({ data, customization: c }: TemplateProps) {
         gridTemplateColumns: '35% 65%',
       }}
     >
-      <aside style={{ background: c.primaryColor, color: '#ffffff', padding: '2.2rem 1.4rem' }}>
+      <aside
+        data-cv-flow=""
+        style={{ background: c.primaryColor, color: '#ffffff', padding: '2.2rem 1.4rem' }}
+      >
         {c.showPhoto ? (
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
             <Photo
@@ -60,7 +63,7 @@ export function SidebarTemplate({ data, customization: c }: TemplateProps) {
         <LanguagesBlock data={data} theme={sideTheme} onDark />
         <CertificationsBlock data={data} c={c} theme={sideTheme} onDark />
       </aside>
-      <main style={{ padding: '2.2rem 1.9rem' }}>
+      <main data-cv-flow="" style={{ padding: '2.2rem 1.9rem' }}>
         <h1
           style={{
             margin: 0,

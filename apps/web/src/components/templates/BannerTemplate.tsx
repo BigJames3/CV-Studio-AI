@@ -76,14 +76,14 @@ export function BannerTemplate({ data, customization: c }: TemplateProps) {
           gridTemplateColumns: hasAside ? 'minmax(0, 64fr) minmax(0, 36fr)' : 'minmax(0, 1fr)',
         }}
       >
-        <main style={{ padding: '0.4rem 1.4rem 2rem 2.2rem' }}>
+        <main data-cv-flow="body" style={{ padding: '0.4rem 1.4rem 2rem 2.2rem' }}>
           <SummaryBlock data={data} c={c} theme={theme} />
           <ExperienceBlock data={data} c={c} theme={theme} />
           <EducationBlock data={data} c={c} theme={theme} />
           <ProjectsBlock data={data} c={c} theme={theme} />
           <MoreSections data={data} c={c} theme={theme} />
         </main>
-        <aside style={{ padding: '0.4rem 2rem 2rem 0.6rem' }}>
+        <aside data-cv-flow="body" style={{ padding: '0.4rem 2rem 2rem 0.6rem' }}>
           <SkillsBlock data={data} c={c} theme={theme} variant="tags" />
           <LanguagesBlock data={data} theme={theme} />
           <CertificationsBlock data={data} c={c} theme={theme} />

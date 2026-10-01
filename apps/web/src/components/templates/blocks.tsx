@@ -298,7 +298,7 @@ export function Section({
     );
   }
   return (
-    <section style={{ marginTop: 'var(--cv-section-gap)', breakInside: 'avoid-page', ...style }}>
+    <section style={{ marginTop: 'var(--cv-section-gap)', ...style }}>
       <Heading theme={theme}>{title}</Heading>
       {children}
     </section>

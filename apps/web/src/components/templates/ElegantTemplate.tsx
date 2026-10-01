@@ -6,6 +6,7 @@ import {
   EducationBlock,
   ExperienceBlock,
   LanguagesBlock,
+  MoreSections,
   ProjectsBlock,
   ReferencesBlock,
   SkillsBlock,
@@ -88,6 +89,7 @@ export function ElegantTemplate({ data, customization: c }: TemplateProps) {
         <ExperienceBlock data={data} c={c} theme={theme} />
         <EducationBlock data={data} c={c} theme={theme} />
         <ProjectsBlock data={data} c={c} theme={theme} />
+        <MoreSections data={data} c={c} theme={theme} />
         <ReferencesBlock data={data} c={c} theme={theme} />
       </main>
     </div>

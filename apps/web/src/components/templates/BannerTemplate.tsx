@@ -6,6 +6,7 @@ import {
   EducationBlock,
   ExperienceBlock,
   LanguagesBlock,
+  MoreSections,
   ProjectsBlock,
   ReferencesBlock,
   SkillsBlock,
@@ -80,6 +81,7 @@ export function BannerTemplate({ data, customization: c }: TemplateProps) {
           <ExperienceBlock data={data} c={c} theme={theme} />
           <EducationBlock data={data} c={c} theme={theme} />
           <ProjectsBlock data={data} c={c} theme={theme} />
+          <MoreSections data={data} c={c} theme={theme} />
         </main>
         <aside style={{ padding: '0.4rem 2rem 2rem 0.6rem' }}>
           <SkillsBlock data={data} c={c} theme={theme} variant="tags" />

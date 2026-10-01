@@ -17,7 +17,26 @@ export const LABELS = {
   projects: 'Projets',
   references: 'Références',
   contact: 'Coordonnées',
+  awards: 'Prix et distinctions',
+  volunteering: 'Bénévolat et engagements',
+  publications: 'Publications',
+  talks: 'Conférences et interventions',
+  licenses: 'Permis et habilitations',
+  interests: 'Centres d’intérêt',
+  additional: 'Informations complémentaires',
 } as const;
+
+/** Non-empty trimmed lines, e.g. responsibilities typed one per line. */
+function lines(values?: string[]): string[] {
+  return (values ?? []).map((v) => v.trim()).filter(Boolean);
+}
+
+export function joinParts(parts: Array<string | undefined | null>, separator = ' · ') {
+  return parts
+    .map((p) => p?.trim())
+    .filter(Boolean)
+    .join(separator);
+}
 
 const MONTHS = [
   'Janvier',
@@ -73,10 +92,11 @@ export type ContactItem = { kind: 'email' | 'phone' | 'city' | 'link'; value: st
 
 export function contactItems(identity: CvContent['identity']): ContactItem[] {
   const strip = (url: string) => url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const location = locationOf(identity);
   const items: Array<ContactItem | null> = [
     identity.phone ? { kind: 'phone', value: identity.phone } : null,
     identity.email ? { kind: 'email', value: identity.email } : null,
-    identity.city ? { kind: 'city', value: identity.city } : null,
+    location ? { kind: 'city', value: location } : null,
     identity.linkedin ? { kind: 'link', value: strip(identity.linkedin) } : null,
     identity.github ? { kind: 'link', value: strip(identity.github) } : null,
     identity.website ? { kind: 'link', value: strip(identity.website) } : null,
@@ -293,7 +313,14 @@ export type SectionName =
   | 'languages'
   | 'certifications'
   | 'projects'
-  | 'references';
+  | 'references'
+  | 'awards'
+  | 'volunteering'
+  | 'publications'
+  | 'talks'
+  | 'licenses'
+  | 'interests'
+  | 'additional';
 
 /** Same visibility rules as the blocks below: lets a layout drop an empty column. */
 export function hasSection(data: CvContent, c: TemplateCustomization, name: SectionName): boolean {
@@ -314,6 +341,28 @@ export function hasSection(data: CvContent, c: TemplateCustomization, name: Sect
       return Boolean(c.showProjects && data.projects.some((p) => p.name.trim()));
     case 'references':
       return Boolean(c.showReferences && (data.references ?? []).some((r) => r.name.trim()));
+    case 'awards':
+      return (data.awards ?? []).some((a) => a.name.trim());
+    case 'volunteering':
+      return (data.volunteering ?? []).some((v) => v.organization.trim() || v.role?.trim());
+    case 'publications':
+      return (data.publications ?? []).some((p) => p.title.trim());
+    case 'talks':
+      return (data.talks ?? []).some((t) => t.event.trim() || t.topic?.trim());
+    case 'licenses':
+      return (data.licenses ?? []).some((l) => l.name.trim());
+    case 'interests':
+      return (data.interests ?? []).some((i) => i.name.trim());
+    case 'additional': {
+      const x = data.extras ?? {};
+      return Boolean(
+        x.availability?.trim() ||
+        x.notice?.trim() ||
+        x.desiredLocation?.trim() ||
+        (x.mobility ?? []).length > 0 ||
+        (data.additionalInfo ?? []).some((i) => i.label.trim() || i.value.trim())
+      );
+    }
   }
 }
 
@@ -346,7 +395,8 @@ export function ExperienceBlock({
       >
         {data.experiences.map((exp, i) => {
           const period = formatPeriod(exp.start, exp.end, exp.current);
-          const place = [exp.company, exp.location].filter(Boolean).join(' · ');
+          const place = joinParts([exp.company, exp.location, exp.contractType, exp.sector]);
+          const achievements = lines(exp.achievements);
           return (
             <article
               key={exp.id}
@@ -409,6 +459,32 @@ export function ExperienceBlock({
                     ))}
                 </ul>
               ) : null}
+              {achievements.length > 0 ? (
+                <>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.76rem', fontWeight: 600 }}>
+                    Réalisations
+                  </p>
+                  <ul
+                    style={{
+                      margin: 0,
+                      paddingLeft: '1.1rem',
+                      fontSize: '0.8rem',
+                      listStyle: 'disc',
+                    }}
+                  >
+                    {achievements.map((a, j) => (
+                      <li key={j} style={{ marginTop: 2 }}>
+                        {a}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              {exp.tools?.trim() ? (
+                <p style={{ margin: '3px 0 0', fontSize: '0.76rem', color: theme.muted }}>
+                  Outils : {exp.tools.trim()}
+                </p>
+              ) : null}
             </article>
           );
         })}
@@ -436,9 +512,17 @@ export function EducationBlock({ data, c, theme }: BlockProps) {
                 </span>
               ) : null}
             </div>
-            {diploma && ed.school ? (
+            {diploma && (ed.school || ed.location) ? (
               <p style={{ margin: '1px 0 0', fontSize: '0.8rem', color: theme.primary }}>
-                {ed.school}
+                {joinParts([ed.school, ed.location])}
+              </p>
+            ) : null}
+            {ed.honors?.trim() || ed.thesis?.trim() ? (
+              <p style={{ margin: '2px 0 0', fontSize: '0.78rem', color: theme.muted }}>
+                {joinParts([
+                  ed.honors?.trim() ? `Mention : ${ed.honors.trim()}` : '',
+                  ed.thesis?.trim() ? `Mémoire : ${ed.thesis.trim()}` : '',
+                ])}
               </p>
             ) : null}
             {ed.details ? (
@@ -464,7 +548,55 @@ export function SkillsBlock({
   if (!hasSection(data, c, 'skills')) return null;
   const textColor = onDark ? '#ffffff' : theme.text;
   const track = onDark ? 'rgba(255,255,255,0.25)' : '#e5e7eb';
+  const groups = groupByCategory(skills);
+  if (groups.length > 1 || groups[0]?.category) {
+    return (
+      <Section theme={theme} title={LABELS.skills}>
+        {groups.map((g, i) => (
+          <div key={g.category || i} style={{ marginTop: i === 0 ? 0 : 8, breakInside: 'avoid' }}>
+            <p
+              style={{
+                margin: '0 0 4px',
+                fontSize: '0.76rem',
+                fontWeight: 600,
+                color: onDark ? '#ffffff' : theme.primary,
+              }}
+            >
+              {g.category || 'Autres'}
+            </p>
+            {renderSkills(g.items, variant, theme, textColor, track, onDark)}
+          </div>
+        ))}
+      </Section>
+    );
+  }
+  return (
+    <Section theme={theme} title={LABELS.skills}>
+      {renderSkills(skills, variant, theme, textColor, track, onDark)}
+    </Section>
+  );
+}
 
+/** Keeps the candidate's order: categories appear in the order they were first used. */
+function groupByCategory(skills: CvContent['skills']) {
+  const groups: Array<{ category: string; items: CvContent['skills'] }> = [];
+  for (const skill of skills) {
+    const category = skill.category?.trim() ?? '';
+    const group = groups.find((g) => g.category === category);
+    if (group) group.items.push(skill);
+    else groups.push({ category, items: [skill] });
+  }
+  return groups;
+}
+
+function renderSkills(
+  skills: CvContent['skills'],
+  variant: 'list' | 'tags' | 'bars' | 'dots' | 'inline',
+  theme: Theme,
+  textColor: string,
+  track: string,
+  onDark: boolean
+): ReactNode {
   let body: ReactNode;
   if (variant === 'inline') {
     body = (
@@ -550,11 +682,7 @@ export function SkillsBlock({
       </ul>
     );
   }
-  return (
-    <Section theme={theme} title={LABELS.skills}>
-      {body}
-    </Section>
-  );
+  return body;
 }
 
 export function LanguagesBlock({
@@ -570,17 +698,22 @@ export function LanguagesBlock({
     <Section theme={theme} title={LABELS.languages}>
       {variant === 'inline' ? (
         <p style={{ margin: 0, fontSize: '0.8rem', color: textColor }}>
-          {languages.map((l) => (l.level ? `${l.name} (${l.level})` : l.name)).join(' · ')}
+          {languages
+            .map((l) => {
+              const detail = joinParts([l.level, l.certification]);
+              return detail ? `${l.name} (${detail})` : l.name;
+            })
+            .join(' · ')}
         </p>
       ) : (
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {languages.map((l) => (
             <li key={l.id} style={{ fontSize: '0.8rem', marginBottom: 4, color: textColor }}>
               <strong style={{ fontWeight: 600 }}>{l.name}</strong>
-              {l.level ? (
+              {l.level || l.certification ? (
                 <span style={{ color: onDark ? 'rgba(255,255,255,0.7)' : theme.muted }}>
                   {' '}
-                  — {l.level}
+                  — {joinParts([l.level, l.certification])}
                 </span>
               ) : null}
             </li>
@@ -614,7 +747,7 @@ export function CertificationsBlock({
           >
             {cert.name}
           </strong>
-          {cert.issuer || cert.year ? (
+          {certMeta(cert) ? (
             <p
               style={{
                 margin: '1px 0 0',
@@ -622,9 +755,7 @@ export function CertificationsBlock({
                 color: onDark ? 'rgba(255,255,255,0.7)' : theme.muted,
               }}
             >
-              {[cert.issuer, cert.year ? `Obtenue : ${formatDateFr(cert.year)}` : '']
-                .filter(Boolean)
-                .join(' · ')}
+              {certMeta(cert)}
             </p>
           ) : null}
         </div>
@@ -633,26 +764,56 @@ export function CertificationsBlock({
   );
 }
 
+/** `PMI · Obtenue : Juin 2021 · Expire : Juin 2027 · ID : 123 · credly.com/…` */
+export function certMeta(cert: CvContent['certificates'][number]) {
+  return joinParts([
+    cert.issuer,
+    cert.year ? `Obtenue : ${formatDateFr(cert.year)}` : '',
+    cert.expires ? `Expire : ${formatDateFr(cert.expires)}` : '',
+    cert.credentialId ? `ID : ${cert.credentialId}` : '',
+    cert.url ? cert.url.replace(/^https?:\/\//, '') : '',
+  ]);
+}
+
 export function ProjectsBlock({ data, c, theme }: BlockProps) {
   const projects = data.projects.filter((p) => p.name.trim());
   if (!hasSection(data, c, 'projects')) return null;
   return (
     <Section theme={theme} title={LABELS.projects}>
-      {projects.map((p, i) => (
-        <div key={p.id} style={{ marginTop: i === 0 ? 0 : 9, breakInside: 'avoid' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-            <strong style={{ fontFamily: theme.headerFont, fontSize: '0.86rem' }}>{p.name}</strong>
-            {p.url ? (
-              <span style={{ fontSize: '0.72rem', color: theme.muted }}>
-                {p.url.replace(/^https?:\/\//, '')}
-              </span>
+      {projects.map((p, i) => {
+        const period = formatPeriod(p.start, p.end, p.current);
+        const url = p.url?.replace(/^https?:\/\//, '');
+        return (
+          <div key={p.id} style={{ marginTop: i === 0 ? 0 : 9, breakInside: 'avoid' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+              <strong style={{ fontFamily: theme.headerFont, fontSize: '0.86rem' }}>
+                {p.name}
+              </strong>
+              {period || url ? (
+                <span style={{ fontSize: '0.72rem', color: theme.muted, whiteSpace: 'nowrap' }}>
+                  {period || url}
+                </span>
+              ) : null}
+            </div>
+            {p.role ? (
+              <p style={{ margin: '1px 0 0', fontSize: '0.8rem', color: theme.primary }}>
+                {p.role}
+              </p>
+            ) : null}
+            {p.description ? (
+              <p style={{ margin: '2px 0 0', fontSize: '0.8rem' }}>{p.description}</p>
+            ) : null}
+            {p.technologies?.trim() || (period && url) ? (
+              <p style={{ margin: '2px 0 0', fontSize: '0.76rem', color: theme.muted }}>
+                {joinParts([
+                  p.technologies?.trim() ? `Technologies : ${p.technologies.trim()}` : '',
+                  period ? url : '',
+                ])}
+              </p>
             ) : null}
           </div>
-          {p.description ? (
-            <p style={{ margin: '2px 0 0', fontSize: '0.8rem' }}>{p.description}</p>
-          ) : null}
-        </div>
-      ))}
+        );
+      })}
     </Section>
   );
 }
@@ -662,7 +823,9 @@ export function ReferencesBlock({ data, c, theme }: BlockProps) {
   if (!c.showReferences) return null;
   const refs = (data.references ?? []).filter((r) => r.name.trim());
   if (refs.length === 0) return null;
-  const placeholder = refs.every((r) => /request|demande/i.test(r.name) && !r.contact);
+  const placeholder = refs.every(
+    (r) => /request|demande/i.test(r.name) && !r.contact && !r.role && !r.organization
+  );
   return (
     <Section theme={theme} title={LABELS.references}>
       {placeholder ? (
@@ -673,7 +836,12 @@ export function ReferencesBlock({ data, c, theme }: BlockProps) {
         refs.map((r, i) => (
           <div key={r.id} style={{ marginTop: i === 0 ? 0 : 7, fontSize: '0.8rem' }}>
             <strong>{r.name}</strong>
-            {r.role ? <span style={{ color: theme.muted }}> — {r.role}</span> : null}
+            {r.role || r.organization ? (
+              <span style={{ color: theme.muted }}>
+                {' '}
+                — {joinParts([r.role, r.organization], ', ')}
+              </span>
+            ) : null}
             {r.contact ? (
               <p style={{ margin: '1px 0 0', color: theme.muted }}>{r.contact}</p>
             ) : null}
@@ -753,4 +921,280 @@ export function ContactList({
 
 export function displayName(identity: CvContent['identity']) {
   return identity.fullName.trim() || 'Votre nom';
+}
+
+/** One dated entry of the optional sections: title + date on a line, then details. */
+function Entry({
+  theme,
+  first,
+  title,
+  date,
+  subtitle,
+  body,
+}: {
+  theme: Theme;
+  first: boolean;
+  title: string;
+  date?: string;
+  subtitle?: string;
+  body?: string;
+}) {
+  return (
+    <div style={{ marginTop: first ? 0 : 8, breakInside: 'avoid' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+        <strong style={{ fontFamily: theme.headerFont, fontSize: '0.86rem' }}>{title}</strong>
+        {date ? (
+          <span style={{ fontSize: '0.72rem', color: theme.muted, whiteSpace: 'nowrap' }}>
+            {date}
+          </span>
+        ) : null}
+      </div>
+      {subtitle ? (
+        <p style={{ margin: '1px 0 0', fontSize: '0.8rem', color: theme.primary }}>{subtitle}</p>
+      ) : null}
+      {body ? (
+        <p style={{ margin: '2px 0 0', fontSize: '0.8rem', whiteSpace: 'pre-line' }}>{body}</p>
+      ) : null}
+    </div>
+  );
+}
+
+export function AwardsBlock({ data, c, theme }: BlockProps) {
+  if (!hasSection(data, c, 'awards')) return null;
+  const items = (data.awards ?? []).filter((a) => a.name.trim());
+  return (
+    <Section theme={theme} title={LABELS.awards}>
+      {items.map((a, i) => (
+        <Entry
+          key={a.id}
+          theme={theme}
+          first={i === 0}
+          title={a.name}
+          date={formatDateFr(a.date)}
+          subtitle={a.issuer}
+          body={a.description}
+        />
+      ))}
+    </Section>
+  );
+}
+
+export function VolunteeringBlock({ data, c, theme }: BlockProps) {
+  if (!hasSection(data, c, 'volunteering')) return null;
+  const items = (data.volunteering ?? []).filter((v) => v.organization.trim() || v.role?.trim());
+  return (
+    <Section theme={theme} title={LABELS.volunteering}>
+      {items.map((v, i) => (
+        <Entry
+          key={v.id}
+          theme={theme}
+          first={i === 0}
+          title={v.role?.trim() || v.organization}
+          date={formatPeriod(v.start, v.end, v.current)}
+          subtitle={joinParts([v.role?.trim() ? v.organization : '', v.location])}
+          body={v.description}
+        />
+      ))}
+    </Section>
+  );
+}
+
+export function PublicationsBlock({ data, c, theme }: BlockProps) {
+  if (!hasSection(data, c, 'publications')) return null;
+  const items = (data.publications ?? []).filter((p) => p.title.trim());
+  return (
+    <Section theme={theme} title={LABELS.publications}>
+      {items.map((p, i) => (
+        <Entry
+          key={p.id}
+          theme={theme}
+          first={i === 0}
+          title={p.title}
+          date={formatDateFr(p.date)}
+          subtitle={joinParts([p.type, p.publisher, p.authors])}
+          body={p.url?.replace(/^https?:\/\//, '')}
+        />
+      ))}
+    </Section>
+  );
+}
+
+export function TalksBlock({ data, c, theme }: BlockProps) {
+  if (!hasSection(data, c, 'talks')) return null;
+  const items = (data.talks ?? []).filter((t) => t.event.trim() || t.topic?.trim());
+  return (
+    <Section theme={theme} title={LABELS.talks}>
+      {items.map((t, i) => (
+        <Entry
+          key={t.id}
+          theme={theme}
+          first={i === 0}
+          title={joinParts([t.role, t.topic?.trim() ? t.topic : t.event], ' — ')}
+          date={formatDateFr(t.date)}
+          subtitle={joinParts([t.topic?.trim() ? t.event : '', t.organizer, t.location])}
+        />
+      ))}
+    </Section>
+  );
+}
+
+/** « Permis B — obtenu : 2022 », « Habilitation électrique B1V · Apave — expire : Mars 2027 ». */
+export function LicensesBlock({ data, c, theme }: BlockProps) {
+  if (!hasSection(data, c, 'licenses')) return null;
+  const items = (data.licenses ?? []).filter((l) => l.name.trim());
+  return (
+    <Section theme={theme} title={LABELS.licenses}>
+      <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '0.8rem' }}>
+        {items.map((l) => {
+          const detail = joinParts([
+            l.issuer,
+            l.date ? `obtenu : ${formatDateFr(l.date)}` : '',
+            l.expires ? `expire : ${formatDateFr(l.expires)}` : '',
+          ]);
+          return (
+            <li key={l.id} style={{ marginBottom: 4 }}>
+              <strong style={{ fontWeight: 600 }}>{l.name}</strong>
+              {detail ? <span style={{ color: theme.muted }}> — {detail}</span> : null}
+            </li>
+          );
+        })}
+      </ul>
+    </Section>
+  );
+}
+
+export function InterestsBlock({ data, c, theme }: BlockProps) {
+  if (!hasSection(data, c, 'interests')) return null;
+  const items = (data.interests ?? []).map((i) => i.name.trim()).filter(Boolean);
+  return (
+    <Section theme={theme} title={LABELS.interests}>
+      <p style={{ margin: 0, fontSize: '0.8rem' }}>{items.join(' · ')}</p>
+    </Section>
+  );
+}
+
+/** Availability, mobility and free « label : value » facts. */
+export function AdditionalInfoBlock({ data, c, theme }: BlockProps) {
+  if (!hasSection(data, c, 'additional')) return null;
+  const x = data.extras ?? {};
+  const rows: Array<[string, string]> = [];
+  const availability = joinParts([x.availability, x.notice ? `préavis : ${x.notice}` : '']);
+  if (availability) rows.push(['Disponibilité', availability]);
+  const mobility = joinParts([x.desiredLocation, ...(x.mobility ?? [])]);
+  if (mobility) rows.push(['Mobilité', mobility]);
+  for (const info of data.additionalInfo ?? []) {
+    if (info.label.trim() || info.value.trim()) rows.push([info.label.trim(), info.value.trim()]);
+  }
+  return (
+    <Section theme={theme} title={LABELS.additional}>
+      <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '0.8rem' }}>
+        {rows.map(([label, value], i) => (
+          <li key={i} style={{ marginBottom: 4 }}>
+            {label ? <strong style={{ fontWeight: 600 }}>{label}</strong> : null}
+            {label && value ? ' : ' : null}
+            {value}
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+/**
+ * The optional sections in the standard order (distinctions, bénévolat, publications,
+ * conférences, permis, centres d'intérêt, informations complémentaires). Each one renders only
+ * when the candidate filled it in, so a template can drop this in once before the references.
+ */
+export function MoreSections(props: BlockProps) {
+  return (
+    <>
+      <AwardsBlock {...props} />
+      <VolunteeringBlock {...props} />
+      <PublicationsBlock {...props} />
+      <TalksBlock {...props} />
+      <LicensesBlock {...props} />
+      <InterestsBlock {...props} />
+      <AdditionalInfoBlock {...props} />
+    </>
+  );
+}
+
+export const MORE_SECTION_NAMES = [
+  'awards',
+  'volunteering',
+  'publications',
+  'talks',
+  'licenses',
+  'interests',
+  'additional',
+] as const satisfies readonly SectionName[];
+
+/* Helpers for the first-generation templates (Modern, Creative, Executive, Startup, ATS), which
+   lay out their sections by hand but should still show the fields added to each section. */
+
+export function locationOf(identity: CvContent['identity']) {
+  return joinParts([identity.address, identity.city, identity.country], ', ');
+}
+
+/** `Abidjan · CDI · Distribution` */
+export function experienceMeta(exp: CvContent['experiences'][number]) {
+  return joinParts([exp.location, exp.contractType, exp.sector]);
+}
+
+/** `Mention : Bien · Mémoire : …` */
+export function educationExtras(ed: CvContent['education'][number]) {
+  return joinParts([
+    ed.honors?.trim() ? `Mention : ${ed.honors.trim()}` : '',
+    ed.thesis?.trim() ? `Mémoire : ${ed.thesis.trim()}` : '',
+  ]);
+}
+
+/** `B2 · TOEIC 850` */
+export function languageDetail(lang: CvContent['languages'][number]) {
+  return joinParts([lang.level, lang.certification]);
+}
+
+/** Achievements and tools under an experience's responsibilities. */
+export function ExperienceExtras({
+  exp,
+  muted,
+  ats = false,
+}: {
+  exp: CvContent['experiences'][number];
+  muted: string;
+  ats?: boolean;
+}) {
+  const achievements = lines(exp.achievements);
+  const tools = exp.tools?.trim();
+  if (achievements.length === 0 && !tools) return null;
+  if (ats) {
+    return (
+      <>
+        {achievements.length > 0 ? <p style={{ margin: '2pt 0' }}>Réalisations :</p> : null}
+        {achievements.map((a, i) => (
+          <p key={i} style={{ margin: '2pt 0 2pt 12pt' }}>
+            - {a}
+          </p>
+        ))}
+        {tools ? <p style={{ margin: '2pt 0' }}>Outils : {tools}</p> : null}
+      </>
+    );
+  }
+  return (
+    <>
+      {achievements.length > 0 ? (
+        <>
+          <p style={{ margin: '4px 0 0', fontSize: '0.76rem', fontWeight: 600 }}>Réalisations</p>
+          <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.8rem', listStyle: 'disc' }}>
+            {achievements.map((a, i) => (
+              <li key={i}>{a}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {tools ? (
+        <p style={{ margin: '3px 0 0', fontSize: '0.76rem', color: muted }}>Outils : {tools}</p>
+      ) : null}
+    </>
+  );
 }

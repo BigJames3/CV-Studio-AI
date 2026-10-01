@@ -6,6 +6,7 @@ import {
   EducationBlock,
   ExperienceBlock,
   LanguagesBlock,
+  MoreSections,
   ProjectsBlock,
   ReferencesBlock,
   SkillsBlock,
@@ -83,6 +84,7 @@ export function HealthTemplate({ data, customization: c }: TemplateProps) {
           <LanguagesBlock data={data} theme={theme} />
         </div>
         <ProjectsBlock data={data} c={c} theme={theme} />
+        <MoreSections data={data} c={c} theme={theme} />
         <ReferencesBlock data={data} c={c} theme={theme} />
       </div>
     </div>

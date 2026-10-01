@@ -6,6 +6,7 @@ import {
   EducationBlock,
   ExperienceBlock,
   LanguagesBlock,
+  MoreSections,
   ProjectsBlock,
   ReferencesBlock,
   SkillsBlock,
@@ -82,6 +83,7 @@ export function InfographicTemplate({ data, customization: c }: TemplateProps) {
           <SummaryBlock data={data} c={c} theme={theme} />
           <ExperienceBlock data={data} c={c} theme={theme} />
           <ProjectsBlock data={data} c={c} theme={theme} />
+          <MoreSections data={data} c={c} theme={theme} />
           <ReferencesBlock data={data} c={c} theme={theme} />
         </main>
         <aside>

@@ -6,6 +6,7 @@ import {
   EducationBlock,
   ExperienceBlock,
   LanguagesBlock,
+  MoreSections,
   ProjectsBlock,
   ReferencesBlock,
   SkillsBlock,
@@ -77,6 +78,7 @@ export function DeveloperTemplate({ data, customization: c }: TemplateProps) {
       <SkillsBlock data={data} c={c} theme={theme} variant="tags" />
       <ExperienceBlock data={data} c={c} theme={theme} />
       <ProjectsBlock data={data} c={c} theme={theme} />
+      <MoreSections data={data} c={c} theme={theme} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 24 }}>
         <div>
           <EducationBlock data={data} c={c} theme={theme} />

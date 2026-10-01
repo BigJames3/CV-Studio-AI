@@ -6,6 +6,7 @@ import {
   EducationBlock,
   ExperienceBlock,
   LanguagesBlock,
+  MoreSections,
   ProjectsBlock,
   ReferencesBlock,
   SkillsBlock,
@@ -86,6 +87,7 @@ export function TimelineTemplate({ data, customization: c }: TemplateProps) {
         </div>
       </div>
       <ProjectsBlock data={data} c={c} theme={theme} />
+      <MoreSections data={data} c={c} theme={theme} />
     </div>
   );
 }

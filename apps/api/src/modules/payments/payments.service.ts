@@ -23,6 +23,9 @@ import {
 } from './payment-env';
 import { emitSecurityAlert } from '../../observability';
 import { MarketplaceService } from '../marketplace/marketplace.service';
+import { stripeDate, subscriptionPeriod } from './stripe-period';
+
+export { subscriptionPeriod } from './stripe-period';
 
 const MAX_RETRIES = 3;
 
@@ -341,7 +344,10 @@ export class PaymentsService {
 
     const stripeSubId =
       typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
-    const stripeSub = await this.stripe!.subscriptions.retrieve(stripeSubId);
+    const stripeSub = await this.subscriptions.enforceSingleTrial(
+      userId,
+      await this.stripe!.subscriptions.retrieve(stripeSubId)
+    );
     const plan = resolvePaidPlan(session, stripeSub);
     const stripeCustomerId =
       expandableStripeId(session.customer) ?? expandableStripeId(stripeSub.customer);
@@ -359,6 +365,7 @@ export class PaymentsService {
       stripeSubscriptionId: stripeSub.id,
       stripeCustomerId,
       cancelAtPeriodEnd: Boolean(stripeSub.cancel_at_period_end),
+      canceledAt: stripeDate(stripeSub.canceled_at),
     });
 
     this.logger.log(
@@ -366,7 +373,22 @@ export class PaymentsService {
     );
   }
 
-  private async onSubscriptionChanged(stripeSub: Stripe.Subscription) {
+  /**
+   * Stripe does not guarantee event order: an older `customer.subscription.updated` can arrive
+   * after a newer one, or after `deleted`. The subscription is therefore synced as Stripe has
+   * it now; the payload only serves when the subscription no longer exists.
+   */
+  private async latestSubscription(stripeSub: Stripe.Subscription): Promise<Stripe.Subscription> {
+    try {
+      return await this.stripe!.subscriptions.retrieve(stripeSub.id);
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code === 'resource_missing') return stripeSub;
+      throw error;
+    }
+  }
+
+  private async onSubscriptionChanged(eventSub: Stripe.Subscription, fresh = false) {
+    let stripeSub = fresh ? eventSub : await this.latestSubscription(eventSub);
     let userId = stripeSub.metadata?.userId;
     if (!userId) {
       const local = await this.prisma.subscription.findFirst({
@@ -390,6 +412,9 @@ export class PaymentsService {
     }
 
     const isFullyCanceled = stripeSub.status === 'canceled' || stripeSub.status === 'unpaid';
+    if (!isFullyCanceled) {
+      stripeSub = await this.subscriptions.enforceSingleTrial(userId, stripeSub);
+    }
     const cancelAtPeriodEnd = Boolean(stripeSub.cancel_at_period_end) && !isFullyCanceled;
 
     let planName: string;
@@ -425,6 +450,7 @@ export class PaymentsService {
       stripeSubscriptionId: stripeSub.id,
       stripeCustomerId: expandableStripeId(stripeSub.customer),
       cancelAtPeriodEnd,
+      canceledAt: stripeDate(stripeSub.canceled_at),
     });
 
     this.logger.log(
@@ -479,7 +505,7 @@ export class PaymentsService {
     if (!sub && this.stripe) {
       const stripeSub = await this.stripe.subscriptions.retrieve(stripeSubId);
       if (stripeSub.metadata?.userId) {
-        await this.onSubscriptionChanged(stripeSub);
+        await this.onSubscriptionChanged(stripeSub, true);
         sub = await find();
       }
     }
@@ -497,7 +523,7 @@ export class PaymentsService {
         data: {
           subscriptionId: sub.id,
           amount: (invoice.amount_paid ?? 0) / 100,
-          currency: (invoice.currency ?? 'usd').toUpperCase(),
+          currency: (invoice.currency ?? 'eur').toUpperCase(),
           status: 'completed',
           paymentMethod: 'stripe',
           stripePaymentIntentId:
@@ -521,7 +547,7 @@ export class PaymentsService {
         subscriptionId: sub.id,
         invoiceNumber,
         amount: (invoice.amount_paid ?? 0) / 100,
-        currency: (invoice.currency ?? 'usd').toUpperCase(),
+        currency: (invoice.currency ?? 'eur').toUpperCase(),
         status: 'paid',
         pdfUrl: invoice.invoice_pdf ?? undefined,
         dueDate: new Date((invoice.created ?? Date.now() / 1000) * 1000),
@@ -540,17 +566,17 @@ export class PaymentsService {
   private async onInvoiceFailed(invoice: Stripe.Invoice) {
     const sub = await this.findInvoiceSubscription(invoice, 'invoice.payment_failed');
 
-    await this.prisma.subscription.update({
-      where: { id: sub.id },
-      data: { status: 'past_due' },
-    });
+    // This event can be older than a later successful payment: take the status from Stripe
+    // rather than forcing past_due.
+    const stripeSub = await this.stripe!.subscriptions.retrieve(invoiceSubscriptionId(invoice)!);
+    await this.onSubscriptionChanged(stripeSub, true);
 
     try {
       await this.prisma.payment.create({
         data: {
           subscriptionId: sub.id,
           amount: (invoice.amount_due ?? invoice.total ?? 0) / 100,
-          currency: (invoice.currency ?? 'usd').toUpperCase(),
+          currency: (invoice.currency ?? 'eur').toUpperCase(),
           status: 'failed',
           paymentMethod: 'stripe',
           transactionId: `${invoice.id}:failed`,
@@ -569,7 +595,7 @@ export class PaymentsService {
 
     await this.mail.sendPaymentFailed(sub.user.email, {
       amount: (invoice.amount_due ?? invoice.total ?? 0) / 100,
-      currency: (invoice.currency ?? 'usd').toUpperCase(),
+      currency: (invoice.currency ?? 'eur').toUpperCase(),
       retryDate,
     });
 
@@ -635,26 +661,7 @@ export function resolvePaidPlan(
   );
 }
 
-/*
- * Webhook payloads are rendered in the API version of the Stripe account (or of the endpoint),
- * not in the version pinned by this SDK. Since 2025-03-31.basil the billing period lives on the
- * subscription items and an invoice points to its subscription through `parent`. Read both.
- */
-
-type VersionedSubscriptionItem = Stripe.SubscriptionItem & {
-  current_period_start?: number;
-  current_period_end?: number;
-};
-
-export function subscriptionPeriod(stripeSub: Stripe.Subscription): { start: Date; end: Date } {
-  const item = stripeSub.items?.data?.[0] as VersionedSubscriptionItem | undefined;
-  const start = stripeSub.current_period_start ?? item?.current_period_start;
-  const end = stripeSub.current_period_end ?? item?.current_period_end;
-  if (!start || !end) {
-    throw new Error(`Stripe subscription ${stripeSub.id} has no billing period`);
-  }
-  return { start: new Date(start * 1000), end: new Date(end * 1000) };
-}
+/* Since 2025-03-31.basil an invoice points to its subscription through `parent`. Read both. */
 
 export function invoiceSubscriptionId(invoice: Stripe.Invoice): string | undefined {
   const legacy = invoice.subscription;

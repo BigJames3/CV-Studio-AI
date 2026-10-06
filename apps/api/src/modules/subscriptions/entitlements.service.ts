@@ -19,26 +19,32 @@ export class EntitlementsService {
     private readonly auditLog: AuditLogService
   ) {}
 
-  async getTier(userId: string): Promise<'free' | 'pro' | 'business'> {
-    const user = await this.prisma.user.findUnique({
+  async getTier(
+    userId: string,
+    db: Prisma.TransactionClient = this.prisma
+  ): Promise<'free' | 'pro' | 'business'> {
+    const user = await db.user.findUnique({
       where: { id: userId },
       select: TIER_SOURCE_SELECT,
     });
     return user ? resolveEffectiveTier(user) : 'free';
   }
 
-  async gatedUser(userId: string) {
-    const subscriptionTier = await this.getTier(userId);
+  async gatedUser(userId: string, db: Prisma.TransactionClient = this.prisma) {
+    const subscriptionTier = await this.getTier(userId, db);
     return { id: userId, subscriptionTier };
   }
 
-  /** `db` lets callers count inside their own transaction (see CvsService quota lock). */
+  /**
+   * `db` lets callers read inside their own transaction (see CvsService quota lock): a lock
+   * holder must not ask the pool for a second connection while waiters hold the others.
+   */
   async can(
     userId: string,
     feature: string,
     db: Prisma.TransactionClient = this.prisma
   ): Promise<boolean> {
-    const user = await this.gatedUser(userId);
+    const user = await this.gatedUser(userId, db);
 
     if (feature === 'cv:create') {
       const count = await db.cv.count({
@@ -117,7 +123,7 @@ export class EntitlementsService {
   ): Promise<void> {
     const allowed = await this.can(userId, feature, db);
     if (allowed) return;
-    const tier = await this.getTier(userId);
+    const tier = await this.getTier(userId, db);
     void this.auditLog.logFeatureDenial(userId, feature, tier);
     throw new ForbiddenException({
       statusCode: 402,

@@ -15,6 +15,7 @@ export function PlanGrid({
   currentTier,
   billingPeriod,
   checkoutPending,
+  trialEligible = false,
   onPeriodChange,
   onCheckout,
 }: {
@@ -22,6 +23,8 @@ export function PlanGrid({
   currentTier: string;
   billingPeriod: 'month' | 'year';
   checkoutPending: 'pro' | 'business' | null;
+  /** From GET /subscriptions/me: the trial is only advertised to accounts that can still get it. */
+  trialEligible?: boolean;
   onPeriodChange: (period: 'month' | 'year') => void;
   onCheckout: (plan: 'pro' | 'business', interval: 'month' | 'year') => void;
 }) {
@@ -131,7 +134,7 @@ export function PlanGrid({
                         Économies : {formatPlanPrice(annualSavings, currency)}/an
                       </p>
                     ) : null}
-                    {plan.trialDays ? (
+                    {plan.trialDays && trialEligible ? (
                       <p className="mt-2 text-xs text-content-secondary">
                         {plan.trialDays} jours gratuits
                       </p>

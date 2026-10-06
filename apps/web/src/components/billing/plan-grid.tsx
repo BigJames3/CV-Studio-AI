@@ -4,11 +4,7 @@ import { CheckCircle2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { BillingPlan } from '@/lib/api';
-import {
-  SUPPORT_BUSINESS_MAILTO,
-  formatFeatureName,
-  formatPlanPrice,
-} from '@/lib/billing/plans-catalog';
+import { formatFeatureName, formatPlanPrice } from '@/lib/billing/plans-catalog';
 
 const TIER_RANK: Record<string, number> = { free: 0, pro: 1, business: 2 };
 
@@ -19,6 +15,7 @@ export function PlanGrid({
   currentTier,
   billingPeriod,
   checkoutPending,
+  trialEligible = false,
   onPeriodChange,
   onCheckout,
 }: {
@@ -26,6 +23,8 @@ export function PlanGrid({
   currentTier: string;
   billingPeriod: 'month' | 'year';
   checkoutPending: 'pro' | 'business' | null;
+  /** From GET /subscriptions/me: the trial is only advertised to accounts that can still get it. */
+  trialEligible?: boolean;
   onPeriodChange: (period: 'month' | 'year') => void;
   onCheckout: (plan: 'pro' | 'business', interval: 'month' | 'year') => void;
 }) {
@@ -135,7 +134,7 @@ export function PlanGrid({
                         Économies : {formatPlanPrice(annualSavings, currency)}/an
                       </p>
                     ) : null}
-                    {plan.trialDays ? (
+                    {plan.trialDays && trialEligible ? (
                       <p className="mt-2 text-xs text-content-secondary">
                         {plan.trialDays} jours gratuits
                       </p>
@@ -168,21 +167,13 @@ export function PlanGrid({
                   <Button className="w-full" variant="secondary" disabled>
                     Plan actuel
                   </Button>
-                ) : plan.id === 'business' ? (
-                  <a
-                    href={SUPPORT_BUSINESS_MAILTO}
-                    data-testid="billing-business-support"
-                    className="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-border bg-transparent px-4 text-sm font-medium text-content-primary hover:bg-[color:var(--cv-color-neutral-100)]"
-                  >
-                    Contactez le support
-                  </a>
-                ) : canUpgrade && plan.id === 'pro' ? (
+                ) : canUpgrade && (plan.id === 'pro' || plan.id === 'business') ? (
                   <Button
                     className="w-full"
                     data-testid={`checkout-${plan.id}-${billingPeriod}`}
                     data-plan={plan.id}
                     disabled={checkoutPending !== null}
-                    onClick={() => onCheckout('pro', billingPeriod)}
+                    onClick={() => onCheckout(plan.id as 'pro' | 'business', billingPeriod)}
                   >
                     {pending ? 'Redirection…' : `Passer à ${plan.name}`}
                   </Button>

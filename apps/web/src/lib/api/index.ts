@@ -18,12 +18,16 @@ export const queryKeys = {
   plans: ['plans'] as const,
   invoices: ['invoices'] as const,
   analyticsDashboard: ['analytics', 'dashboard'] as const,
+  cvAnalytics: (days: number) => ['analytics', 'cvs', days] as const,
   marketplace: ['marketplace', 'templates'] as const,
   marketplaceCatalog: (filters?: { q?: string; category?: string; sort?: string }) =>
     ['marketplace', 'templates', filters ?? {}] as const,
   marketplaceListing: (id: string) => ['marketplace', 'listing', id] as const,
   sessions: ['auth', 'sessions'] as const,
   payments: ['payments', 'history'] as const,
+  teams: ['teams'] as const,
+  team: (id: string) => ['teams', id] as const,
+  sharedCvs: ['cvs', 'shared'] as const,
 };
 
 export type AuthResponse = {
@@ -241,6 +245,8 @@ export type CvListItem = {
   templateId?: string | null;
   viewCount?: number;
   createdAt?: string;
+  /** Team the CV is shared with (Business). */
+  teamId?: string | null;
 };
 
 export type ListCvsParams = {
@@ -267,6 +273,13 @@ export const cvsApi = {
     return apiClient<ListCvsResponse>(`/cvs${qs ? `?${qs}` : ''}`);
   },
   get: (id: string) => apiClient<Record<string, unknown>>(`/cvs/${id}`),
+  /** CVs other people shared with my teams (Business). */
+  shared: () => apiClient<{ items: SharedCv[] }>('/cvs/shared'),
+  setTeam: (id: string, teamId: string | null) =>
+    apiClient<{ id: string; teamId: string | null }>(`/cvs/${id}/team`, {
+      method: 'PUT',
+      body: { teamId },
+    }),
   create: (body: { title: string; templateId?: string; content?: unknown }) =>
     apiClient('/cvs', { method: 'POST', body }),
   update: (id: string, body: unknown) => apiClient(`/cvs/${id}`, { method: 'PATCH', body }),
@@ -302,6 +315,85 @@ export const cvsApi = {
     }>(`/cvs/exports/${jobId}`),
 };
 
+export type CvAccess = 'owner' | 'editor' | 'viewer';
+export type TeamRole = 'owner' | 'admin' | 'editor' | 'viewer';
+
+export type SharedCv = {
+  id: string;
+  title: string;
+  templateId: string | null;
+  teamId: string;
+  updatedAt: string;
+  ownerName: string;
+  teamName: string;
+  access: CvAccess;
+};
+
+export type TeamSummary = {
+  id: string;
+  name: string;
+  createdAt: string;
+  memberCount: number;
+  myRole: TeamRole;
+  /** False once the owner's Business plan lapsed: shared CVs are hidden until it is back. */
+  active: boolean;
+};
+
+export type TeamMember = {
+  id: string;
+  userId: string;
+  role: TeamRole;
+  createdAt: string;
+  user: { email: string; firstName: string; lastName: string };
+};
+
+export type TeamDetail = {
+  id: string;
+  name: string;
+  createdAt: string;
+  myRole: TeamRole;
+  memberLimit: number;
+  active: boolean;
+  members: TeamMember[];
+};
+
+export const teamsApi = {
+  list: () => apiClient<TeamSummary[]>('/teams'),
+  get: (id: string) => apiClient<TeamDetail>(`/teams/${id}`),
+  create: (name: string) => apiClient<TeamSummary>('/teams', { method: 'POST', body: { name } }),
+  remove: (id: string) => apiClient(`/teams/${id}`, { method: 'DELETE' }),
+  addMember: (id: string, body: { email: string; role: Exclude<TeamRole, 'owner'> }) =>
+    apiClient<TeamMember>(`/teams/${id}/members`, { method: 'POST', body }),
+  updateMember: (id: string, memberId: string, role: Exclude<TeamRole, 'owner'>) =>
+    apiClient<TeamMember>(`/teams/${id}/members/${memberId}`, { method: 'PATCH', body: { role } }),
+  removeMember: (id: string, memberId: string) =>
+    apiClient(`/teams/${id}/members/${memberId}`, { method: 'DELETE' }),
+};
+
+export type ViewSource =
+  'direct' | 'qr' | 'linkedin' | 'email' | 'search' | 'social' | 'job_board' | 'other';
+
+export type CvAnalyticsReport = {
+  days: 7 | 30 | 90;
+  since: string;
+  totals: { views: number; dailyVisitors: number; publicCvs: number };
+  series: Array<{ date: string; views: number }>;
+  sources: Array<{ source: ViewSource; views: number }>;
+  cvs: Array<{
+    id: string;
+    title: string;
+    isPublic: boolean;
+    views: number;
+    dailyVisitors: number;
+    lastViewedAt: string | null;
+  }>;
+};
+
+export const analyticsApi = {
+  /** Business: views, daily visitors and sources of my CVs. */
+  cvs: (days: 7 | 30 | 90) => apiClient<CvAnalyticsReport>(`/analytics/cvs?days=${days}`),
+};
+
 export const templatesApi = {
   list: () =>
     apiClient<{
@@ -327,8 +419,12 @@ export const subscriptionsApi = {
         cancelAtPeriodEnd: boolean;
         currentPeriodEnd: string;
         currentPeriodStart: string;
+        stripeCustomerId?: string | null;
       } | null;
       tier: 'free' | 'pro' | 'business';
+      /** Decided by the server: the 14-day trial is offered once per account. */
+      trialEligible?: boolean;
+      trialEndsAt?: string | null;
       entitlements: {
         cvCreate: boolean;
         exportPdf?: boolean;
@@ -349,6 +445,7 @@ export const subscriptionsApi = {
       method: 'POST',
       body: params,
     }),
+  portal: () => apiClient<{ url: string }>('/subscriptions/me/portal', { method: 'POST' }),
   cancel: () =>
     apiClient<{
       status: string;
@@ -396,6 +493,11 @@ export type PaymentHistoryItem = {
 
 export const paymentsApi = {
   history: () => apiClient<{ items: PaymentHistoryItem[] }>('/payments/history'),
+  confirmCheckout: (sessionId: string) =>
+    apiClient<{ confirmed: boolean }>('/payments/checkout/confirm', {
+      method: 'POST',
+      body: { sessionId },
+    }),
 };
 
 export const aiApi = {

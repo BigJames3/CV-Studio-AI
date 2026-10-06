@@ -2,11 +2,13 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { TEMPLATE_CATALOG, categoryToKey, getTemplateById } from '@/lib/templates/catalog';
+import { TEMPLATE_CATALOG, getTemplateById, templateKeyOf } from '@/lib/templates/catalog';
 import type { TemplateCustomization, TemplateKey, TemplateListItem } from '@/lib/templates/types';
 import { cvsApi } from '@/lib/api';
 import { ApiError } from '@/lib/api/client';
+import { toast } from 'sonner';
 import { SAMPLE_CV } from '@/lib/templates/sample-cv';
+import { emptyContent } from '@/stores/editor-store';
 import { templateAccessType } from '@cvstudio/shared-utils';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
 
@@ -28,7 +30,7 @@ export function useTemplateSelection(initialId?: string) {
     [selectedId, templates]
   );
 
-  const templateKey: TemplateKey = categoryToKey(String(selected.category));
+  const templateKey: TemplateKey = templateKeyOf(selected);
 
   const selectTemplate = useCallback((t: TemplateListItem) => {
     setSelectedId(t.id);
@@ -62,18 +64,8 @@ export function useTemplateSelection(initialId?: string) {
     setCreating(true);
     setError(null);
     try {
-      const content = {
-        ...SAMPLE_CV,
-        identity: { ...SAMPLE_CV.identity, fullName: '' },
-        summary: { text: '' },
-        experiences: [],
-        education: [],
-        skills: [],
-        languages: [],
-        templateKey,
-        customization,
-        schemaVersion: 1,
-      };
+      // Start empty: the sample CV is only for previews, never the candidate's own data.
+      const content = { ...emptyContent(templateKey), customization };
       const cv = (await cvsApi.create({
         title: `CV — ${selected.name}`,
         templateId: selected.id,
@@ -85,19 +77,13 @@ export function useTemplateSelection(initialId?: string) {
         showUpgrade('cv:create');
         return;
       }
-      // Offline / API down — still open editor with local id for demo
-      const localId = `local-${selected.id.slice(0, 8)}`;
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem(
-          `cv-draft-${localId}`,
-          JSON.stringify({
-            templateId: selected.id,
-            templateKey,
-            customization,
-          })
-        );
-      }
-      router.push(`/editor/${localId}?template=${templateKey}`);
+      // Never fall back to an unsaved local draft: the user would believe the CV is saved.
+      const message =
+        error instanceof ApiError && error.status < 500 && error.message
+          ? error.message
+          : 'Impossible de créer le CV. Vérifiez votre connexion et réessayez.';
+      setError(message);
+      toast.error('❌ Le CV n’a pas pu être créé', { description: message });
     } finally {
       setCreating(false);
     }

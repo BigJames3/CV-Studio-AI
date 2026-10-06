@@ -10,6 +10,7 @@ import { EntitlementsService } from '../subscriptions/entitlements.service';
 import { lockUserScope, USER_LOCK_TX_OPTIONS } from '../../common/utils/user-lock';
 import { CreateCvDto, UpdateCvDto, PublishCvDto, ListCvsQueryDto } from './dto/cv.dto';
 import { PdfExportService } from './export/pdf-export.service';
+import { TeamsService, type CvAccess } from '../teams/teams.service';
 import { EMPTY_CV_CONTENT, normalizeCvContent } from './cv-content.util';
 import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 import { randomBytes } from 'crypto';
@@ -20,9 +21,7 @@ const PREMIUM_TEMPLATE_MESSAGE = 'This template requires a Pro or Business plan'
 
 /** Editor keys (`content.templateKey`) of the premium official templates, e.g. `executive`. */
 const PREMIUM_TEMPLATE_KEYS: ReadonlySet<string> = new Set(
-  TEMPLATE_SEEDS.filter((t) => t.isPremium).map((t) =>
-    t.category === 'ats_optimized' ? 'ats' : t.category
-  )
+  TEMPLATE_SEEDS.filter((t) => t.isPremium).map((t) => String(t.designData.key))
 );
 
 function contentTemplateKey(content: unknown): string | undefined {
@@ -34,7 +33,8 @@ export class CvsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly entitlements: EntitlementsService,
-    private readonly pdfExport: PdfExportService
+    private readonly pdfExport: PdfExportService,
+    private readonly teams: TeamsService
   ) {}
 
   async list(userId: string, query: ListCvsQueryDto) {
@@ -64,6 +64,7 @@ export class CvsService {
         publicUrl: true,
         isStarred: true,
         viewCount: true,
+        teamId: true,
         updatedAt: true,
         createdAt: true,
       },
@@ -102,15 +103,84 @@ export class CvsService {
     };
   }
 
+  /** CVs other people shared with the caller's active teams, newest first. */
+  async listShared(userId: string) {
+    const memberships = await this.teams.activeMemberships(userId);
+    if (memberships.length === 0) return { items: [] };
+    const byTeam = new Map(memberships.map((m) => [m.teamId, m]));
+    const cvs = await this.prisma.cv.findMany({
+      where: {
+        teamId: { in: [...byTeam.keys()] },
+        userId: { not: userId },
+        deletedAt: null,
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: 200,
+      select: {
+        id: true,
+        title: true,
+        templateId: true,
+        teamId: true,
+        updatedAt: true,
+        user: { select: { firstName: true, lastName: true } },
+      },
+    });
+    return {
+      items: cvs.map(({ user, ...cv }) => {
+        const team = byTeam.get(cv.teamId as string)!;
+        return {
+          ...cv,
+          ownerName: `${user.firstName} ${user.lastName}`.trim(),
+          teamName: team.teamName,
+          access: team.access,
+        };
+      }),
+    };
+  }
+
+  /**
+   * A CV the caller may open: their own, or one shared with an active team they belong to.
+   * `edit` rejects team viewers. Owner-only actions (delete, publish, share...) use `get`.
+   */
+  async getAccessible(userId: string, id: string, need: 'read' | 'edit' = 'read') {
+    const cv = await this.prisma.cv.findFirst({ where: { id, deletedAt: null } });
+    if (!cv) throw new NotFoundException({ code: 'NOT_FOUND', message: 'CV not found' });
+    const access: CvAccess | null =
+      cv.userId === userId ? 'owner' : await this.teams.cvAccess(userId, cv);
+    if (!access) {
+      throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Not your CV' });
+    }
+    if (need === 'edit' && access === 'viewer') {
+      throw new ForbiddenException({ code: 'READ_ONLY', message: 'You can only view this CV' });
+    }
+    return {
+      ...cv,
+      content: normalizeCvContent(cv.content) as Prisma.JsonValue,
+      access,
+    };
+  }
+
+  /** Share a CV with one of the owner's teams, or stop sharing it (`teamId: null`). */
+  async setTeam(userId: string, id: string, teamId: string | null) {
+    await this.get(userId, id);
+    if (teamId) await this.teams.assertCanShareInto(userId, teamId);
+    return this.prisma.cv.update({
+      where: { id },
+      data: { teamId },
+      select: { id: true, teamId: true },
+    });
+  }
+
   async update(userId: string, id: string, dto: UpdateCvDto) {
-    const current = await this.get(userId, id);
-    await this.assertTemplateAccess(userId, dto.templateId);
+    const cv = await this.getAccessible(userId, id, 'edit');
+    // Premium templates follow the CV owner's plan, whoever edits.
+    await this.assertTemplateAccess(cv.userId, dto.templateId);
     if (dto.content !== undefined) {
       // The editor switches template through content.templateKey, not templateId. A CV that
       // already uses a premium template (e.g. after a downgrade) stays editable.
       const nextKey = contentTemplateKey(dto.content);
-      if (nextKey !== contentTemplateKey(current.content)) {
-        await this.assertTemplateKeyAccess(userId, nextKey);
+      if (nextKey !== contentTemplateKey(cv.content)) {
+        await this.assertTemplateKeyAccess(cv.userId, nextKey);
       }
     }
     const content =
@@ -123,7 +193,8 @@ export class CvsService {
         title: dto.title,
         templateId: dto.templateId,
         content,
-        isStarred: dto.isStarred,
+        // Starring is the owner's own bookmark.
+        isStarred: cv.access === 'owner' ? dto.isStarred : undefined,
         locale: dto.locale,
         paper: dto.paper,
       },
@@ -172,12 +243,9 @@ export class CvsService {
         updatedAt: true,
       },
     });
+    // Views are counted by POST /public/cvs/:slug/view from the visitor's browser: this read
+    // is cached by the web page, so counting here missed most visits.
     if (!cv) return null;
-
-    await this.prisma.cv.update({
-      where: { id: cv.id },
-      data: { viewCount: { increment: 1 } },
-    });
 
     return {
       ...cv,
@@ -224,7 +292,8 @@ export class CvsService {
     }
     const shareUrl = `${appUrl}/s/${cv.publicUrl}`;
     const QRCode = await import('qrcode');
-    const qrCodeDataUrl = await QRCode.toDataURL(shareUrl, { margin: 1, width: 220 });
+    // `src=qr` lets analytics tell QR scans from shared links.
+    const qrCodeDataUrl = await QRCode.toDataURL(`${shareUrl}?src=qr`, { margin: 1, width: 220 });
     return {
       isPublic: true,
       publicUrl: cv.publicUrl,
@@ -258,7 +327,7 @@ export class CvsService {
   }
 
   async listVersions(userId: string, id: string) {
-    await this.get(userId, id);
+    await this.getAccessible(userId, id);
     return this.prisma.cvVersion.findMany({
       where: { cvId: id },
       orderBy: { versionNumber: 'desc' },
@@ -267,7 +336,7 @@ export class CvsService {
   }
 
   async getVersion(userId: string, cvId: string, versionId: string) {
-    await this.get(userId, cvId);
+    await this.getAccessible(userId, cvId);
     const version = await this.prisma.cvVersion.findFirst({
       where: { id: versionId, cvId },
     });
@@ -276,8 +345,8 @@ export class CvsService {
   }
 
   async restoreVersion(userId: string, cvId: string, versionId: string) {
+    const current = await this.getAccessible(userId, cvId, 'edit');
     const version = await this.getVersion(userId, cvId, versionId);
-    const current = await this.get(userId, cvId);
 
     const last = await this.prisma.cvVersion.findFirst({
       where: { cvId },
@@ -300,7 +369,7 @@ export class CvsService {
       }),
     ]);
 
-    return this.get(userId, cvId);
+    return this.getAccessible(userId, cvId);
   }
 
   private async assertTemplateAccess(userId: string, templateId?: string) {

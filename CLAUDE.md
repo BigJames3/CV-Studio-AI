@@ -70,7 +70,7 @@ The schema is `apps/api/prisma/schema.prisma` (the single source of truth; `docs
 - Feature modules live in `src/modules/*` (auth, users, cvs, templates, subscriptions, plans, payments, invoices, ai, analytics, marketplace, health). Cross-cutting code (guards, filters, interceptors, middleware, feature gating) is in `src/common`. Infrastructure lives in `src/database` (Prisma), `src/redis`, `src/cache`, `src/mail`, `src/queue` and `src/observability` (Sentry, PostHog).
 - **Two entrypoints from one codebase**: `main.ts` is the HTTP API. `worker.ts` (`WORKER_KIND=pdf node dist/worker.js`) is a PDF worker that keeps a warm Chromium pool (`PdfBrowserPool` in `modules/cvs/export`). In local dev, PDF jobs are processed inline by the API. `ScheduleModule` (cron) is disabled when `WORKER_KIND` is set or `NODE_ENV=test`.
 - Env loading: `.env.test` (only when `NODE_ENV=test`), then `.env.local`, then `.env`. Copy `apps/api/.env.example` and `apps/web/.env.example` to start.
-- Payments: Stripe only (CinetPay was removed). Webhook handling is fail-closed (see `docs/STRIPE-WEBHOOK-FAIL-CLOSED.md`, `docs/PAYMENT_GATEWAY_SETUP.md`). Maintenance script: `webhook:retry-dlq`.
+- Payments: Stripe only (CinetPay was removed). Webhook handling is fail-closed (see `docs/STRIPE-WEBHOOK-FAIL-CLOSED.md`, `docs/PAYMENT_GATEWAY_SETUP.md`). Maintenance scripts: `webhook:retry-dlq`, and `pnpm stripe:check` (read-only check of keys, prices, webhooks and customer portal).
 
 ## Web architecture (apps/web)
 
@@ -91,3 +91,16 @@ App Router with route groups `(marketing)`, `(auth)` and `(app)`, plus public sh
 ## Working conventions requested by the maintainer
 
 When fixing tooling or CI issues: observe, reproduce, prove the root cause, then propose a minimal fix and **wait for validation** before modifying anything. Never add `--no-verify`, `|| true` or `continue-on-error: true` to hide real errors. Don't install packages, bump versions, touch the lockfile or change application code to fix a purely environmental problem without justification. Keep each fix in its own isolated commit, and run `git diff --check` before committing.
+
+## AI agent governance
+
+The project's agent team is already defined and is authoritative:
+
+- `AGENTS.md`: shared charter (priorities P0→P4, Definition of Done, security, git, report format).
+- `docs/agents/00-README.md`: repository map, feature and plan matrices, anti-conflict rule.
+- `docs/agents/01-architect.md` … `08-devops.md`: one sheet per agent (ownership, allowed and forbidden files).
+- `docs/agents/TASK_BOARD.md` and `DECISIONS.md`: confirmed tasks and open human decisions.
+
+`.claude/agents/` exposes these 8 agents as Claude Code subagents (`architect`, `security`, `qa`, `backend`, `frontend`, `ai`, `billing`, `devops`). Each wrapper points to its `docs/agents/` sheet: edit the sheet, not the wrapper.
+
+Cross-cutting work: `architect` splits it → `security` confirms the risk (read-only) → the owning agent implements → `qa` tests → `architect` reviews the diff.

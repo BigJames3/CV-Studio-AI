@@ -1,12 +1,14 @@
 import { canDownloadPDF, canShare } from '@cvstudio/shared-utils';
 import {
   CATALOG_FALLBACK_ROWS,
+  FREE_TEMPLATE_COUNT,
   mapPlanToPublicDto,
   PLAN_CACHE_KEY,
   PlansService,
   TRIAL_PERIOD_DAYS,
   UNSHIPPED_FEATURES,
 } from './plans.service';
+import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 
 const FREE = {
   name: 'Free',
@@ -69,12 +71,21 @@ describe('mapPlanToPublicDto', () => {
     expect(dto.entitlements.find((e) => e.feature === 'downloadPdf')?.included).toBe(false);
     expect(dto.entitlements.find((e) => e.feature === 'share')?.included).toBe(false);
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(false);
+    // Even with a seeded `marketplaceAccess: false` row, Free can buy marketplace licences.
+    expect(dto.entitlements.find((e) => e.feature === 'marketplaceAccess')?.included).toBe(true);
+    expect(dto.entitlements.find((e) => e.feature === 'atsCheck')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'templates')).toEqual({
       feature: 'templates',
-      value: '5',
+      value: '10',
       included: true,
     });
     expect(dto.entitlements.some((e) => /docx/i.test(e.feature))).toBe(false);
+  });
+
+  it('advertises exactly the non-premium official templates for Free', () => {
+    const free = TEMPLATE_SEEDS.filter((t) => !t.isPremium).length;
+    expect(FREE_TEMPLATE_COUNT).toBe(free);
+    expect(FREE_TEMPLATE_COUNT).toBe(10);
   });
 
   it('maps Pro with annual savings inputs and 14-day trial', () => {

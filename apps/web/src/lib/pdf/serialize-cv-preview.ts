@@ -1,72 +1,13 @@
 /**
- * Serialize the live CV preview from the browser with computed styles.
- * Ensures the PDF matches what the user sees in the editor (WYSIWYG).
+ * Serialize the live CV preview into a standalone HTML document for the PDF service.
+ *
+ * The CV markup is kept as rendered (templates are styled inline), so the PDF uses exactly the
+ * same layout rules as the preview and the browser print: same widths, same page-break rules,
+ * same paged-media CSS (see `PAGED_MEDIA_CSS`). What the PDF service cannot fetch is embedded:
+ * the stylesheet rules that apply to the CV, its fonts and its images. The service blocks all
+ * network requests except data: URLs.
  */
-
-const PAPER: Record<'A4' | 'Letter', { width: string; height: string }> = {
-  A4: { width: '210mm', height: '297mm' },
-  Letter: { width: '8.5in', height: '11in' },
-};
-
-const STYLE_PROPS = [
-  'display',
-  'position',
-  'box-sizing',
-  'width',
-  'min-width',
-  'max-width',
-  'height',
-  'min-height',
-  'max-height',
-  'margin',
-  'padding',
-  'border',
-  'border-radius',
-  'background',
-  'background-color',
-  'background-image',
-  'color',
-  'font-family',
-  'font-size',
-  'font-weight',
-  'font-style',
-  'line-height',
-  'letter-spacing',
-  'text-align',
-  'text-decoration',
-  'text-transform',
-  'white-space',
-  'overflow',
-  'overflow-wrap',
-  'word-break',
-  'flex',
-  'flex-direction',
-  'flex-wrap',
-  'justify-content',
-  'align-items',
-  'align-self',
-  'gap',
-  'row-gap',
-  'column-gap',
-  'grid',
-  'grid-template-columns',
-  'grid-template-rows',
-  'grid-column',
-  'grid-row',
-  'object-fit',
-  'object-position',
-  'opacity',
-  'list-style',
-  'vertical-align',
-  'box-shadow',
-  'outline',
-  'z-index',
-  'top',
-  'right',
-  'bottom',
-  'left',
-  'transform',
-] as const;
+import { PAPER_SIZES, type PaperSize } from '@/lib/templates/page-layout';
 
 const NO_PRINT_SELECTORS = [
   '.editor-controls',
@@ -78,82 +19,26 @@ const NO_PRINT_SELECTORS = [
   '[role="toolbar"]',
 ] as const;
 
-function absoluteUrl(url: string): string {
-  if (!url || url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('http')) {
-    return url;
-  }
+/** Inherited properties the CV takes from the page around the preview. */
+const INHERITED_PROPS = [
+  'font-family',
+  'font-size',
+  'font-weight',
+  'font-style',
+  'line-height',
+  'letter-spacing',
+  'color',
+  'text-align',
+  '-webkit-font-smoothing',
+] as const;
+
+function absoluteUrl(url: string, base = window.location.href): string {
+  if (!url || url.startsWith('data:') || url.startsWith('blob:')) return url;
   try {
-    return new URL(url, window.location.origin).href;
+    return new URL(url, base).href;
   } catch {
     return url;
   }
-}
-
-function inlineElementStyles(source: HTMLElement, target: HTMLElement) {
-  const computed = window.getComputedStyle(source);
-  const parts: string[] = [];
-  for (const prop of STYLE_PROPS) {
-    const value = computed.getPropertyValue(prop);
-    if (!value || value === 'none' || value === 'normal' || value === 'auto') {
-      if (
-        prop === 'display' ||
-        prop === 'width' ||
-        prop === 'font-family' ||
-        prop === 'font-size'
-      ) {
-        parts.push(`${prop}:${value}`);
-      }
-      continue;
-    }
-    // Kill editor chrome artifacts (scale / drop shadow live outside print)
-    if (prop === 'box-shadow') continue;
-    if (prop === 'transform' && value !== 'none') continue;
-    parts.push(`${prop}:${value}`);
-  }
-  parts.push('-webkit-print-color-adjust:exact', 'print-color-adjust:exact');
-  target.setAttribute('style', parts.join(';'));
-
-  if (target instanceof HTMLImageElement && source instanceof HTMLImageElement) {
-    target.src = absoluteUrl(source.currentSrc || source.src);
-    target.removeAttribute('srcset');
-  }
-
-  const srcChildren = Array.from(source.children) as HTMLElement[];
-  const tgtChildren = Array.from(target.children) as HTMLElement[];
-  for (let i = 0; i < srcChildren.length; i++) {
-    if (srcChildren[i] && tgtChildren[i]) {
-      inlineElementStyles(srcChildren[i], tgtChildren[i]);
-    }
-  }
-}
-
-function collectFontFaces(): string {
-  const faces: string[] = [];
-  try {
-    for (const sheet of Array.from(document.styleSheets)) {
-      let rules: CSSRuleList | undefined;
-      try {
-        rules = sheet.cssRules;
-      } catch {
-        continue; // cross-origin
-      }
-      if (!rules) continue;
-      for (const rule of Array.from(rules)) {
-        if (rule instanceof CSSFontFaceRule) {
-          faces.push(rule.cssText);
-        }
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  return faces.join('\n');
-}
-
-function googleFontsLink(): string {
-  return `<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lato:wght@400;700&family=Montserrat:wght@500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />`;
 }
 
 function removeInteractiveElements(element: HTMLElement): void {
@@ -162,15 +47,13 @@ function removeInteractiveElements(element: HTMLElement): void {
   }
 }
 
-async function imageToDataUrl(url: string): Promise<string> {
+async function toDataUrl(url: string): Promise<string> {
   if (url.startsWith('data:')) return url;
-
   const response = await fetch(url, { credentials: 'include' });
   if (!response.ok) {
-    throw new Error(`Image fetch failed (${response.status})`);
+    throw new Error(`Fetch failed (${response.status})`);
   }
   const blob = await response.blob();
-
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
@@ -186,7 +69,7 @@ async function inlineImages(element: HTMLElement): Promise<void> {
       const src = img.currentSrc || img.src;
       if (!src) return;
       try {
-        img.src = await imageToDataUrl(absoluteUrl(src));
+        img.src = await toDataUrl(absoluteUrl(src));
         img.removeAttribute('srcset');
       } catch (error) {
         console.warn('Failed to inline image for PDF:', src, error);
@@ -194,22 +77,170 @@ async function inlineImages(element: HTMLElement): Promise<void> {
     })
   );
 
-  // CSS background-image: url(...) → data URL where possible
-  const withBg = Array.from(element.querySelectorAll('*')) as HTMLElement[];
+  // Inline style background-image: url(...) → data URL where possible
+  const withBg = Array.from(element.querySelectorAll<HTMLElement>('[style*="url("]'));
   await Promise.all(
     withBg.map(async (el) => {
-      const bg = el.style.backgroundImage;
-      if (!bg || bg === 'none' || !bg.includes('url(')) return;
-      const match = bg.match(/url\(["']?([^"')]+)["']?\)/);
+      const match = el.style.backgroundImage.match(/url\(["']?([^"')]+)["']?\)/);
       if (!match?.[1] || match[1].startsWith('data:')) return;
       try {
-        const dataUrl = await imageToDataUrl(absoluteUrl(match[1]));
-        el.style.backgroundImage = `url("${dataUrl}")`;
+        const dataUrl = await toDataUrl(absoluteUrl(match[1]));
+        el.style.backgroundImage = el.style.backgroundImage.replace(match[0], `url("${dataUrl}")`);
       } catch {
         /* keep original */
       }
     })
   );
+}
+
+function normalizeFamily(family: string): string {
+  return family
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .toLowerCase();
+}
+
+type FontUsage = {
+  /** Resolved family (e.g. `__inter_d65c78`) → font weights rendered with it. */
+  weights: Map<string, Set<number>>;
+  /** Code points of the CV text, in both cases (text-transform may change them). */
+  codePoints: Set<number>;
+};
+
+/** Families, weights and characters the CV actually renders. */
+function fontUsage(root: HTMLElement): FontUsage {
+  const weights = new Map<string, Set<number>>();
+  for (const el of [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))]) {
+    const style = window.getComputedStyle(el);
+    const weight = Number(style.fontWeight) || 400;
+    for (const family of style.fontFamily.split(',')) {
+      const key = normalizeFamily(family);
+      if (!weights.has(key)) weights.set(key, new Set());
+      weights.get(key)!.add(weight);
+    }
+  }
+  const text = root.textContent ?? '';
+  const codePoints = new Set<number>();
+  for (const char of text + text.toUpperCase() + text.toLowerCase()) {
+    codePoints.add(char.codePointAt(0)!);
+  }
+  return { weights, codePoints };
+}
+
+/** `U+0-FF, U+131, U+4??` → does it cover any of the code points? No range covers all. */
+function coversText(unicodeRange: string, codePoints: Set<number>): boolean {
+  if (!unicodeRange.trim()) return true;
+  const ranges = unicodeRange.split(',').map((part) => {
+    const value = part.trim().replace(/^u\+/i, '');
+    if (value.includes('?')) {
+      return [parseInt(value.replace(/\?/g, '0'), 16), parseInt(value.replace(/\?/g, 'F'), 16)];
+    }
+    const [from, to = from] = value.split('-');
+    return [parseInt(from!, 16), parseInt(to!, 16)];
+  });
+  for (const point of codePoints) {
+    if (ranges.some(([from, to]) => point >= from! && point <= to!)) return true;
+  }
+  return false;
+}
+
+/** `400` or `100 900` (variable font) → does it include one of the weights used? */
+function coversWeight(fontWeight: string, used: Set<number>): boolean {
+  const [from, to = from] = fontWeight
+    .split(/\s+/)
+    .map((w) => (w === 'bold' ? 700 : w === 'normal' || !w ? 400 : Number(w)));
+  return Array.from(used).some((w) => w >= from! && w <= to!);
+}
+
+/**
+ * The @font-face rules to embed: the CV's families, only for the scripts its text uses and the
+ * weights it renders. A family whose weights match no face keeps all its faces (the browser
+ * then picks the nearest one, as in the preview).
+ */
+function facesToEmbed(faces: CSSFontFaceRule[], usage: FontUsage): CSSFontFaceRule[] {
+  const used = faces.filter((face) =>
+    usage.weights.has(normalizeFamily(face.style.getPropertyValue('font-family')))
+  );
+  const inText = used.filter((face) =>
+    coversText(face.style.getPropertyValue('unicode-range'), usage.codePoints)
+  );
+  const byFamily = new Map<string, CSSFontFaceRule[]>();
+  for (const face of inText) {
+    const family = normalizeFamily(face.style.getPropertyValue('font-family'));
+    byFamily.set(family, [...(byFamily.get(family) ?? []), face]);
+  }
+  return Array.from(byFamily.entries()).flatMap(([family, list]) => {
+    const weights = usage.weights.get(family)!;
+    const matching = list.filter((face) =>
+      coversWeight(face.style.getPropertyValue('font-weight'), weights)
+    );
+    return matching.length ? matching : list;
+  });
+}
+
+function ruleApplies(selector: string, source: HTMLElement): boolean {
+  try {
+    return (
+      source.matches(selector) ||
+      source.querySelector(selector) !== null ||
+      document.documentElement.matches(selector) ||
+      document.body.matches(selector)
+    );
+  } catch {
+    return false; // pseudo-element-only or unsupported selector
+  }
+}
+
+async function inlineFontFace(rule: CSSFontFaceRule, base: string): Promise<string> {
+  let css = rule.cssText;
+  const urls = Array.from(css.matchAll(/url\(["']?([^"')]+)["']?\)/g));
+  for (const [match, url] of urls) {
+    try {
+      css = css.replace(match, `url("${await toDataUrl(absoluteUrl(url, base))}")`);
+    } catch (error) {
+      console.warn('Failed to inline font for PDF:', url, error);
+    }
+  }
+  return css;
+}
+
+/**
+ * Stylesheet rules that apply to the CV (preflight resets, font variables on html/body…) and
+ * the @font-face rules of the families it uses, with their files embedded. Rules nested in
+ * at-rules are skipped: templates are styled inline and carry their own print rules.
+ */
+async function collectCvCss(source: HTMLElement): Promise<string> {
+  const rules: string[] = [];
+  const faces: Array<{ rule: CSSFontFaceRule; base: string }> = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    let list: CSSRuleList;
+    try {
+      list = sheet.cssRules;
+    } catch {
+      continue; // cross-origin stylesheet
+    }
+    const base = sheet.href ?? window.location.href;
+    for (const rule of Array.from(list)) {
+      if (rule instanceof CSSFontFaceRule) {
+        faces.push({ rule, base });
+      } else if (rule instanceof CSSStyleRule && ruleApplies(rule.selectorText, source)) {
+        rules.push(rule.cssText);
+      }
+    }
+  }
+  const embedded = facesToEmbed(
+    faces.map((f) => f.rule),
+    fontUsage(source)
+  );
+  const fontCss = await Promise.all(
+    faces.filter((f) => embedded.includes(f.rule)).map((f) => inlineFontFace(f.rule, f.base))
+  );
+  return [...fontCss, ...rules].join('\n');
+}
+
+function inheritedStyle(source: HTMLElement): string {
+  const parent = window.getComputedStyle(source.parentElement ?? document.body);
+  return INHERITED_PROPS.map((prop) => `${prop}:${parent.getPropertyValue(prop)}`).join(';');
 }
 
 function findPreviewElement(selector: string): HTMLElement {
@@ -237,66 +268,62 @@ function escapeHtml(value: string): string {
 }
 
 export type SerializeCvOptions = {
-  pageSize?: 'A4' | 'Letter';
+  pageSize?: PaperSize;
   title?: string;
   selector?: string;
 };
 
 /**
- * Capture `[data-cv-preview]` (TemplateWrapper) as standalone HTML with inlined
- * computed styles, fonts, and images for Puppeteer WYSIWYG export.
+ * Capture `[data-cv-preview]` (TemplateWrapper) as standalone HTML for Puppeteer WYSIWYG export.
  */
 export async function serializeCvPreviewHtml(options: SerializeCvOptions = {}): Promise<string> {
   const pageSize = options.pageSize ?? 'A4';
-  const paper = PAPER[pageSize];
-  const selector = options.selector ?? '[data-cv-preview]';
-  const source = findPreviewElement(selector);
+  const paper = PAPER_SIZES[pageSize];
+  const source = findPreviewElement(options.selector ?? '[data-cv-preview]');
 
   const clone = source.cloneNode(true) as HTMLElement;
-  inlineElementStyles(source, clone);
   removeInteractiveElements(clone);
-  await inlineImages(clone);
-
-  // Exact paper frame for Puppeteer (no editor scale / shadow)
-  clone.style.width = paper.width;
-  clone.style.minHeight = paper.height;
-  clone.style.maxWidth = 'none';
-  clone.style.margin = '0';
-  clone.style.boxShadow = 'none';
-  clone.style.transform = 'none';
-  clone.style.overflow = 'visible';
+  // Editor layout classes (zoom, shadow) belong to the editor, not to the CV.
+  clone.removeAttribute('class');
   clone.setAttribute('data-cv-export', '1');
+  clone.style.setProperty('--cv-paper-height', paper.height);
+  await inlineImages(clone);
+  const css = await collectCvCss(source);
 
-  const fontFaces = collectFontFaces();
+  const htmlClass = escapeHtml(document.documentElement.className);
+  const bodyClass = escapeHtml(document.body.className);
+  const rootFontSize = window.getComputedStyle(document.documentElement).fontSize;
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${escapeHtml(document.documentElement.lang || 'fr')}" class="${htmlClass}" style="font-size:${rootFontSize}">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(options.title || 'CV')}</title>
-${googleFontsLink()}
 <style>
-  @page { size: ${pageSize}; margin: 0; }
-  * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+${css}
+</style>
+<style>
+  @page { size: ${paper.css}; margin: 0; }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   html, body {
-    margin: 0;
-    padding: 0;
+    margin: 0 !important;
+    padding: 0 !important;
     width: ${paper.width};
-    background: #ffffff;
+    background: #ffffff !important;
   }
-  body { overflow: hidden; }
   [data-cv-export] {
     width: ${paper.width} !important;
     min-height: ${paper.height} !important;
+    max-width: none !important;
+    margin: 0 !important;
     box-shadow: none !important;
     transform: none !important;
+    overflow: visible !important;
   }
-  img { max-width: 100%; height: auto; }
-  ${fontFaces}
 </style>
 </head>
-<body>${clone.outerHTML}</body>
+<body class="${bodyClass}" style="${escapeHtml(inheritedStyle(source))}">${clone.outerHTML}</body>
 </html>`;
 }
 

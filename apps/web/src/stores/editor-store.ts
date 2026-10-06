@@ -1,9 +1,21 @@
 import { create } from 'zustand';
 import type {
+  CvAdditionalInfo,
+  CvAward,
+  CvCertificate,
   CvContent,
   CvEducation,
   CvExperience,
+  CvExtras,
+  CvInterest,
+  CvLanguage,
+  CvLicense,
+  CvProject,
+  CvPublication,
+  CvReference,
   CvSkill,
+  CvTalk,
+  CvVolunteering,
   TemplateCustomization,
   TemplateKey,
 } from '@/lib/templates/types';
@@ -19,19 +31,47 @@ export type SectionId =
   | 'languages'
   | 'projects'
   | 'certificates'
-  | 'references';
+  | 'references'
+  | 'activities'
+  | 'more';
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 export type { CvContent, TemplateCustomization, TemplateKey };
 
-export type CvLanguage = { id: string; name: string; level?: string };
-export type CvProject = { id: string; name: string; description?: string; url?: string };
-export type CvCertificate = { id: string; name: string; issuer?: string; year?: string };
-export type CvReference = { id: string; name: string; role?: string; contact?: string };
+export type { CvLanguage, CvProject, CvCertificate, CvReference };
+
+/** Optional sections added for the « modèle universel »: absent from older CVs. */
+export type ExtraListItems = {
+  awards: CvAward;
+  volunteering: CvVolunteering;
+  publications: CvPublication;
+  talks: CvTalk;
+  licenses: CvLicense;
+  interests: CvInterest;
+  additionalInfo: CvAdditionalInfo;
+};
+export type ExtraListKey = keyof ExtraListItems;
+
+const EXTRA_ITEM_PREFIX: Record<ExtraListKey, string> = {
+  awards: 'award',
+  volunteering: 'vol',
+  publications: 'pub',
+  talks: 'talk',
+  licenses: 'lic',
+  interests: 'int',
+  additionalInfo: 'info',
+};
 
 type ListKey =
-  'experiences' | 'education' | 'skills' | 'languages' | 'projects' | 'certificates' | 'references';
+  | 'experiences'
+  | 'education'
+  | 'skills'
+  | 'languages'
+  | 'projects'
+  | 'certificates'
+  | 'references'
+  | ExtraListKey;
 
 function newId(prefix: string) {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
@@ -103,6 +143,15 @@ type EditorState = {
   addReference: () => void;
   updateReference: (id: string, patch: Partial<CvReference>) => void;
   removeReference: (id: string) => void;
+  // Optional sections (distinctions, bénévolat, permis…)
+  addExtraItem: <K extends ExtraListKey>(list: K, item: Omit<ExtraListItems[K], 'id'>) => void;
+  updateExtraItem: <K extends ExtraListKey>(
+    list: K,
+    id: string,
+    patch: Partial<ExtraListItems[K]>
+  ) => void;
+  removeExtraItem: (list: ExtraListKey, id: string) => void;
+  patchExtras: (patch: Partial<CvExtras>) => void;
   moveItem: (list: ListKey, id: string, direction: 'up' | 'down') => void;
   setSaveStatus: (s: SaveStatus) => void;
   setDrawer: (d: EditorState['drawer']) => void;
@@ -124,6 +173,14 @@ export const emptyContent = (templateKey: TemplateKey = 'modern'): CvContent => 
   projects: [],
   certificates: [],
   references: [],
+  awards: [],
+  volunteering: [],
+  publications: [],
+  talks: [],
+  licenses: [],
+  interests: [],
+  additionalInfo: [],
+  extras: {},
 });
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -240,7 +297,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   addSkill: () => {
-    const item: CvSkill = { id: newId('sk'), name: '', level: 3 };
+    // No default level: the candidate picks one or the CV shows none.
+    const item: CvSkill = { id: newId('sk'), name: '' };
     markDirty(set, { ...get().content, skills: [...get().content.skills, item] });
   },
   updateSkill: (id, patch) => {
@@ -329,11 +387,30 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
+  addExtraItem: (list, item) => {
+    const content = get().content;
+    const next = { ...item, id: newId(EXTRA_ITEM_PREFIX[list]) };
+    markDirty(set, { ...content, [list]: [...(content[list] ?? []), next] });
+  },
+  updateExtraItem: (list, id, patch) => {
+    const content = get().content;
+    markDirty(set, {
+      ...content,
+      [list]: (content[list] ?? []).map((e) => (e.id === id ? { ...e, ...patch } : e)),
+    });
+  },
+  removeExtraItem: (list, id) => {
+    const content = get().content;
+    markDirty(set, { ...content, [list]: (content[list] ?? []).filter((e) => e.id !== id) });
+  },
+  patchExtras: (patch) => {
+    const content = get().content;
+    markDirty(set, { ...content, extras: { ...content.extras, ...patch } });
+  },
+
   moveItem: (list, id, direction) => {
     const content = get().content;
-    const current = (list === 'references' ? (content.references ?? []) : content[list]) as Array<{
-      id: string;
-    }>;
+    const current = (content[list] ?? []) as Array<{ id: string }>;
     const next = moveInList(current, id, direction);
     if (!next) return;
     markDirty(set, {

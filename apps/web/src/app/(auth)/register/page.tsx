@@ -19,8 +19,8 @@ import { track } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 
 const BENEFITS = [
-  '1 CV et export PDF sans filigrane',
-  '5 templates ATS (Modern, Creative, Executive…)',
+  '1 CV modifiable en ligne',
+  '10 modèles de CV gratuits (Classique, Moderne, ATS…)',
   'Aucune carte bancaire requise',
   'Essai Pro 14 jours au checkout',
 ] as const;

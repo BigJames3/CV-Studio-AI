@@ -13,7 +13,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useSubscription } from '@/hooks';
+import { useQuery } from '@tanstack/react-query';
+import { queryKeys, subscriptionsApi } from '@/lib/api';
 
 const featureNames: Record<string, { title: string; description: string }> = {
   'cv:create': {
@@ -71,7 +72,12 @@ export function PaywallModal({
 }: PaywallModalProps) {
   const router = useRouter();
   // The trial is offered once per account: only advertise it when the server says it is left.
-  const { data: subscription } = useSubscription();
+  // The modal is mounted on every app page: fetch only once it opens (shared, cached query).
+  const { data: subscription } = useQuery({
+    queryKey: queryKeys.subscription,
+    queryFn: () => subscriptionsApi.me(),
+    enabled: isOpen,
+  });
   const trialEligible = subscription?.trialEligible === true;
   const benefits = trialEligible ? [...PREMIUM_BENEFITS, '14 jours gratuits'] : PREMIUM_BENEFITS;
   const copy = featureNames[feature] ?? {

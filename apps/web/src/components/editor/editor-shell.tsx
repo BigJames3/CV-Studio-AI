@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useEditorStore, emptyContent, type SectionId } from '@/stores/editor-store';
 import { useAutosave, useDebouncedValue } from '@/hooks';
+import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { TemplateWrapper } from '@/components/templates/TemplateWrapper';
@@ -12,9 +13,8 @@ import { AtsPanel } from '@/components/editor/ats-panel';
 import { TeamShareSelect } from '@/components/team/team-share-select';
 import type { CvAccess } from '@/lib/api';
 import type { TemplateKey } from '@/lib/templates/types';
-import { TEMPLATE_CATALOG, TEMPLATE_DESIGN_DATA, categoryToKey } from '@/lib/templates/catalog';
+import { TEMPLATE_CATALOG, TEMPLATE_DESIGN_DATA, templateKeyOf } from '@/lib/templates/catalog';
 import { templateAccessType } from '@cvstudio/shared-utils';
-import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { SAMPLE_CV } from '@/lib/templates/sample-cv';
 import {
   CertificatesForm,
@@ -27,27 +27,19 @@ import {
   SkillsForm,
   SummaryForm,
 } from '@/components/editor/section-forms';
+import { ActivitiesForm, MoreInfoForm } from '@/components/editor/extra-section-forms';
+import { EDITOR_SECTIONS } from '@/components/editor/editor-sections';
 import '@/styles/print.css';
 
 /** Access tier per editor key, e.g. `executive` → `pro`. */
 const TEMPLATE_ACCESS = new Map(
-  TEMPLATE_CATALOG.map((t) => [
-    categoryToKey(String(t.category)),
-    t.accessTier ?? templateAccessType(t.isPremium),
-  ])
+  TEMPLATE_CATALOG.map((t) => [templateKeyOf(t), t.accessTier ?? templateAccessType(t.isPremium)])
 );
 
-const SECTIONS: { id: SectionId; label: string; short: string }[] = [
-  { id: 'identity', label: 'Profil', short: 'Pro' },
-  { id: 'summary', label: 'Résumé', short: 'Rés' },
-  { id: 'experience', label: 'Expérience', short: 'Exp' },
-  { id: 'education', label: 'Formation', short: 'For' },
-  { id: 'skills', label: 'Skills', short: 'Ski' },
-  { id: 'languages', label: 'Langues', short: 'Lan' },
-  { id: 'projects', label: 'Projets', short: 'Prj' },
-  { id: 'certificates', label: 'Certificats', short: 'Cer' },
-  { id: 'references', label: 'Références', short: 'Réf' },
-];
+/** Display name per editor key, e.g. `sidebar` → « Sidebar sombre ». */
+const TEMPLATE_NAMES = new Map(TEMPLATE_CATALOG.map((t) => [templateKeyOf(t), t.name]));
+
+const SECTIONS = EDITOR_SECTIONS;
 
 function ActiveSectionForm({ section }: { section: SectionId }) {
   switch (section) {
@@ -69,6 +61,10 @@ function ActiveSectionForm({ section }: { section: SectionId }) {
       return <CertificatesForm />;
     case 'references':
       return <ReferencesForm />;
+    case 'activities':
+      return <ActivitiesForm />;
+    case 'more':
+      return <MoreInfoForm />;
     default:
       return null;
   }
@@ -101,7 +97,7 @@ export function EditorShell({
     setTemplateKey,
     patchCustomization,
   } = useEditorStore();
-  const { canUseTemplateType, showUpgrade } = useFeatureGate();
+  const { canUseTemplateType, canPrint, showUpgrade } = useFeatureGate();
 
   const isLocked = (k: TemplateKey) => !canUseTemplateType(TEMPLATE_ACCESS.get(k) ?? 'free');
   const selectTemplate = (k: TemplateKey) => {
@@ -164,9 +160,21 @@ export function EditorShell({
 
   useAutosave(resumeId);
   const previewContent = useDebouncedValue(content, 150);
+  // Ctrl+P bypasses the print button: print.css swaps the page for this notice instead.
+  const printLocked = !canPrint && !resumeId.startsWith('local-');
 
   return (
-    <div className="editor-shell flex h-[calc(100dvh-3.5rem)] flex-col" data-testid="cv-editor">
+    <div
+      className="editor-shell flex h-[calc(100dvh-3.5rem)] flex-col"
+      data-testid="cv-editor"
+      data-print-locked={printLocked ? 'true' : undefined}
+    >
+      {printLocked ? (
+        <p className="cv-print-locked-notice hidden" data-testid="print-locked-notice">
+          L’impression est réservée aux plans Pro et Business. Passez à Pro depuis CV Studio AI pour
+          imprimer ou télécharger votre CV.
+        </p>
+      ) : null}
       <div className="flex items-center justify-between border-b border-border bg-surface-card px-3 py-2">
         <div className="flex items-center gap-3">
           <div className="text-sm text-content-secondary" aria-live="polite">
@@ -185,7 +193,9 @@ export function EditorShell({
             >
               {(Object.keys(TEMPLATE_DESIGN_DATA) as TemplateKey[]).map((k) => (
                 <option key={k} value={k}>
-                  {isLocked(k) ? `${k} (Pro)` : k}
+                  {isLocked(k)
+                    ? `${TEMPLATE_NAMES.get(k) ?? k} (Pro)`
+                    : (TEMPLATE_NAMES.get(k) ?? k)}
                 </option>
               ))}
             </select>

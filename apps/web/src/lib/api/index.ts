@@ -397,6 +397,9 @@ export const subscriptionsApi = {
         stripeCustomerId?: string | null;
       } | null;
       tier: 'free' | 'pro' | 'business';
+      /** Decided by the server: the 14-day trial is offered once per account. */
+      trialEligible?: boolean;
+      trialEndsAt?: string | null;
       entitlements: {
         cvCreate: boolean;
         exportPdf?: boolean;

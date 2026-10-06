@@ -75,6 +75,7 @@ describe('PaymentsService webhook fail-closed', () => {
 
   const subscriptions = {
     applyPaidEntitlement: jest.fn().mockResolvedValue(undefined),
+    enforceSingleTrial: jest.fn(),
   };
 
   const mail = {
@@ -139,6 +140,10 @@ describe('PaymentsService webhook fail-closed', () => {
     webhookStore.markProcessing.mockResolvedValue(true);
     webhookStore.isProcessed.mockResolvedValue(false);
 
+    subscriptions.enforceSingleTrial.mockImplementation(
+      async (_userId: string, sub: unknown) => sub
+    );
+
     service = new PaymentsService(
       prisma as never,
       subscriptions as never,
@@ -146,6 +151,12 @@ describe('PaymentsService webhook fail-closed', () => {
       webhookStore as never,
       alerts as never
     );
+    // Never reach Stripe from a unit test. Unless a test attaches its own subscriptions, Stripe
+    // reports them as gone, so subscription events are synced from their payload.
+    const client = (service as unknown as { stripe: Stripe }).stripe;
+    jest
+      .spyOn(client.subscriptions, 'retrieve')
+      .mockRejectedValue({ code: 'resource_missing' } as never);
   });
 
   afterEach(() => {
@@ -391,12 +402,25 @@ describe('PaymentsService webhook fail-closed', () => {
   });
 
   it('handles invoice.payment_failed with email alert', async () => {
-    prisma.subscription.findFirst.mockResolvedValue({
+    prisma.subscription.findFirst.mockReset().mockResolvedValue({
       id: 'local-sub',
       userId: 'user-1',
       user: { email: 'u@example.com' },
     });
+    prisma.subscription.findUnique.mockResolvedValue({ stripeSubscriptionId: 'sub_stripe' });
     prisma.subscription.update.mockResolvedValue({});
+    subscriptions.applyPaidEntitlement.mockReset().mockResolvedValue(undefined);
+    const retrieve = jest.fn().mockResolvedValue({
+      id: 'sub_stripe',
+      customer: 'cus_1',
+      status: 'past_due',
+      cancel_at_period_end: false,
+      current_period_start: 1_700_000_000,
+      current_period_end: 1_702_592_000,
+      metadata: { userId: 'user-1', plan: 'pro' },
+      items: { data: [{ price: { id: 'price_pro_month' } }] },
+    });
+    (service as unknown as { stripe: unknown }).stripe = { subscriptions: { retrieve } };
     prisma.payment.create.mockResolvedValue({});
 
     await service.processEventWithRetry({
@@ -417,7 +441,82 @@ describe('PaymentsService webhook fail-closed', () => {
       'u@example.com',
       expect.objectContaining({ amount: 19.99, currency: 'USD' })
     );
+    // The status comes from Stripe, not from the (possibly stale) event.
+    expect(retrieve).toHaveBeenCalledWith('sub_stripe');
+    expect(subscriptions.applyPaidEntitlement).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1', status: 'past_due', plan: 'pro' })
+    );
     expect(webhookStore.markProcessed).toHaveBeenCalledWith('evt_fail');
+  });
+
+  describe('out-of-order subscription events', () => {
+    beforeEach(() => {
+      subscriptions.applyPaidEntitlement.mockReset().mockResolvedValue(undefined);
+      prisma.subscription.findUnique
+        .mockReset()
+        .mockResolvedValue({ stripeSubscriptionId: 'sub_1' });
+    });
+
+    it('syncs the state Stripe has now, not the stale event payload', async () => {
+      // The late event still says "active", but the subscription was deleted since.
+      const retrieve = jest.fn().mockResolvedValue({
+        id: 'sub_1',
+        customer: 'cus_1',
+        status: 'canceled',
+        cancel_at_period_end: false,
+        canceled_at: 1_700_050_000,
+        current_period_start: 1_700_000_000,
+        current_period_end: 1_700_086_400,
+        metadata: { userId: 'user-1', plan: 'pro' },
+        items: { data: [{ price: { id: 'price_pro_month' } }] },
+      });
+      (service as unknown as { stripe: unknown }).stripe = { subscriptions: { retrieve } };
+
+      await service.processEventWithRetry(
+        mockSubscriptionEvent({ id: 'evt_late', cancelAtPeriodEnd: false, status: 'active' })
+      );
+
+      expect(retrieve).toHaveBeenCalledWith('sub_1');
+      expect(subscriptions.applyPaidEntitlement).toHaveBeenCalledWith(
+        expect.objectContaining({
+          plan: 'free',
+          status: 'canceled',
+          canceledAt: new Date(1_700_050_000 * 1000),
+        })
+      );
+      expect(subscriptions.enforceSingleTrial).not.toHaveBeenCalled();
+    });
+
+    it('checks the one-trial rule before syncing a live subscription', async () => {
+      const trialing = {
+        id: 'sub_1',
+        customer: 'cus_1',
+        status: 'trialing',
+        trial_start: 1_700_000_000,
+        cancel_at_period_end: false,
+        current_period_start: 1_700_000_000,
+        current_period_end: 1_701_209_600,
+        metadata: { userId: 'user-1', plan: 'pro' },
+        items: { data: [{ price: { id: 'price_pro_month' } }] },
+      };
+      const ended = { ...trialing, status: 'active', current_period_end: 1_702_592_000 };
+      (service as unknown as { stripe: unknown }).stripe = {
+        subscriptions: { retrieve: jest.fn().mockResolvedValue(trialing) },
+      };
+      subscriptions.enforceSingleTrial.mockResolvedValueOnce(ended);
+
+      await service.processEventWithRetry(
+        mockSubscriptionEvent({ id: 'evt_trial', cancelAtPeriodEnd: false, status: 'trialing' })
+      );
+
+      expect(subscriptions.enforceSingleTrial).toHaveBeenCalledWith('user-1', trialing);
+      expect(subscriptions.applyPaidEntitlement).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'active',
+          periodEnd: new Date(1_702_592_000 * 1000),
+        })
+      );
+    });
   });
 
   describe('events rendered in a newer Stripe API version (2025-03-31.basil+)', () => {

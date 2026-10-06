@@ -10,6 +10,8 @@ export const EDITOR_SECTIONS: { id: SectionId; label: string; short: string }[] 
   { id: 'projects', label: 'Projets', short: 'Prj' },
   { id: 'certificates', label: 'Certificats', short: 'Cer' },
   { id: 'references', label: 'Références', short: 'Réf' },
+  { id: 'activities', label: 'Distinctions et activités', short: 'Act' },
+  { id: 'more', label: 'Informations complémentaires', short: 'Inf' },
 ];
 
 export const EDITOR_SECTION_PANEL_ID = 'editor-section-panel';

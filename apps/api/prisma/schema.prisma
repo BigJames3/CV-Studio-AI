@@ -199,7 +199,13 @@ model User {
   subscriptionTier           SubscriptionTier @default(free) @map("subscription_tier")
   subscriptionStartDate      DateTime?        @map("subscription_start_date") @db.Timestamptz(6)
   subscriptionEndDate        DateTime?        @map("subscription_end_date") @db.Timestamptz(6)
-  isEmailVerified            Boolean          @default(false) @map("is_email_verified")
+  /// The 14-day trial is granted once per account lifetime: never reset to false.
+  trialUsed                  Boolean          @default(false) @map("trial_used")
+  trialStartedAt             DateTime?        @map("trial_started_at") @db.Timestamptz(6)
+  trialEndsAt                DateTime?        @map("trial_ends_at") @db.Timestamptz(6)
+  /// Stripe subscription that consumed the trial (null for accounts backfilled from legacy data).
+  trialStripeSubscriptionId  String?          @map("trial_stripe_subscription_id") @db.VarChar(255)
+  isEmailVerified           Boolean          @default(false) @map("is_email_verified")
   is2faEnabled               Boolean          @default(false) @map("is_2fa_enabled")
   twoFactorSecretEncrypted   Bytes?           @map("two_factor_secret_encrypted") // AES-GCM ciphertext
   twoFactorBackupCodes       String[]         @default([]) @map("two_factor_backup_codes")

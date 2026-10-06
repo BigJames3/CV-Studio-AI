@@ -75,6 +75,11 @@ apps/mobile/android/
 infrastructure/terraform/**/.terraform/
 infrastructure/terraform/**/*.tfstate*
 infrastructure/terraform/**/crash.log
+infrastructure/terraform-ovh/**/.terraform/
+infrastructure/terraform-ovh/**/*.tfstate*
+infrastructure/terraform-ovh/**/crash.log
+infrastructure/terraform-ovh/**/backend.hcl
+infrastructure/terraform-ovh/**/*.tfplan
 *.tfvars
 !*.tfvars.example
 

@@ -52,7 +52,7 @@ jobs:
         run: terraform validate
 
   plan-apply:
-    name: ${{ inputs.action }} ${{ inputs.env }}
+    name: Plan / apply
     if: github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: ubuntu-latest

@@ -25,6 +25,7 @@ export function CompactTemplate({ data, customization: c }: TemplateProps) {
   const { identity } = data;
   return (
     <div
+      data-cv-flow=""
       style={{
         ...densityStyle(c.density),
         fontSize: `calc(${densityStyle(c.density).fontSize} * 0.94)`,

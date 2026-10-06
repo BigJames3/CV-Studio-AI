@@ -18,6 +18,7 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
 
   return (
     <div
+      data-cv-flow=""
       style={{
         ...densityStyle(c.density),
         background: c.backgroundColor,
@@ -30,7 +31,7 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
         gap: '1.25rem',
       }}
     >
-      <div>
+      <div data-cv-flow="body">
         <div
           style={{
             display: 'inline-block',
@@ -95,6 +96,7 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
                   borderRadius: 12,
                   border: `1px solid ${c.primaryColor}22`,
                   background: '#fff',
+                  breakInside: 'avoid',
                 }}
               >
                 <strong style={{ fontFamily: c.headerFont }}>{exp.title}</strong>
@@ -142,6 +144,7 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
                   borderRadius: 12,
                   border: `1px solid ${c.accentColor}55`,
                   background: '#fff',
+                  breakInside: 'avoid',
                 }}
               >
                 <strong style={{ fontFamily: c.headerFont }}>{p.name}</strong>
@@ -167,11 +170,11 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
             ))}
           </section>
         ) : null}
+        <MoreSections data={data} c={c} theme={themeFrom(c, 'caps')} />
       </div>
 
-      <MoreSections data={data} c={c} theme={themeFrom(c, 'caps')} />
-
       <aside
+        data-cv-flow=""
         style={{
           background: c.primaryColor,
           color: '#f8fafc',

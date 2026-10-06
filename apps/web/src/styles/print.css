@@ -119,6 +119,7 @@
   }
 
   .cv-print-root[data-paper='Letter'] [data-cv-preview] {
+    --cv-paper-height: 11in !important;
     width: 8.5in !important;
     min-height: 11in !important;
   }
@@ -141,6 +142,7 @@
 
 /* Screen-only paper size for letter preview */
 .cv-print-root[data-paper='Letter'] [data-cv-preview] {
+  --cv-paper-height: 11in !important;
   width: 8.5in !important;
   min-height: 11in !important;
 }

@@ -6,12 +6,12 @@
   "license": "UNLICENSED",
   "packageManager": "pnpm@9.15.0",
   "engines": {
-    "node": ">=20.11.0",
+    "node": ">=24.0.0",
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "dev": "turbo run dev --parallel --filter=@cvstudio/api --filter=@cvstudio/web",
-    "dev:all": "turbo run dev --parallel",
+    "dev": "turbo run dev --filter=@cvstudio/api --filter=@cvstudio/web",
+    "dev:all": "turbo run dev",
     "dev:api": "turbo run dev --filter=@cvstudio/api",
     "dev:web": "turbo run dev --filter=@cvstudio/web",
     "dev:mobile": "turbo run start --filter=@cvstudio/mobile",
@@ -23,7 +23,7 @@
     "start:api": "turbo run start --filter=@cvstudio/api",
     "start:web": "turbo run start --filter=@cvstudio/web",
     "lint": "turbo run lint",
-    "lint:fix": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "typecheck": "turbo run typecheck",
     "type-check": "turbo run typecheck",
@@ -39,6 +39,7 @@
     "db:migrate": "pnpm --filter @cvstudio/api exec prisma migrate dev",
     "db:migrate:deploy": "pnpm --filter @cvstudio/api exec prisma migrate deploy",
     "db:seed": "pnpm --filter @cvstudio/api exec prisma db seed",
+    "stripe:check": "pnpm --filter @cvstudio/api stripe:check",
     "db:studio": "pnpm --filter @cvstudio/api exec prisma studio",
     "db:reset": "pnpm --filter @cvstudio/api exec prisma migrate reset",
     "docker:up": "docker compose up -d postgres redis mailpit",

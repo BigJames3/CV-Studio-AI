@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: stripe-webhook-retry
     app.kubernetes.io/part-of: cvstudio
 spec:
-  schedule: "*/5 * * * *"
+  schedule: '*/5 * * * *'
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 5
@@ -23,12 +23,12 @@ spec:
               imagePullPolicy: IfNotPresent
               envFrom:
                 - secretRef:
-                    name: cvstudio-api-secrets
+                    name: api-secrets
               env:
                 - name: NODE_ENV
                   value: production
                 - name: STRIPE_FAIL_CLOSED
-                  value: "1"
+                  value: '1'
                 - name: WEBHOOK_DLQ_RETRY_LIMIT
-                  value: "50"
-              command: ["node", "dist/scripts/retry-webhook-dlq.js"]
+                  value: '50'
+              command: ['node', 'dist/scripts/retry-webhook-dlq.js']

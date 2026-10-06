@@ -3,7 +3,6 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { authApi } from '@/lib/api';
-import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api/client';
 import { sanitizeNextPath } from '@/lib/safe-next';
 
@@ -77,11 +76,7 @@ export function GoogleSignInButton({ nextPath = '/dashboard', onRequires2fa }: P
   }, [clientId, onCredential]);
 
   if (!clientId) {
-    return (
-      <Button type="button" className="w-full" disabled>
-        Google (configurer NEXT_PUBLIC_GOOGLE_CLIENT_ID)
-      </Button>
-    );
+    return null;
   }
 
   return (

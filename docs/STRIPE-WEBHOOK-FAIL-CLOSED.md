@@ -10,17 +10,18 @@
 
 ## Fail-closed
 
-- Production / `STRIPE_FAIL_CLOSED=1`: missing Stripe config → **503** (webhook) / checkout rejected. No soft-ack, no `dev_bypass`.
-- Development: soft-ack + local plan activation allowed.
+- Missing or placeholder Stripe config → **503** on webhook, checkout **400** `STRIPE_NOT_CONFIGURED`. No soft-ack, no `dev_bypass`.
+- Live keys (`sk_live_` / `rk_live_`) are ignored unless `STRIPE_ALLOW_LIVE=1`.
+- Opt out only with `STRIPE_FAIL_CLOSED=0` (not used in staging).
 
 ## Events
 
-| Event | Action |
-|-------|--------|
-| `checkout.session.completed` | Sync subscription + tier |
-| `customer.subscription.updated/deleted` | Sync / downgrade to Free |
+| Event                                        | Action                                          |
+| -------------------------------------------- | ----------------------------------------------- |
+| `checkout.session.completed`                 | Sync subscription + tier                        |
+| `customer.subscription.updated/deleted`      | Sync / downgrade to Free                        |
 | `invoice.paid` / `invoice.payment_succeeded` | Payment + invoice rows (unique `transactionId`) |
-| `invoice.payment_failed` | `past_due` + email + alert |
+| `invoice.payment_failed`                     | `past_due` + email + alert                      |
 
 ## Ops
 

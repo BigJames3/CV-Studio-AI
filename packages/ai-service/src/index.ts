@@ -1,6 +1,7 @@
 /**
  * AI gateway for CV Studio AI.
- * Live: optimize-resume, cover-letter, ats-explain (heuristic + optional OpenAI for optimize).
+ * Live: optimize-resume, cover-letter, ats-explain, job-match, interview prep, career advice
+ * and skills suggestions (heuristic; optional OpenAI for optimize).
  */
 
 export type { AiFeature } from './routing';
@@ -35,7 +36,46 @@ export {
   buildAtsExplainMessages,
 } from './prompts/ats-explain';
 
+export type {
+  JobMatchInput,
+  JobMatchResult,
+  JobMatchGap,
+  JobMatchStrength,
+  JobMatchEdit,
+} from './prompts/job-match';
+export { JOB_MATCH_PROMPT_ID, JOB_MATCH_PROMPT_VERSION } from './prompts/job-match';
+
+export type {
+  InterviewPrepInput,
+  InterviewPrepResult,
+  InterviewQuestion,
+  InterviewType,
+} from './prompts/interview-prep';
+export { INTERVIEW_PREP_PROMPT_ID, INTERVIEW_PREP_PROMPT_VERSION } from './prompts/interview-prep';
+
+export type {
+  CareerAdviceInput,
+  CareerAdviceResult,
+  CareerAdviceCard,
+} from './prompts/career-advice';
+export { CAREER_ADVICE_PROMPT_ID, CAREER_ADVICE_PROMPT_VERSION } from './prompts/career-advice';
+
+export type {
+  SkillsSuggestInput,
+  SkillsSuggestResult,
+  SkillSuggestion,
+  SkillToDevelop,
+} from './prompts/skills-suggest';
+export { SKILLS_SUGGEST_PROMPT_ID, SKILLS_SUGGEST_PROMPT_VERSION } from './prompts/skills-suggest';
+
+export type { CvFacts, CvFactExperience } from './cv-facts';
+export { extractCvFacts, extractKeywords, cvMentions } from './cv-facts';
+
 export { optimizeResumeHeuristic } from './providers/heuristic-optimize';
+export { matchJobHeuristic } from './providers/heuristic-job-match';
+export { interviewPrepHeuristic } from './providers/heuristic-interview-prep';
+export { careerAdviceHeuristic } from './providers/heuristic-career-advice';
+export { skillsSuggestHeuristic } from './providers/heuristic-skills-suggest';
 export { generateCoverLetterHeuristic } from './providers/heuristic-cover-letter';
 export { explainAtsHeuristic } from './providers/heuristic-ats-explain';
 export { optimizeResumeWithOpenAi } from './providers/openai-compatible';

@@ -54,15 +54,15 @@ describe('validateCvForExport', () => {
 
 describe('suggestFilename', () => {
   it('builds Prenom_Nom_CV.pdf', () => {
-    expect(
-      suggestFilename({ identity: { fullName: 'Alex Martin', email: 'a@b.c' } })
-    ).toBe('Alex_Martin_CV.pdf');
+    expect(suggestFilename({ identity: { fullName: 'Alex Martin', email: 'a@b.c' } })).toBe(
+      'Alex_Martin_CV.pdf'
+    );
   });
 
   it('respects custom filename', () => {
-    expect(
-      suggestFilename({ identity: { fullName: 'Alex' } }, 'My Custom.pdf')
-    ).toBe('My_Custom.pdf');
+    expect(suggestFilename({ identity: { fullName: 'Alex' } }, 'My Custom.pdf')).toBe(
+      'My_Custom.pdf'
+    );
   });
 });
 

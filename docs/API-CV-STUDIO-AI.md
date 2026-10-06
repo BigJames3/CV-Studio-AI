@@ -236,16 +236,17 @@ Query : `?premium=&published=true&cursor=`
 | ------ | -------------------------- | -------------------------------------- |
 | POST   | `/subscriptions`           | Create/attach (rare ; prefer checkout) |
 | GET    | `/subscriptions/me`        | Current sub + entitlements             |
-| PATCH  | `/subscriptions/me`        | Change plan interval                   |
+| PATCH  | `/subscriptions/me`        | Disabled (400 `USE_CHECKOUT`)          |
 | DELETE | `/subscriptions/me/cancel` | cancel_at_period_end                   |
-| POST   | `/subscriptions/checkout`  | Stripe Checkout Session URL            |
+| POST   | `/subscriptions/checkout`  | Checkout URL, or in-place plan change  |
 
 ### 4.6 Payments — `/api/v1/payments`
 
-| Method | Path                | Auth             |
-| ------ | ------------------- | ---------------- |
-| GET    | `/payments/history` | JWT              |
-| POST   | `/payments/webhook` | Stripe signature |
+| Method | Path                         | Auth             |
+| ------ | ---------------------------- | ---------------- |
+| GET    | `/payments/history`          | JWT              |
+| POST   | `/payments/checkout/confirm` | JWT              |
+| POST   | `/payments/webhook`          | Stripe signature |
 
 ### 4.7 Invoices — `/api/v1/invoices`
 

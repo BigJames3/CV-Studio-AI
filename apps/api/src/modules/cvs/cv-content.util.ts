@@ -12,7 +12,26 @@ export type FlatCvContent = {
   projects: unknown[];
   certificates: unknown[];
   references: unknown[];
+  awards: unknown[];
+  volunteering: unknown[];
+  publications: unknown[];
+  talks: unknown[];
+  licenses: unknown[];
+  interests: unknown[];
+  additionalInfo: unknown[];
+  extras: Record<string, unknown>;
 };
+
+/** Optional « modèle universel » lists (distinctions, bénévolat, permis…). */
+const EXTRA_LISTS = [
+  'awards',
+  'volunteering',
+  'publications',
+  'talks',
+  'licenses',
+  'interests',
+  'additionalInfo',
+] as const;
 
 export const EMPTY_CV_CONTENT: FlatCvContent = {
   schemaVersion: 1,
@@ -25,6 +44,14 @@ export const EMPTY_CV_CONTENT: FlatCvContent = {
   projects: [],
   certificates: [],
   references: [],
+  awards: [],
+  volunteering: [],
+  publications: [],
+  talks: [],
+  licenses: [],
+  interests: [],
+  additionalInfo: [],
+  extras: {},
 };
 
 /**
@@ -33,7 +60,18 @@ export const EMPTY_CV_CONTENT: FlatCvContent = {
  */
 export function normalizeCvContent(raw: unknown): FlatCvContent {
   if (!raw || typeof raw !== 'object') {
-    return { ...EMPTY_CV_CONTENT, experiences: [], education: [], skills: [], languages: [], projects: [], certificates: [], references: [] };
+    return {
+      ...EMPTY_CV_CONTENT,
+      experiences: [],
+      education: [],
+      skills: [],
+      languages: [],
+      projects: [],
+      certificates: [],
+      references: [],
+      ...emptyExtraLists(),
+      extras: {},
+    };
   }
 
   const obj = raw as Record<string, unknown>;
@@ -58,8 +96,10 @@ export function normalizeCvContent(raw: unknown): FlatCvContent {
     },
     summary: {
       text:
-        src.summary && typeof src.summary === 'object' && typeof (src.summary as { text?: unknown }).text === 'string'
-          ? ((src.summary as { text: string }).text)
+        src.summary &&
+        typeof src.summary === 'object' &&
+        typeof (src.summary as { text?: unknown }).text === 'string'
+          ? (src.summary as { text: string }).text
           : '',
     },
     experiences: Array.isArray(src.experiences) ? src.experiences : [],
@@ -69,5 +109,19 @@ export function normalizeCvContent(raw: unknown): FlatCvContent {
     projects: Array.isArray(src.projects) ? src.projects : [],
     certificates: Array.isArray(src.certificates) ? src.certificates : [],
     references: Array.isArray(src.references) ? src.references : [],
+    ...(Object.fromEntries(
+      EXTRA_LISTS.map((key) => [key, Array.isArray(src[key]) ? src[key] : []])
+    ) as Record<(typeof EXTRA_LISTS)[number], unknown[]>),
+    extras:
+      src.extras && typeof src.extras === 'object' && !Array.isArray(src.extras)
+        ? (src.extras as Record<string, unknown>)
+        : {},
   };
+}
+
+function emptyExtraLists() {
+  return Object.fromEntries(EXTRA_LISTS.map((key) => [key, []])) as unknown as Record<
+    (typeof EXTRA_LISTS)[number],
+    unknown[]
+  >;
 }

@@ -25,6 +25,7 @@ export function AppTopbar() {
           <Link href="/dashboard">Dashboard</Link>
           <Link href="/dashboard/templates">Templates</Link>
           <Link href="/dashboard/team">Équipe</Link>
+          <Link href="/dashboard/analytics">Statistiques</Link>
           <Link href="/marketplace">Marketplace</Link>
           <Link href="/account/profile">Profil</Link>
           <Link href="/account/billing">Facturation</Link>

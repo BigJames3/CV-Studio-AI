@@ -380,6 +380,7 @@ model Cv {
   aiHistories    AiHistory[]
   collabSessions CollabSession[]
   collabSnapshots CollabSnapshot[]
+  views           CvView[]
 
   @@index([userId, updatedAt(sort: Desc)], map: "idx_cvs_user_updated")
   @@index([templateId], map: "idx_cvs_template_id")
@@ -388,6 +389,23 @@ model Cv {
   @@index([deletedAt], map: "idx_cvs_deleted_at")
   @@index([teamId], map: "idx_cvs_team_id")
   @@map("cvs")
+}
+
+/// One visit of a public CV page, recorded by the visitor's browser (Business analytics).
+/// No IP or user agent is stored: `visitorHash` is a daily-salted hash, so a visitor can be
+/// counted once per day but not followed across days.
+model CvView {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cvId         String   @map("cv_id") @db.Uuid
+  viewedAt     DateTime @default(now()) @map("viewed_at") @db.Timestamptz(6)
+  source       String   @db.VarChar(32)
+  referrerHost String?  @map("referrer_host") @db.VarChar(255)
+  visitorHash  String   @map("visitor_hash") @db.Char(32)
+
+  cv Cv @relation(fields: [cvId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([cvId, viewedAt(sort: Desc)], map: "idx_cv_views_cv_viewed")
+  @@map("cv_views")
 }
 
 model CvVersion {

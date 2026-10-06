@@ -85,6 +85,8 @@ export class EntitlementsService {
       'api:access': ['business'],
       // Creating a team, inviting members and keeping shared CVs visible to them.
       'team:manage': ['business'],
+      // Per-CV views, visitors and traffic sources (the basic dashboard stays open to all).
+      'analytics:advanced': ['business'],
     };
 
     const allowed = matrix[feature];

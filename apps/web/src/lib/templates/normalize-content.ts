@@ -44,6 +44,8 @@ export function normalizeCvContent(
       email: identity.email,
       phone: identity.phone,
       city: identity.city,
+      country: identity.country,
+      address: identity.address,
       linkedin: identity.linkedin,
       github: identity.github,
       website: identity.website,
@@ -57,5 +59,17 @@ export function normalizeCvContent(
     projects: Array.isArray(src.projects) ? src.projects : [],
     certificates: Array.isArray(src.certificates) ? src.certificates : [],
     references: Array.isArray(src.references) ? src.references : [],
+    awards: listOf(src.awards),
+    volunteering: listOf(src.volunteering),
+    publications: listOf(src.publications),
+    talks: listOf(src.talks),
+    licenses: listOf(src.licenses),
+    interests: listOf(src.interests),
+    additionalInfo: listOf(src.additionalInfo),
+    extras: src.extras && typeof src.extras === 'object' ? src.extras : {},
   };
+}
+
+function listOf<T>(value: T[] | undefined): T[] {
+  return Array.isArray(value) ? value : [];
 }

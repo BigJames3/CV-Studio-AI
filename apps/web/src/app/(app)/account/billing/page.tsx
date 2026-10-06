@@ -370,6 +370,7 @@ function BillingPageContent() {
             currentTier={displayTier}
             billingPeriod={billingPeriod}
             checkoutPending={checkoutPending}
+            trialEligible={subData?.trialEligible === true}
             onPeriodChange={setBillingPeriod}
             onCheckout={(plan, interval) => void checkout(plan, interval)}
           />

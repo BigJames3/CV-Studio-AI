@@ -1,5 +1,13 @@
 import type { TemplateProps } from './shared';
 import {
+  ExperienceExtras,
+  MoreSections,
+  educationExtras,
+  experienceMeta,
+  languageDetail,
+  themeFrom,
+} from './blocks';
+import {
   SectionTitle,
   CertificatesSection,
   ProjectsSection,
@@ -17,6 +25,7 @@ export function ATSTemplate({ data, customization: c }: TemplateProps) {
 
   return (
     <div
+      data-cv-flow=""
       style={{
         ...densityStyle(c.density),
         padding: '0.5in',
@@ -48,7 +57,7 @@ export function ATSTemplate({ data, customization: c }: TemplateProps) {
           {experiences.map((exp) => (
             <div key={exp.id} style={{ marginTop: 10 }}>
               <p style={{ margin: 0, fontWeight: 700 }}>
-                {exp.title} | {exp.company}
+                {[exp.title, exp.company, experienceMeta(exp)].filter(Boolean).join(' | ')}
               </p>
               <p style={{ margin: '2pt 0' }}>{formatRange(exp.start, exp.end, exp.current)}</p>
               {exp.bullets.map((b, i) => (
@@ -56,6 +65,7 @@ export function ATSTemplate({ data, customization: c }: TemplateProps) {
                   - {b}
                 </p>
               ))}
+              <ExperienceExtras exp={exp} muted="#000000" ats />
             </div>
           ))}
         </section>
@@ -71,6 +81,7 @@ export function ATSTemplate({ data, customization: c }: TemplateProps) {
               {ed.degree}
               {ed.field ? `, ${ed.field}` : ''} | {ed.school}
               {ed.end ? ` | ${ed.end}` : ''}
+              {educationExtras(ed) ? ` | ${educationExtras(ed)}` : ''}
             </p>
           ))}
         </section>
@@ -91,10 +102,14 @@ export function ATSTemplate({ data, customization: c }: TemplateProps) {
         <section style={{ marginTop: 14 }}>
           <SectionTitle ats>LANGUAGES</SectionTitle>
           <p style={{ marginTop: 6 }}>
-            {languages.map((l) => (l.level ? `${l.name} (${l.level})` : l.name)).join(', ')}
+            {languages
+              .map((l) => (languageDetail(l) ? `${l.name} (${languageDetail(l)})` : l.name))
+              .join(', ')}
           </p>
         </section>
       ) : null}
+
+      <MoreSections data={data} c={c} theme={themeFrom(c, 'caps')} />
     </div>
   );
 }

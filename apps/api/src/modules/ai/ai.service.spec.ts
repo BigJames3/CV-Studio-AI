@@ -48,9 +48,17 @@ describe('AiService', () => {
     };
 
     const quotas = {
-      assertOptimizeQuota: jest.fn().mockResolvedValue({ used: quotaUsed, limit: 50 }),
-      assertCoverLetterQuota: jest.fn().mockResolvedValue({ used: quotaUsed, limit: 20 }),
-      assertAtsExplainQuota: jest.fn().mockResolvedValue({ used: quotaUsed, limit: 20 }),
+      reserveOptimizeQuota: jest
+        .fn()
+        .mockResolvedValue({ id: 'res-1', used: quotaUsed, limit: 50 }),
+      reserveCoverLetterQuota: jest
+        .fn()
+        .mockResolvedValue({ id: 'res-1', used: quotaUsed, limit: 20 }),
+      reserveAtsExplainQuota: jest
+        .fn()
+        .mockResolvedValue({ id: 'res-1', used: quotaUsed, limit: 20 }),
+      commit: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
     };
 
     return {
@@ -102,7 +110,7 @@ describe('AiService', () => {
   });
 
   it('optimizes resume via gateway heuristic and persists AiHistory', async () => {
-    const { service, prisma, quotas } = createService();
+    const { service, quotas } = createService();
 
     const result = await service.optimizeResume(userId, {
       cvId,
@@ -110,15 +118,12 @@ describe('AiService', () => {
       tone: 'factual',
     });
 
-    expect(quotas.assertOptimizeQuota).toHaveBeenCalledWith(userId);
-    expect(prisma.aiHistory.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        userId,
-        cvId,
-        actionType: 'resume_optimization',
-        tokensUsed: 0,
-      }),
-    });
+    expect(quotas.reserveOptimizeQuota).toHaveBeenCalledWith(userId, cvId);
+    expect(quotas.commit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'res-1' }),
+      expect.objectContaining({ tokensUsed: 0 })
+    );
+    expect(quotas.release).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       status: 'completed',
       feature: 'optimize-resume',
@@ -146,6 +151,39 @@ describe('AiService', () => {
         bulletText: 'Built APIs',
       })
     ).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('gives the reserved quota slot back when the AI call fails', async () => {
+    const { service, quotas } = createService();
+    runAiFeatureMock.mockResolvedValueOnce({ ok: false, error: 'provider down' });
+
+    await expect(
+      service.optimizeResume(userId, { cvId, bulletText: 'Built APIs' })
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(quotas.release).toHaveBeenCalledWith(expect.objectContaining({ id: 'res-1' }));
+    expect(quotas.commit).not.toHaveBeenCalled();
+  });
+
+  it('gives the slot back when the cover letter is refused', async () => {
+    const { service, quotas } = createService();
+    runAiFeatureMock.mockResolvedValueOnce({
+      ok: true,
+      data: { ok: false, refusals: ['no facts'], warnings: [] },
+    });
+
+    await expect(
+      service.generateCoverLetter(userId, { cvId, jobDescription: 'Senior engineer' })
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(quotas.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reserve quota when the CV is not owned by the caller', async () => {
+    const { service, quotas, prisma } = createService();
+    prisma.cv.findFirst.mockResolvedValueOnce({ ...defaultCv(), userId: 'someone-else' });
+
+    await expect(service.checkAts(userId, { cvId, jobDescription: 'x' })).rejects.toBeDefined();
+    expect(quotas.reserveAtsExplainQuota).not.toHaveBeenCalled();
   });
 
   it('uses default provider error message when gateway error is empty', async () => {
@@ -209,7 +247,7 @@ describe('AiService', () => {
   });
 
   it('persists optimize history with default tone when omitted', async () => {
-    const { service, prisma } = createService();
+    const { service, quotas } = createService();
     runAiFeatureMock.mockResolvedValueOnce({
       ok: true,
       tokensUsed: 12,
@@ -228,12 +266,13 @@ describe('AiService', () => {
       bulletText: 'Worked on payment webhooks',
     });
 
-    expect(prisma.aiHistory.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    expect(quotas.commit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'res-1' }),
+      expect.objectContaining({
         prompt: expect.stringContaining('tone=factual'),
         tokensUsed: 12,
-      }),
-    });
+      })
+    );
     expect(result.provider).toBe('heuristic');
     expect(result.model).toBe('gpt-4o');
   });
@@ -254,9 +293,9 @@ describe('AiService', () => {
       jobDescription: 'TypeScript React Node.js GraphQL leadership collaboration',
     });
 
-    expect(quotas.assertAtsExplainQuota).toHaveBeenCalledWith(userId);
+    expect(quotas.reserveAtsExplainQuota).toHaveBeenCalledWith(userId, cvId);
     expect(prisma.atsReport.create).toHaveBeenCalledTimes(1);
-    expect(prisma.aiHistory.create).toHaveBeenCalled();
+    expect(quotas.commit).toHaveBeenCalled();
     expect(result).toMatchObject({
       id: 'ats-1',
       feature: 'ats',
@@ -309,7 +348,7 @@ describe('AiService', () => {
   });
 
   it('generates cover letter via gateway and queues portfolio jobs', async () => {
-    const { service, prisma, quotas } = createService();
+    const { service, quotas } = createService();
 
     await expect(
       service.generateCoverLetter(userId, {
@@ -324,14 +363,11 @@ describe('AiService', () => {
         body: expect.stringContaining('Dear Hiring Manager'),
       }),
     });
-    expect(quotas.assertCoverLetterQuota).toHaveBeenCalledWith(userId);
-    expect(prisma.aiHistory.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        actionType: 'cover_letter',
-        userId,
-        cvId,
-      }),
-    });
+    expect(quotas.reserveCoverLetterQuota).toHaveBeenCalledWith(userId, cvId);
+    expect(quotas.commit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'res-1' }),
+      expect.objectContaining({ prompt: expect.stringContaining('company=Acme') })
+    );
 
     await expect(
       service.generatePortfolio(userId, {
@@ -345,45 +381,105 @@ describe('AiService', () => {
     });
   });
 
-  it('returns completed scaffold payloads for match, interview and career advice', async () => {
-    const { service } = createService();
+  it('runs job match, interview prep and career advice on the CV (AI-001)', async () => {
+    const { service, quotas } = createService();
 
-    await expect(
-      service.matchJob(userId, {
-        cvId,
-        jobDescription: 'React TypeScript role',
-      })
-    ).resolves.toMatchObject({
+    const match = await service.matchJob(userId, {
+      cvId,
+      jobDescription: 'Required: React, TypeScript and GraphQL',
+    });
+    expect(match).toMatchObject({
       status: 'completed',
       feature: 'job-match',
-      model: 'claude-sonnet',
-      matchScore: 68,
+      provider: 'heuristic',
+      model: 'heuristic-v1',
+      mustHaveGaps: [expect.objectContaining({ requirement: 'graphql' })],
+      quota: { used: 1, limit: 50 },
     });
+    expect(match).not.toHaveProperty('ok');
+    expect(match.matchScore).toBeGreaterThan(0);
 
     await expect(
-      service.interviewPrep(userId, {
-        cvId,
-        jobDescription: 'React TypeScript role',
-      })
+      service.interviewPrep(userId, { cvId, jobDescription: 'React TypeScript role' })
     ).resolves.toMatchObject({
       status: 'completed',
       feature: 'interview',
       interviewType: 'hr',
+      disclaimer: expect.stringContaining('Practice aid only'),
+      questions: expect.arrayContaining([
+        expect.objectContaining({ question: 'Tell me about yourself.' }),
+      ]),
     });
 
     await expect(
-      service.careerAdvice(userId, {
-        cvId,
-        targetRole: 'Staff Engineer',
-      })
+      service.careerAdvice(userId, { cvId, targetRole: 'Staff Engineer' })
     ).resolves.toMatchObject({
       status: 'completed',
       feature: 'career-advice',
+      disclaimer: expect.stringContaining('not certified coaching'),
+      cards: expect.arrayContaining([expect.objectContaining({ type: 'next-step' })]),
+    });
+
+    expect(quotas.reserveOptimizeQuota).toHaveBeenCalledTimes(3);
+    expect(quotas.reserveOptimizeQuota).toHaveBeenCalledWith(userId, cvId);
+    expect(quotas.commit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'res-1' }),
+      expect.objectContaining({ prompt: expect.stringMatching(/^job-match \| /) })
+    );
+    expect(quotas.release).not.toHaveBeenCalled();
+  });
+
+  it('refuses a CV insight without usable input and gives the slot back', async () => {
+    const { service, quotas } = createService();
+
+    await expect(
+      service.matchJob(userId, { cvId, jobDescription: 'the and with' })
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'AI_REFUSED' }),
+    });
+    expect(quotas.release).toHaveBeenCalledWith(expect.objectContaining({ id: 'res-1' }));
+    expect(quotas.commit).not.toHaveBeenCalled();
+  });
+
+  it('maps a CV insight provider failure to ServiceUnavailableException', async () => {
+    const { service, quotas } = createService();
+    runAiFeatureMock.mockResolvedValueOnce({ ok: false, error: 'boom' });
+
+    await expect(service.careerAdvice(userId, { cvId })).rejects.toBeInstanceOf(
+      ServiceUnavailableException
+    );
+    expect(quotas.release).toHaveBeenCalled();
+  });
+
+  it('uses fallback messages when the gateway gives no error or refusal text', async () => {
+    const { service } = createService();
+    runAiFeatureMock.mockResolvedValueOnce({ ok: false });
+    await expect(service.careerAdvice(userId, { cvId })).rejects.toMatchObject({
+      response: expect.objectContaining({ message: 'career-advice failed' }),
+    });
+
+    runAiFeatureMock.mockResolvedValueOnce({ ok: false, data: { ok: false } });
+    await expect(service.careerAdvice(userId, { cvId })).rejects.toMatchObject({
+      response: expect.objectContaining({ message: 'career-advice refused' }),
+    });
+
+    runAiFeatureMock.mockResolvedValueOnce({ ok: true, data: { ok: true } });
+    await expect(service.careerAdvice(userId, { cvId })).resolves.toMatchObject({
       model: 'gpt-4o-mini',
+      provider: 'heuristic',
     });
   });
 
-  it('returns grammar and skills scaffolds plus queued import jobs', async () => {
+  it('checks CV ownership before reserving quota for CV insights', async () => {
+    const { service, quotas } = createService({ ...defaultCv(), userId: 'someone-else' });
+
+    await expect(
+      service.skillsSuggest(userId, { cvId, targetRole: 'Frontend Engineer' })
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(quotas.reserveOptimizeQuota).not.toHaveBeenCalled();
+  });
+
+  it('returns the grammar scaffold, skills suggestions and queued import jobs', async () => {
     const { service } = createService();
 
     await expect(
@@ -405,8 +501,9 @@ describe('AiService', () => {
     ).resolves.toMatchObject({
       status: 'completed',
       feature: 'skills-suggest',
-      model: 'gpt-4o-mini',
+      provider: 'heuristic',
       suggestions: [],
+      toDevelop: expect.arrayContaining([expect.objectContaining({ skill: 'CSS' })]),
     });
 
     await expect(

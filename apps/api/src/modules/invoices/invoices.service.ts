@@ -12,7 +12,18 @@ export class InvoicesService {
       where: { subscriptionId: sub.id },
       orderBy: { createdAt: 'desc' },
     });
-    return { items };
+    return {
+      items: items.map((invoice) => ({
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        amount: Number(invoice.amount),
+        currency: invoice.currency,
+        status: invoice.status,
+        pdfUrl: invoice.pdfUrl,
+        createdAt: invoice.createdAt,
+        paidAt: invoice.paidAt,
+      })),
+    };
   }
 
   async get(userId: string, id: string) {

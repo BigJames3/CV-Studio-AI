@@ -11,7 +11,7 @@ const features = [
     body: 'Formulaire à gauche, aperçu live à droite. Autosave toutes les 5 secondes.',
   },
   {
-    title: '5 templates pro',
+    title: '15 modèles de CV',
     body: 'Modern, Creative, Executive, Startup et ATS — personnalisables couleurs et polices.',
   },
   {
@@ -26,12 +26,13 @@ const features = [
 
 const testimonials = [
   {
-    quote: 'Mon CV est passé les ATS en une semaine. L’aperçu live m’a évité trois aller-retours PDF.',
+    quote:
+      'Mon CV est passé les ATS en une semaine. L’aperçu live m’a évité trois aller-retours PDF.',
     name: 'Camille R.',
     role: 'Product Designer',
   },
   {
-    quote: 'On a migrés l’équipe careers dessus. Templates ATS + export sans watermark Free.',
+    quote: 'On a migrés l’équipe careers dessus. Templates ATS + export PDF fidèle.',
     name: 'Jonas M.',
     role: 'Talent Lead',
   },
@@ -45,7 +46,7 @@ const testimonials = [
 const faqs = [
   {
     q: 'Le plan Free est-il vraiment utilisable ?',
-    a: 'Oui : 1 CV, 5 templates, export PDF sans watermark. L’IA est sur Pro. Export DOCX arrive bientôt.',
+    a: 'Oui : 1 CV, 10 modèles et le score ATS, modifiables en ligne. L’export PDF, le partage et l’optimisation IA sont sur Pro.',
   },
   {
     q: 'Mes données sont-elles sécurisées ?',
@@ -179,7 +180,7 @@ export function LandingPageContent() {
           <h2 className="font-[family-name:var(--font-landing-display)] text-3xl text-[#0B1F2A] md:text-4xl">
             Tarifs clairs
           </h2>
-          <p className="mt-3 text-[#4A5F5A]">Free · Pro 9,99$/mois · Business 29,99$/mois</p>
+          <p className="mt-3 text-[#4A5F5A]">Gratuit · Pro 9,99 €/mois · Business 29,99 €/mois</p>
           <div className="mt-10 flex flex-wrap gap-4">
             <Link href="/pricing">
               <Button size="lg">Voir le détail</Button>
@@ -277,8 +278,7 @@ export function LandingPageContent() {
               price: '0',
               priceCurrency: 'USD',
             },
-            description:
-              'Builder de CV ATS-ready avec aperçu live, templates pro et export PDF.',
+            description: 'Builder de CV ATS-ready avec aperçu live, templates pro et export PDF.',
           }),
         }}
       />

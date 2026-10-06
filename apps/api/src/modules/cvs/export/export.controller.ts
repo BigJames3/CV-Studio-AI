@@ -13,6 +13,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentUser, AuthUser } from '../../../common/decorators';
+import { FeatureGate } from '../../../common/guards/feature-gate.guard';
 import { PdfExportService } from './pdf-export.service';
 import { ExportPdfDto, BatchExportPdfDto, PDF_HTML_MAX_CHARS } from './dto/export-pdf.dto';
 
@@ -25,6 +26,7 @@ export class CvExportController {
 
   @Post('export/pdf')
   @ApiBearerAuth('JWT')
+  @FeatureGate('downloadPDF')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'Sync PDF from CV content (authenticated)' })
   async renderPdf(
@@ -92,6 +94,7 @@ export class CvExportController {
 
   @Post('export/pdf/batch')
   @ApiBearerAuth('JWT')
+  @FeatureGate('downloadPDF')
   @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @ApiOperation({ summary: 'Batch export multiple template contents as JSON (base64 PDFs)' })
   async batchExport(@CurrentUser() user: AuthUser, @Body() dto: BatchExportPdfDto) {
@@ -116,17 +119,22 @@ export class CvExportController {
 
   @Get('exports/:jobId')
   @ApiBearerAuth('JWT')
-  @ApiOperation({ summary: 'Poll async PDF export job status' })
-  getExportJob(@Param('jobId') jobId: string) {
-    return this.exportService.getJobStatus(jobId);
+  @FeatureGate('downloadPDF')
+  @ApiOperation({ summary: 'Poll async PDF export job status (owner only)' })
+  getExportJob(@CurrentUser() user: AuthUser, @Param('jobId') jobId: string) {
+    return this.exportService.getJobStatus(jobId, user.id);
   }
 
   @Get('exports/:jobId/download')
   @ApiBearerAuth('JWT')
-  @ApiOperation({ summary: 'Download completed async PDF export' })
+  @FeatureGate('downloadPDF')
+  @ApiOperation({ summary: 'Download completed async PDF export (owner only)' })
   @Header('Content-Type', 'application/pdf')
-  async downloadExport(@Param('jobId') jobId: string): Promise<StreamableFile> {
-    const { buffer, filename } = await this.exportService.getJobBuffer(jobId);
+  async downloadExport(
+    @CurrentUser() user: AuthUser,
+    @Param('jobId') jobId: string
+  ): Promise<StreamableFile> {
+    const { buffer, filename } = await this.exportService.getJobBuffer(jobId, user.id);
     return new StreamableFile(buffer, {
       type: 'application/pdf',
       disposition: `attachment; filename="${filename}"`,

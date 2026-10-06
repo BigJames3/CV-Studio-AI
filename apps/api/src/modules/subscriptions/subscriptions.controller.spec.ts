@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { validate } from 'class-validator';
 import { SubscriptionsController } from './subscriptions.controller';
@@ -18,8 +18,8 @@ describe('SubscriptionsController', () => {
     checkout: jest.fn(),
     me: jest.fn(),
     create: jest.fn(),
-    update: jest.fn(),
     cancel: jest.fn(),
+    billingPortal: jest.fn(),
   };
 
   let controller: SubscriptionsController;
@@ -33,31 +33,7 @@ describe('SubscriptionsController', () => {
     controller = module.get(SubscriptionsController);
   });
 
-  it('POST checkout accepts plan, interval, paymentMethod', async () => {
-    subscriptions.checkout.mockResolvedValue({
-      url: 'https://checkout.cinetpay.com/payment/tok',
-      transactionId: 'cv_abc_1',
-      paymentMethod: 'cinetpay',
-    });
-
-    const result = await controller.checkout(user, {
-      plan: 'pro',
-      interval: 'month',
-      paymentMethod: 'cinetpay',
-    });
-
-    expect(subscriptions.checkout).toHaveBeenCalledWith(
-      'user-1',
-      expect.objectContaining({ plan: 'pro', interval: 'month', paymentMethod: 'cinetpay' })
-    );
-    expect(result).toMatchObject({
-      url: expect.stringMatching(/cinetpay/),
-      transactionId: 'cv_abc_1',
-      paymentMethod: 'cinetpay',
-    });
-  });
-
-  it('POST checkout works without paymentMethod (backward compatible)', async () => {
+  it('POST checkout forwards plan and interval', async () => {
     subscriptions.checkout.mockResolvedValue({
       url: 'https://checkout.stripe.com/c/pay/cs_test',
     });
@@ -76,6 +52,29 @@ describe('SubscriptionsController', () => {
     ).toBeFalsy();
   });
 
+  it('POST checkout is throttled to 10 requests per minute', () => {
+    expect(
+      Reflect.getMetadata('THROTTLER:LIMITdefault', SubscriptionsController.prototype.checkout)
+    ).toBe(10);
+    expect(
+      Reflect.getMetadata('THROTTLER:TTLdefault', SubscriptionsController.prototype.checkout)
+    ).toBe(60_000);
+  });
+
+  it('POST me/portal opens the portal for the signed-in user only', async () => {
+    subscriptions.billingPortal.mockResolvedValue({ url: 'https://billing.stripe.com/p/s' });
+    await expect(controller.billingPortal(user)).resolves.toEqual({
+      url: 'https://billing.stripe.com/p/s',
+    });
+    expect(subscriptions.billingPortal).toHaveBeenCalledWith('user-1');
+    expect(
+      Reflect.getMetadata(IS_PUBLIC_KEY, SubscriptionsController.prototype.billingPortal)
+    ).toBeFalsy();
+    expect(
+      Reflect.getMetadata('THROTTLER:LIMITdefault', SubscriptionsController.prototype.billingPortal)
+    ).toBe(10);
+  });
+
   it('POST /subscriptions is forbidden for regular users and does not create', () => {
     expect(() => controller.create(user, { plan: 'pro' })).toThrow(ForbiddenException);
     expect(subscriptions.create).not.toHaveBeenCalled();
@@ -86,10 +85,22 @@ describe('SubscriptionsController', () => {
     expect(() => controller.create(nonAdmin, { plan: 'business' })).toThrow(ForbiddenException);
     expect(subscriptions.create).not.toHaveBeenCalled();
   });
+
+  it('PATCH /subscriptions/me points to checkout instead of silently doing nothing (BILL-004)', () => {
+    let error: unknown;
+    try {
+      controller.update(user, { plan: 'business', interval: 'month' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as BadRequestException).getResponse()).toMatchObject({ code: 'USE_CHECKOUT' });
+    expect(subscriptions.me).not.toHaveBeenCalled();
+  });
 });
 
 describe('CheckoutDto validation', () => {
-  it('accepts optional paymentMethod', async () => {
+  it('accepts plan and interval', async () => {
     const dto = Object.assign(new CheckoutDto(), { plan: 'pro', interval: 'year' });
     expect(await validate(dto)).toHaveLength(0);
   });

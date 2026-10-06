@@ -4,7 +4,27 @@ import { useMemo } from 'react';
 import { useEditorStore } from '@/stores/editor-store';
 import { Label } from '@/components/ui/input';
 import { identitySchema } from '@/lib/validations/auth';
-import { AddItemButton, FormField, FormTextarea, SectionCard } from './form-primitives';
+import {
+  CONTRACT_TYPES,
+  DATE_PLACEHOLDER,
+  LANGUAGE_LEVELS,
+  SKILL_CATEGORIES,
+} from '@/lib/templates/cv-options';
+import {
+  AddItemButton,
+  CheckboxField,
+  FormField,
+  FormTextarea,
+  SectionCard,
+  Suggestions,
+} from './form-primitives';
+
+const DATE_HINT = 'Le mois est facultatif : n’indiquez que ce que vous savez.';
+
+/** Textarea lines as a list; empty lines are kept while typing and dropped on the CV. */
+function splitLines(value: string) {
+  return value.split('\n');
+}
 
 function useIdentityErrors() {
   const identity = useEditorStore((s) => s.content.identity);
@@ -43,10 +63,10 @@ export function IdentityForm() {
       />
       <FormField
         id="headline"
-        label="Titre / Headline"
+        label="Titre professionnel"
         value={identity.headline ?? ''}
         onChange={(headline) => patchIdentity({ headline })}
-        placeholder="ex. Senior Product Designer"
+        placeholder="ex. Responsable commercial"
       />
       <FormField
         id="email"
@@ -62,12 +82,27 @@ export function IdentityForm() {
         value={identity.phone ?? ''}
         onChange={(phone) => patchIdentity({ phone })}
       />
+      <div className="grid grid-cols-2 gap-3">
+        <FormField
+          id="city"
+          label="Ville"
+          value={identity.city ?? ''}
+          onChange={(city) => patchIdentity({ city })}
+          placeholder="Abidjan"
+        />
+        <FormField
+          id="country"
+          label="Pays"
+          value={identity.country ?? ''}
+          onChange={(country) => patchIdentity({ country })}
+          placeholder="Côte d’Ivoire"
+        />
+      </div>
       <FormField
-        id="city"
-        label="Localisation"
-        value={identity.city ?? ''}
-        onChange={(city) => patchIdentity({ city })}
-        placeholder="Paris, FR"
+        id="address"
+        label="Adresse (facultative)"
+        value={identity.address ?? ''}
+        onChange={(address) => patchIdentity({ address })}
       />
       <FormField
         id="linkedin"
@@ -85,7 +120,7 @@ export function IdentityForm() {
       />
       <FormField
         id="website"
-        label="Site web"
+        label="Site web / portfolio"
         value={identity.website ?? ''}
         onChange={(website) => patchIdentity({ website })}
         placeholder="https://…"
@@ -152,11 +187,27 @@ export function ExperienceForm() {
             value={exp.company}
             onChange={(company) => updateExperience(exp.id, { company })}
           />
+          <div className="grid grid-cols-2 gap-3">
+            <FormField
+              id={`${exp.id}-location`}
+              label="Ville / pays"
+              value={exp.location ?? ''}
+              onChange={(location) => updateExperience(exp.id, { location })}
+            />
+            <FormField
+              id={`${exp.id}-contract`}
+              label="Type de contrat"
+              list="cv-contract-types"
+              value={exp.contractType ?? ''}
+              onChange={(contractType) => updateExperience(exp.id, { contractType })}
+              placeholder="CDI, Stage…"
+            />
+          </div>
           <FormField
-            id={`${exp.id}-location`}
-            label="Lieu"
-            value={exp.location ?? ''}
-            onChange={(location) => updateExperience(exp.id, { location })}
+            id={`${exp.id}-sector`}
+            label="Secteur d’activité (facultatif)"
+            value={exp.sector ?? ''}
+            onChange={(sector) => updateExperience(exp.id, { sector })}
           />
           <div className="grid grid-cols-2 gap-3">
             <FormField
@@ -165,16 +216,17 @@ export function ExperienceForm() {
               required
               value={exp.start}
               onChange={(start) => updateExperience(exp.id, { start })}
-              placeholder="2022"
+              placeholder={DATE_PLACEHOLDER}
             />
             <FormField
               id={`${exp.id}-end`}
               label="Fin"
               value={exp.current ? '' : (exp.end ?? '')}
               onChange={(end) => updateExperience(exp.id, { end: end || null, current: false })}
-              placeholder="2024"
+              placeholder={DATE_PLACEHOLDER}
             />
           </div>
+          <p className="-mt-1 text-xs text-content-secondary">{DATE_HINT}</p>
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -189,22 +241,34 @@ export function ExperienceForm() {
             Poste actuel
           </label>
           <div>
-            <Label htmlFor={`${exp.id}-bullets`}>Description (une puce par ligne)</Label>
+            <Label htmlFor={`${exp.id}-bullets`}>Responsabilités (une par ligne)</Label>
             <textarea
               id={`${exp.id}-bullets`}
               className="min-h-28 w-full rounded-md border border-border bg-surface-card px-3 py-2 text-sm"
               value={exp.bullets.join('\n')}
-              placeholder="Réalisations, impact, technologies…"
-              onChange={(e) =>
-                updateExperience(exp.id, {
-                  bullets: e.target.value.split('\n'),
-                })
-              }
+              placeholder="Missions principales du poste…"
+              onChange={(e) => updateExperience(exp.id, { bullets: splitLines(e.target.value) })}
             />
           </div>
+          <FormTextarea
+            id={`${exp.id}-achievements`}
+            label="Réalisations (une par ligne)"
+            value={(exp.achievements ?? []).join('\n')}
+            onChange={(v) => updateExperience(exp.id, { achievements: splitLines(v) })}
+            placeholder="Résultats obtenus. N’indiquez un chiffre que s’il est réel."
+            rows={3}
+          />
+          <FormField
+            id={`${exp.id}-tools`}
+            label="Outils / compétences utilisés"
+            value={exp.tools ?? ''}
+            onChange={(tools) => updateExperience(exp.id, { tools })}
+            placeholder="séparés par des virgules"
+          />
         </SectionCard>
       ))}
       <AddItemButton label="+ Ajouter une expérience" onClick={addExperience} />
+      <Suggestions id="cv-contract-types" values={CONTRACT_TYPES} />
     </div>
   );
 }
@@ -242,9 +306,15 @@ export function EducationForm() {
           />
           <FormField
             id={`${edu.id}-field`}
-            label="Domaine / Major"
+            label="Spécialité"
             value={edu.field ?? ''}
             onChange={(field) => updateEducation(edu.id, { field })}
+          />
+          <FormField
+            id={`${edu.id}-location`}
+            label="Ville / pays"
+            value={edu.location ?? ''}
+            onChange={(location) => updateEducation(edu.id, { location })}
           />
           <div className="grid grid-cols-2 gap-3">
             <FormField
@@ -252,17 +322,33 @@ export function EducationForm() {
               label="Début"
               value={edu.start ?? ''}
               onChange={(start) => updateEducation(edu.id, { start })}
+              placeholder={DATE_PLACEHOLDER}
             />
             <FormField
               id={`${edu.id}-end`}
               label="Fin"
               value={edu.end ?? ''}
               onChange={(end) => updateEducation(edu.id, { end })}
+              placeholder={DATE_PLACEHOLDER}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField
+              id={`${edu.id}-honors`}
+              label="Mention (facultative)"
+              value={edu.honors ?? ''}
+              onChange={(honors) => updateEducation(edu.id, { honors })}
+            />
+            <FormField
+              id={`${edu.id}-thesis`}
+              label="Projet / mémoire"
+              value={edu.thesis ?? ''}
+              onChange={(thesis) => updateEducation(edu.id, { thesis })}
             />
           </div>
           <FormTextarea
             id={`${edu.id}-details`}
-            label="Détails"
+            label="Description (facultative)"
             value={edu.details ?? ''}
             onChange={(details) => updateEducation(edu.id, { details })}
             rows={3}
@@ -299,14 +385,25 @@ export function SkillsForm() {
             value={skill.name}
             onChange={(name) => updateSkill(skill.id, { name })}
           />
+          <FormField
+            id={`${skill.id}-category`}
+            label="Catégorie (facultative)"
+            list="cv-skill-categories"
+            value={skill.category ?? ''}
+            onChange={(category) => updateSkill(skill.id, { category })}
+            placeholder="Compétences techniques…"
+          />
           <div>
-            <Label htmlFor={`${skill.id}-level`}>Niveau (1–5)</Label>
+            <Label htmlFor={`${skill.id}-level`}>Niveau (facultatif)</Label>
             <select
               id={`${skill.id}-level`}
               className="h-10 w-full rounded-md border border-border bg-surface-card px-3 text-sm"
-              value={skill.level ?? 3}
-              onChange={(e) => updateSkill(skill.id, { level: Number(e.target.value) })}
+              value={skill.level ?? 0}
+              onChange={(e) =>
+                updateSkill(skill.id, { level: Number(e.target.value) || undefined })
+              }
             >
+              <option value={0}>Non précisé</option>
               <option value={1}>1 — Débutant</option>
               <option value={2}>2 — Intermédiaire bas</option>
               <option value={3}>3 — Intermédiaire</option>
@@ -317,6 +414,7 @@ export function SkillsForm() {
         </SectionCard>
       ))}
       <AddItemButton label="+ Ajouter une compétence" onClick={addSkill} />
+      <Suggestions id="cv-skill-categories" values={SKILL_CATEGORIES} />
     </div>
   );
 }
@@ -349,13 +447,23 @@ export function LanguagesForm() {
           <FormField
             id={`${lang.id}-level`}
             label="Niveau"
+            list="cv-language-levels"
             value={lang.level ?? ''}
             onChange={(level) => updateLanguage(lang.id, { level })}
-            placeholder="Natif, Fluent, B2…"
+            placeholder="Langue maternelle, B2…"
+            hint="Niveaux CECRL : A1, A2, B1, B2, C1, C2."
+          />
+          <FormField
+            id={`${lang.id}-certification`}
+            label="Certification (facultative)"
+            value={lang.certification ?? ''}
+            onChange={(certification) => updateLanguage(lang.id, { certification })}
+            placeholder="TOEIC 850, DELF B2…"
           />
         </SectionCard>
       ))}
       <AddItemButton label="+ Ajouter une langue" onClick={addLanguage} />
+      <Suggestions id="cv-language-levels" values={LANGUAGE_LEVELS} />
     </div>
   );
 }
@@ -381,9 +489,38 @@ export function ProjectsForm() {
         >
           <FormField
             id={`${project.id}-name`}
-            label="Titre"
+            label="Nom du projet"
             value={project.name}
             onChange={(name) => updateProject(project.id, { name })}
+          />
+          <FormField
+            id={`${project.id}-role`}
+            label="Rôle"
+            value={project.role ?? ''}
+            onChange={(role) => updateProject(project.id, { role })}
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <FormField
+              id={`${project.id}-start`}
+              label="Début"
+              value={project.start ?? ''}
+              onChange={(start) => updateProject(project.id, { start })}
+              placeholder={DATE_PLACEHOLDER}
+            />
+            <FormField
+              id={`${project.id}-end`}
+              label="Fin"
+              value={project.current ? '' : (project.end ?? '')}
+              onChange={(end) => updateProject(project.id, { end, current: false })}
+              placeholder={DATE_PLACEHOLDER}
+            />
+          </div>
+          <CheckboxField
+            label="Projet en cours"
+            checked={Boolean(project.current)}
+            onChange={(current) =>
+              updateProject(project.id, { current, end: current ? '' : project.end })
+            }
           />
           <FormTextarea
             id={`${project.id}-desc`}
@@ -394,10 +531,17 @@ export function ProjectsForm() {
           />
           <FormField
             id={`${project.id}-url`}
-            label="URL"
+            label="Lien (site, GitHub…)"
             value={project.url ?? ''}
             onChange={(url) => updateProject(project.id, { url })}
             placeholder="https://…"
+          />
+          <FormField
+            id={`${project.id}-technologies`}
+            label="Technologies / outils"
+            value={project.technologies ?? ''}
+            onChange={(technologies) => updateProject(project.id, { technologies })}
+            placeholder="séparés par des virgules"
           />
         </SectionCard>
       ))}
@@ -437,13 +581,37 @@ export function CertificatesForm() {
             value={cert.issuer ?? ''}
             onChange={(issuer) => updateCertificate(cert.id, { issuer })}
           />
-          <FormField
-            id={`${cert.id}-year`}
-            label="Année"
-            value={cert.year ?? ''}
-            onChange={(year) => updateCertificate(cert.id, { year })}
-            placeholder="2023"
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <FormField
+              id={`${cert.id}-year`}
+              label="Date d’obtention"
+              value={cert.year ?? ''}
+              onChange={(year) => updateCertificate(cert.id, { year })}
+              placeholder={DATE_PLACEHOLDER}
+            />
+            <FormField
+              id={`${cert.id}-expires`}
+              label="Expiration (si applicable)"
+              value={cert.expires ?? ''}
+              onChange={(expires) => updateCertificate(cert.id, { expires })}
+              placeholder={DATE_PLACEHOLDER}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField
+              id={`${cert.id}-credential`}
+              label="Identifiant (facultatif)"
+              value={cert.credentialId ?? ''}
+              onChange={(credentialId) => updateCertificate(cert.id, { credentialId })}
+            />
+            <FormField
+              id={`${cert.id}-url`}
+              label="Lien de vérification"
+              value={cert.url ?? ''}
+              onChange={(url) => updateCertificate(cert.id, { url })}
+              placeholder="https://…"
+            />
+          </div>
         </SectionCard>
       ))}
       <AddItemButton label="+ Ajouter un certificat" onClick={addCertificate} />
@@ -488,10 +656,16 @@ export function ReferencesForm() {
           />
           <FormField
             id={`${ref.id}-role`}
-            label="Fonction / Relation"
+            label="Fonction / relation"
             value={ref.role ?? ''}
             onChange={(role) => updateReference(ref.id, { role })}
-            placeholder="ex. Manager chez Acme"
+            placeholder="ex. Ancien responsable direct"
+          />
+          <FormField
+            id={`${ref.id}-organization`}
+            label="Organisation"
+            value={ref.organization ?? ''}
+            onChange={(organization) => updateReference(ref.id, { organization })}
           />
           <FormField
             id={`${ref.id}-contact`}

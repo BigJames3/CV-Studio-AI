@@ -91,8 +91,13 @@ describe('Auth (e2e)', () => {
       .post('/api/v1/auth/refresh')
       .send({ refreshToken: oldRefresh })
       .expect(200);
-    const newRefresh = refreshFromCookie(first);
+    const second = await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: refreshFromCookie(first) })
+      .expect(200);
+    const latestRefresh = refreshFromCookie(second);
 
+    // Two rotations back: outside the previous-token grace window → theft.
     await request(app.getHttpServer())
       .post('/api/v1/auth/refresh')
       .send({ refreshToken: oldRefresh })
@@ -100,7 +105,39 @@ describe('Auth (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/refresh')
-      .send({ refreshToken: newRefresh })
+      .send({ refreshToken: latestRefresh })
+      .expect(401);
+  });
+
+  it('accepts the previous refresh token once right after rotation', async () => {
+    const email = uniqueEmail();
+    const reg = await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({ email, password, firstName: 'Grace', lastName: 'Test' })
+      .expect(201);
+
+    const oldRefresh = refreshFromCookie(reg);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: oldRefresh })
+      .expect(200);
+
+    // e.g. a navigation aborted the response carrying the new cookie
+    const replay = await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: oldRefresh })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: refreshFromCookie(replay) })
+      .expect(200);
+
+    // A second replay of the same old token is theft.
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: oldRefresh })
       .expect(401);
   });
 
@@ -317,5 +354,74 @@ describe('Auth (e2e)', () => {
       .post('/api/v1/auth/refresh')
       .send({ refreshToken: refresh })
       .expect(401);
+  });
+
+  describe('signing in again from the same browser', () => {
+    const server = () => app.getHttpServer();
+    const cookie = (refresh: string) => `refresh_token=${encodeURIComponent(refresh)}`;
+
+    async function registerUser() {
+      const email = uniqueEmail();
+      const res = await request(server())
+        .post('/api/v1/auth/register')
+        .send({ email, password, firstName: 'E2E', lastName: 'Switch' })
+        .expect(201);
+      return { email, refresh: refreshFromCookie(res) };
+    }
+
+    it('revokes the previous account session when another account signs in', async () => {
+      const alice = await registerUser();
+      const bob = await registerUser();
+
+      const switched = await request(server())
+        .post('/api/v1/auth/login')
+        .set('Cookie', cookie(alice.refresh))
+        .send({ email: bob.email, password })
+        .expect(200);
+      const bobRefresh = refreshFromCookie(switched);
+
+      await request(server())
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken: alice.refresh })
+        .expect(401);
+      await request(server())
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken: bobRefresh })
+        .expect(200);
+    });
+
+    it('keeps the current session when the new sign-in fails', async () => {
+      const alice = await registerUser();
+
+      await request(server())
+        .post('/api/v1/auth/login')
+        .set('Cookie', cookie(alice.refresh))
+        .send({ email: alice.email, password: 'Wrongpass1!x' })
+        .expect(401);
+
+      await request(server())
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken: alice.refresh })
+        .expect(200);
+    });
+
+    it('replaces the session when the same account signs in again', async () => {
+      const alice = await registerUser();
+
+      const again = await request(server())
+        .post('/api/v1/auth/login')
+        .set('Cookie', cookie(alice.refresh))
+        .send({ email: alice.email, password })
+        .expect(200);
+
+      await request(server())
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken: alice.refresh })
+        .expect(401);
+      await request(server())
+        .post('/api/v1/auth/refresh')
+        .send({ refreshToken: refreshFromCookie(again) })
+        .expect(200);
+    });
   });
 });

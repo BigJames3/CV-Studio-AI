@@ -18,11 +18,7 @@ export function LinkedInSignInButton({ nextPath = '/dashboard' }: { nextPath?: s
   }, []);
 
   if (!clientId) {
-    return (
-      <Button type="button" variant="secondary" className="w-full" disabled>
-        LinkedIn (non configuré)
-      </Button>
-    );
+    return null;
   }
 
   return (

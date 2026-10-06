@@ -2,10 +2,7 @@
 
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  changePasswordSchema,
-  type ChangePasswordInput,
-} from '@/lib/validations/auth';
+import { changePasswordSchema, type ChangePasswordInput } from '@/lib/validations/auth';
 import { useChangePassword } from '@/hooks';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
@@ -40,9 +37,7 @@ export function ChangePasswordForm({ onSuccess }: ChangePasswordFormProps) {
           onSuccess?.();
         } catch (err) {
           const message =
-            err instanceof ApiError
-              ? err.message
-              : 'Impossible de changer le mot de passe';
+            err instanceof ApiError ? err.message : 'Impossible de changer le mot de passe';
           form.setError('root', { message });
         }
       })}
@@ -77,9 +72,7 @@ export function ChangePasswordForm({ onSuccess }: ChangePasswordFormProps) {
           {...form.register('confirmPassword')}
         />
         {form.formState.errors.confirmPassword && (
-          <p className="mt-1 text-xs text-error">
-            {form.formState.errors.confirmPassword.message}
-          </p>
+          <p className="mt-1 text-xs text-error">{form.formState.errors.confirmPassword.message}</p>
         )}
       </div>
 

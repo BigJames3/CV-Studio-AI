@@ -1,8 +1,5 @@
 import type { CoverLetterInput, CoverLetterResult } from '../prompts/cover-letter';
-import {
-  COVER_LETTER_PROMPT_ID,
-  COVER_LETTER_PROMPT_VERSION,
-} from '../prompts/cover-letter';
+import { COVER_LETTER_PROMPT_ID, COVER_LETTER_PROMPT_VERSION } from '../prompts/cover-letter';
 
 function extractName(cvFacts: Record<string, unknown>): string {
   const identity = (cvFacts.identity ?? cvFacts.personal ?? {}) as Record<string, unknown>;
@@ -16,7 +13,9 @@ function extractName(cvFacts: Record<string, unknown>): string {
 
 function extractEvidence(cvFacts: Record<string, unknown>): string[] {
   const evidence: string[] = [];
-  const experience = Array.isArray(cvFacts.experience) ? cvFacts.experience : [];
+  // CvContent stores roles under `experiences`; older payloads used `experience`.
+  const roles = cvFacts.experiences ?? cvFacts.experience;
+  const experience = Array.isArray(roles) ? roles : [];
   for (const exp of experience.slice(0, 3)) {
     const row = exp as Record<string, unknown>;
     const title = String(row.position ?? row.title ?? '');

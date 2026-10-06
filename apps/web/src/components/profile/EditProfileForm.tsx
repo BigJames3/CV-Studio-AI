@@ -3,10 +3,7 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { UserProfile } from '@/lib/api';
-import {
-  updateProfileSchema,
-  type UpdateProfileInput,
-} from '@/lib/validations/auth';
+import { updateProfileSchema, type UpdateProfileInput } from '@/lib/validations/auth';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
 import { ApiError } from '@/lib/api/client';
@@ -96,12 +93,7 @@ export function EditProfileForm({ user, onSave, onCancel }: EditProfileFormProps
 
       <div>
         <Label htmlFor="avatarUrl">Avatar (URL)</Label>
-        <Input
-          id="avatarUrl"
-          type="url"
-          placeholder="https://…"
-          {...form.register('avatarUrl')}
-        />
+        <Input id="avatarUrl" type="url" placeholder="https://…" {...form.register('avatarUrl')} />
         {form.formState.errors.avatarUrl && (
           <p className="mt-1 text-xs text-error">{form.formState.errors.avatarUrl.message}</p>
         )}

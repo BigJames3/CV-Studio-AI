@@ -1,0 +1,34 @@
+/* Mobile CV editor — section tabs scroll inside their strip, never the page */
+
+.editor-tabs {
+  min-width: 0;
+  width: 100%;
+  border-bottom: 1px solid var(--cv-border-default);
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  touch-action: pan-x;
+}
+
+.editor-tab {
+  min-height: var(--cv-touch-target);
+  border-bottom: 3px solid transparent;
+}
+
+.editor-tab-active {
+  border-bottom-color: var(--cv-color-primary);
+}
+
+.editor-tabpanel {
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (min-width: 768px) {
+  .editor-tabs {
+    display: none;
+  }
+}

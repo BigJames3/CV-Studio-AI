@@ -42,7 +42,7 @@ jobs:
       - name: Validate
         run: terraform validate
       - name: Plan
-        run: terraform plan -no-color -input=false || true
+        run: terraform plan -no-color -input=false
         # Real plan requires backend credentials + vars
 
   apply:

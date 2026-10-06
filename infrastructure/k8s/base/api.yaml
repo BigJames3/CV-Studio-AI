@@ -37,6 +37,9 @@ spec:
           envFrom:
             - secretRef:
                 name: api-secrets
+          env:
+            - name: STRIPE_FAIL_CLOSED
+              value: '1'
           readinessProbe:
             httpGet:
               path: /api/v1/health/ready

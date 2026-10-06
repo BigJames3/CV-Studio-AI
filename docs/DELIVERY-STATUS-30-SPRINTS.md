@@ -4,22 +4,22 @@ Last updated: 2026-07-30
 
 ## Mapping
 
-| User framework | Repo roadmap (`docs/ROADMAP-24M`) | Status |
-| --- | --- | --- |
-| Phase 1 S0 Infra | Sprint 0 | ✅ Done |
-| Phase 1 S1 Auth | Sprint 1 (+ S10 MFA/OAuth) | ✅ Core complete |
-| Phase 1 S2 Landing | Marketing polish | ✅ Redesigned |
-| Phase 1 S3 Editor | Sprint 3 | ✅ Usable (existing) |
-| Phase 1 S4 Templates | Sprint 4 | ✅ 5 templates (existing) |
-| Phase 1 S5 Export & share | Sprint 4–5 | ✅ PDF + public share + QR; DOCX hidden (coming soon) |
-| Phase 1 S6 Dashboard | — | ✅ List + rename/dup/delete/share |
-| Phase 1 S7 Billing | Sprint 6–7 | ✅ Stripe fail-closed (idempotency, retry, DLQ, Sentry) |
-| Phase 1 S8 Mobile | — | 🟡 Responsive chrome; editor tabs TBD polish |
-| Phase 1 S9 QA | — | ✅ Unit + AI/payments coverage gates; Playwright suite |
-| Phase 1 S10 Beta | — | 🟡 Monitoring scaffolds in infra docs |
-| Phase 2 S11–20 | Core | 🟡 API scaffolds / UI partial — **ATS panel éditeur live** (rules + explain) |
-| Phase 3 S21–25 | AI | 🟡 optimize-resume + cover-letter + ATS explain live; rest scaffold |
-| Phase 4 S26–30 | Marketplace + mobile | 🟡 Seller UI wired to sales/analytics/listings API; Expo scaffold |
+| User framework            | Repo roadmap (`docs/ROADMAP-24M`) | Status                                                                       |
+| ------------------------- | --------------------------------- | ---------------------------------------------------------------------------- |
+| Phase 1 S0 Infra          | Sprint 0                          | ✅ Done                                                                      |
+| Phase 1 S1 Auth           | Sprint 1 (+ S10 MFA/OAuth)        | ✅ Core complete                                                             |
+| Phase 1 S2 Landing        | Marketing polish                  | ✅ Redesigned                                                                |
+| Phase 1 S3 Editor         | Sprint 3                          | ✅ Usable (existing)                                                         |
+| Phase 1 S4 Templates      | Sprint 4                          | ✅ 5 templates (existing)                                                    |
+| Phase 1 S5 Export & share | Sprint 4–5                        | ✅ PDF + public share + QR; DOCX hidden (coming soon)                        |
+| Phase 1 S6 Dashboard      | —                                 | ✅ List + rename/dup/delete/share                                            |
+| Phase 1 S7 Billing        | Sprint 6–7                        | ✅ Stripe fail-closed (idempotency, retry, DLQ, Sentry)                      |
+| Phase 1 S8 Mobile         | —                                 | 🟡 Responsive chrome; editor tabs TBD polish                                 |
+| Phase 1 S9 QA             | —                                 | ✅ Unit + AI/payments coverage gates; Playwright suite                       |
+| Phase 1 S10 Beta          | —                                 | 🟡 Monitoring scaffolds in infra docs                                        |
+| Phase 2 S11–20            | Core                              | 🟡 API scaffolds / UI partial — **ATS panel éditeur live** (rules + explain) |
+| Phase 3 S21–25            | AI                                | 🟡 optimize-resume + cover-letter + ATS explain live; rest scaffold          |
+| Phase 4 S26–30            | Marketplace + mobile              | 🟡 Seller UI wired to sales/analytics/listings API; Expo scaffold            |
 
 ## Sprint 1 — Auth (this delivery)
 

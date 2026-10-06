@@ -13,6 +13,8 @@ export class RegisterPage {
     await this.page.locator('#lastName').fill(input.lastName);
     await this.page.locator('#email').fill(input.email);
     await this.page.locator('#password').fill(input.password);
+    await this.page.locator('#confirmPassword').fill(input.password);
+    await this.page.locator('#acceptedTerms').check();
     await this.page.getByTestId('register-submit').click();
   }
 }

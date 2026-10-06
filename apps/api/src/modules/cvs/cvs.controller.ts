@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Body,
   Param,
@@ -14,6 +15,8 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CvsService } from './cvs.service';
 import { CreateCvDto, UpdateCvDto, PublishCvDto, ListCvsQueryDto } from './dto/cv.dto';
 import { CurrentUser, AuthUser } from '../../common/decorators';
+import { ShareCvWithTeamDto } from '../teams/dto/team.dto';
+import { FeatureGate } from '../../common/guards/feature-gate.guard';
 
 @ApiTags('CVs')
 @ApiBearerAuth('JWT')
@@ -33,9 +36,26 @@ export class CvsController {
     return this.cvs.create(user.id, dto);
   }
 
+  @Get('shared')
+  @ApiOperation({ summary: 'CVs shared with my teams (Business)' })
+  listShared(@CurrentUser() user: AuthUser) {
+    return this.cvs.listShared(user.id);
+  }
+
   @Get(':id')
+  @ApiOperation({ summary: 'Get a CV I own or that a team shares with me (`access` says which)' })
   get(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.cvs.get(user.id, id);
+    return this.cvs.getAccessible(user.id, id);
+  }
+
+  @Put(':id/team')
+  @ApiOperation({ summary: 'Share the CV with a team, or stop sharing (teamId: null)' })
+  setTeam(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ShareCvWithTeamDto
+  ) {
+    return this.cvs.setTeam(user.id, id, dto.teamId ?? null);
   }
 
   @Patch(':id')
@@ -70,12 +90,14 @@ export class CvsController {
   }
 
   @Get(':id/share')
+  @FeatureGate('share')
   @ApiOperation({ summary: 'Public share URL + QR for a CV' })
   share(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.cvs.shareMeta(user.id, id);
   }
 
   @Get(':id/export/pdf')
+  @FeatureGate('downloadPDF')
   @ApiOperation({ summary: 'Enqueue PDF export (async job)' })
   exportPdf(
     @CurrentUser() user: AuthUser,

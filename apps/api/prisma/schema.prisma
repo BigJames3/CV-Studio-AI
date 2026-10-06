@@ -199,7 +199,13 @@ model User {
   subscriptionTier           SubscriptionTier @default(free) @map("subscription_tier")
   subscriptionStartDate      DateTime?        @map("subscription_start_date") @db.Timestamptz(6)
   subscriptionEndDate        DateTime?        @map("subscription_end_date") @db.Timestamptz(6)
-  isEmailVerified            Boolean          @default(false) @map("is_email_verified")
+  /// The 14-day trial is granted once per account lifetime: never reset to false.
+  trialUsed                  Boolean          @default(false) @map("trial_used")
+  trialStartedAt             DateTime?        @map("trial_started_at") @db.Timestamptz(6)
+  trialEndsAt                DateTime?        @map("trial_ends_at") @db.Timestamptz(6)
+  /// Stripe subscription that consumed the trial (null for accounts backfilled from legacy data).
+  trialStripeSubscriptionId  String?          @map("trial_stripe_subscription_id") @db.VarChar(255)
+  isEmailVerified           Boolean          @default(false) @map("is_email_verified")
   is2faEnabled               Boolean          @default(false) @map("is_2fa_enabled")
   twoFactorSecretEncrypted   Bytes?           @map("two_factor_secret_encrypted") // AES-GCM ciphertext
   twoFactorBackupCodes       String[]         @default([]) @map("two_factor_backup_codes")
@@ -286,6 +292,7 @@ model Team {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   members TeamMember[]
+  cvs     Cv[]
 
   @@map("teams")
 }
@@ -356,9 +363,12 @@ model Cv {
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  /// Team the owner shared this CV with (Business). Members read or edit it by team role.
+  teamId      String?   @map("team_id") @db.Uuid
 
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   template       Template?       @relation(fields: [templateId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  team           Team?           @relation(fields: [teamId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   versions       CvVersion[]
   experiences    Experience[]
   education      Education[]
@@ -370,13 +380,32 @@ model Cv {
   aiHistories    AiHistory[]
   collabSessions CollabSession[]
   collabSnapshots CollabSnapshot[]
+  views           CvView[]
 
   @@index([userId, updatedAt(sort: Desc)], map: "idx_cvs_user_updated")
   @@index([templateId], map: "idx_cvs_template_id")
   @@index([createdAt], map: "idx_cvs_created_at")
   @@index([isPublic], map: "idx_cvs_is_public")
   @@index([deletedAt], map: "idx_cvs_deleted_at")
+  @@index([teamId], map: "idx_cvs_team_id")
   @@map("cvs")
+}
+
+/// One visit of a public CV page, recorded by the visitor's browser (Business analytics).
+/// No IP or user agent is stored: `visitorHash` is a daily-salted hash, so a visitor can be
+/// counted once per day but not followed across days.
+model CvView {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cvId         String   @map("cv_id") @db.Uuid
+  viewedAt     DateTime @default(now()) @map("viewed_at") @db.Timestamptz(6)
+  source       String   @db.VarChar(32)
+  referrerHost String?  @map("referrer_host") @db.VarChar(255)
+  visitorHash  String   @map("visitor_hash") @db.Char(32)
+
+  cv Cv @relation(fields: [cvId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([cvId, viewedAt(sort: Desc)], map: "idx_cv_views_cv_viewed")
+  @@map("cv_views")
 }
 
 model CvVersion {
@@ -538,7 +567,9 @@ model Subscription {
   cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
   canceledAt           DateTime?          @map("canceled_at") @db.Timestamptz(6)
   stripeSubscriptionId   String?            @map("stripe_subscription_id") @db.VarChar(255)
-  provider               String?            @db.VarChar(32) // 'stripe' | 'cinetpay'
+  stripeCustomerId       String?            @unique @map("stripe_customer_id") @db.VarChar(255)
+  provider               String?            @db.VarChar(32) // 'stripe'
+  /// Unused since CinetPay was removed; dropped by the next release (expand/contract).
   cinetpayTransactionId  String?            @unique @map("cinetpay_transaction_id") @db.VarChar(255)
   lastPaymentError       String?            @map("last_payment_error") @db.VarChar(512)
   createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)

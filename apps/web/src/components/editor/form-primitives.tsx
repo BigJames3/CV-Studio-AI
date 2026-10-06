@@ -12,6 +12,9 @@ type FieldProps = {
   placeholder?: string;
   error?: string;
   required?: boolean;
+  /** id of a <datalist> with suggestions; the field stays free text. */
+  list?: string;
+  hint?: string;
 };
 
 export function FormField({
@@ -23,6 +26,8 @@ export function FormField({
   placeholder,
   error,
   required,
+  list,
+  hint,
 }: FieldProps) {
   return (
     <div>
@@ -35,11 +40,17 @@ export function FormField({
         type={type}
         value={value}
         placeholder={placeholder}
+        list={list}
         aria-invalid={Boolean(error)}
-        aria-describedby={error ? `${id}-error` : undefined}
+        aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
         onChange={(e) => onChange(e.target.value)}
         className={error ? 'border-error' : undefined}
       />
+      {hint && !error ? (
+        <p id={`${id}-hint`} className="mt-1 text-xs text-content-secondary">
+          {hint}
+        </p>
+      ) : null}
       {error ? (
         <p id={`${id}-error`} className="mt-1 text-xs text-error" role="alert">
           {error}
@@ -140,5 +151,33 @@ export function AddItemButton({ label, onClick }: { label: string; onClick: () =
     <Button type="button" variant="secondary" size="sm" className="w-full" onClick={onClick}>
       {label}
     </Button>
+  );
+}
+
+/** Suggestions for a free-text field (contract types, CECRL levels…). */
+export function Suggestions({ id, values }: { id: string; values: readonly string[] }) {
+  return (
+    <datalist id={id}>
+      {values.map((v) => (
+        <option key={v} value={v} />
+      ))}
+    </datalist>
+  );
+}
+
+export function CheckboxField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      {label}
+    </label>
   );
 }

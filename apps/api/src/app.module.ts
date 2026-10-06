@@ -10,16 +10,19 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { CvsModule } from './modules/cvs/cvs.module';
+import { TeamsModule } from './modules/teams/teams.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
+import { PlansModule } from './modules/plans/plans.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { AiModule } from './modules/ai/ai.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { MarketplaceModule } from './modules/marketplace/marketplace.module';
 import { HealthModule } from './modules/health/health.module';
-import { GeoModule } from './modules/geo/geo.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
+import { FeatureGateModule } from './common/feature-gate.module';
+import { shouldSkipThrottle } from './common/utils/throttle-skip';
 
 @Module({
   imports: [
@@ -31,25 +34,30 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
         '.env',
       ],
     }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    ThrottlerModule.forRoot({
+      throttlers: [{ ttl: 60_000, limit: 120 }],
+      skipIf: shouldSkipThrottle,
+    }),
     ...(process.env.WORKER_KIND || process.env.NODE_ENV === 'test'
       ? []
       : [ScheduleModule.forRoot()]),
     PrismaModule,
+    FeatureGateModule,
     RedisModule,
     MailModule,
     AuthModule,
     UsersModule,
     CvsModule,
+    TeamsModule,
     TemplatesModule,
     SubscriptionsModule,
+    PlansModule,
     PaymentsModule,
     InvoicesModule,
     AiModule,
     AnalyticsModule,
     MarketplaceModule,
     HealthModule,
-    GeoModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

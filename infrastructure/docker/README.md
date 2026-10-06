@@ -9,11 +9,11 @@ pnpm docker:down
 pnpm docker:app     # optional: also build/run api+web (profile app)
 ```
 
-| File               | Purpose                                      |
-| ------------------ | -------------------------------------------- |
+| File                 | Purpose                                      |
+| -------------------- | -------------------------------------------- |
 | `docker-compose.yml` | Postgres + Redis + Mailpit (+ profile `app`) |
-| `nginx.conf`       | Reverse proxy snippet for compose stacks     |
-| `.env.example`     | Local compose env defaults                   |
+| `nginx.conf`         | Reverse proxy snippet for compose stacks     |
+| `.env.example`       | Local compose env defaults                   |
 
 ## Dockerfiles (single source of truth)
 

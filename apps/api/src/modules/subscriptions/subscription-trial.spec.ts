@@ -88,10 +88,12 @@ function createWorld(user: Partial<UserRow> = {}) {
         }
       ),
     },
-    $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+    $transaction: jest.fn(async (fn: (tx: unknown) => Promise<unknown>): Promise<unknown> => {
       let release: () => void = () => undefined;
       let held = false;
-      const tx = {
+      // The lock's transaction exposes the same models: work under the lock runs on it.
+      const tx: Record<string, unknown> = {
+        ...(prisma as Record<string, unknown>),
         $executeRaw: jest.fn(async () => {
           const previous = lockChain;
           lockChain = new Promise<void>((resolve) => (release = resolve));

@@ -360,7 +360,10 @@ describe('SubscriptionsService.checkout', () => {
     });
     prisma.user.update.mockResolvedValue({});
     prisma.user.updateMany.mockResolvedValue({ count: 1 });
-    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(lockTx));
+    // The lock's transaction exposes the same models: work under the lock runs on it.
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({ ...prisma, $executeRaw: lockTx.$executeRaw })
+    );
     lockTx.$executeRaw.mockResolvedValue(1);
     prisma.subscription.upsert.mockResolvedValue({ id: 'sub-1', userId });
     service = new SubscriptionsService(prisma as never, entitlements as never);

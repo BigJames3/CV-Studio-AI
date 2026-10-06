@@ -118,6 +118,7 @@ describe('SubscriptionsService.applyStripeSubscription', () => {
 describe('SubscriptionsService.applyPaidEntitlement', () => {
   const userId = 'user-1';
   const future = new Date('2027-01-01');
+  const start = new Date('2026-12-01');
   const prisma = {
     plan: { findUnique: jest.fn() },
     subscription: { upsert: jest.fn() },
@@ -152,6 +153,7 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
       userId,
       plan: 'pro',
       provider: 'stripe',
+      periodStart: start,
       periodEnd: future,
       stripeSubscriptionId: 'sub_123',
     });
@@ -169,6 +171,7 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
       userId,
       plan: 'pro',
       provider: 'stripe',
+      periodStart: start,
       periodEnd: future,
       stripeSubscriptionId: 'sub_123',
     });
@@ -177,6 +180,7 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
       userId,
       plan: 'business',
       provider: 'stripe',
+      periodStart: start,
       periodEnd: future,
       stripeSubscriptionId: 'sub_456',
     });
@@ -194,6 +198,7 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
       userId,
       plan: 'pro',
       provider: 'stripe',
+      periodStart: start,
       periodEnd: future,
       stripeSubscriptionId: 'sub_ok_123',
     });
@@ -220,6 +225,7 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
       plan: 'pro',
       provider: 'stripe',
       status,
+      periodStart: start,
       periodEnd: future,
       stripeSubscriptionId: 'sub_123',
     });
@@ -238,6 +244,7 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
         plan: 'business',
         provider: 'stripe',
         status,
+        periodStart: start,
         periodEnd: future,
         stripeSubscriptionId: 'sub_123',
       });
@@ -253,6 +260,7 @@ describe('SubscriptionsService.applyPaidEntitlement', () => {
       userId,
       plan: 'pro',
       provider: 'stripe',
+      periodStart: start,
       periodEnd: future,
       stripeSubscriptionId: 'sub_period_1',
     });
@@ -276,7 +284,13 @@ describe('SubscriptionsService.checkout', () => {
       update: jest.fn(),
       create: jest.fn(),
     },
-    user: { findFirst: jest.fn(), update: jest.fn() },
+    user: { findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+    $transaction: jest.fn(),
+  };
+  const lockTx = { $executeRaw: jest.fn() };
+  /** Every Checkout Session is created with its own idempotency key. */
+  const checkoutKey = {
+    idempotencyKey: expect.stringMatching(/^checkout-session:user-1:[0-9a-f-]{36}$/),
   };
   const entitlements = {};
   let service: SubscriptionsService;
@@ -285,6 +299,9 @@ describe('SubscriptionsService.checkout', () => {
   let listCustomers: jest.Mock;
   let updateCustomer: jest.Mock;
   let retrieveSubscription: jest.Mock;
+  let listSubscriptions: jest.Mock;
+  let listOpenSessions: jest.Mock;
+  let expireOpenSession: jest.Mock;
   const prevPrices = {
     STRIPE_PRICE_PRO_MONTHLY: process.env.STRIPE_PRICE_PRO_MONTHLY,
     STRIPE_PRICE_PRO_YEARLY: process.env.STRIPE_PRICE_PRO_YEARLY,
@@ -342,6 +359,9 @@ describe('SubscriptionsService.checkout', () => {
       return null;
     });
     prisma.user.update.mockResolvedValue({});
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(lockTx));
+    lockTx.$executeRaw.mockResolvedValue(1);
     prisma.subscription.upsert.mockResolvedValue({ id: 'sub-1', userId });
     service = new SubscriptionsService(prisma as never, entitlements as never);
     createCheckoutSession = jest.fn().mockResolvedValue({
@@ -352,10 +372,19 @@ describe('SubscriptionsService.checkout', () => {
     listCustomers = jest.fn().mockResolvedValue({ data: [] });
     updateCustomer = jest.fn().mockResolvedValue({ id: 'cus_old' });
     retrieveSubscription = jest.fn();
+    listSubscriptions = jest.fn().mockResolvedValue({ data: [] });
+    listOpenSessions = jest.fn().mockResolvedValue({ data: [] });
+    expireOpenSession = jest.fn().mockResolvedValue({});
     (service as unknown as { stripe: unknown }).stripe = {
-      checkout: { sessions: { create: createCheckoutSession } },
+      checkout: {
+        sessions: {
+          create: createCheckoutSession,
+          list: listOpenSessions,
+          expire: expireOpenSession,
+        },
+      },
       customers: { create: createCustomer, list: listCustomers, update: updateCustomer },
-      subscriptions: { retrieve: retrieveSubscription },
+      subscriptions: { retrieve: retrieveSubscription, list: listSubscriptions },
     };
   });
 
@@ -427,7 +456,8 @@ describe('SubscriptionsService.checkout', () => {
               trial_days: '14',
             }),
           }),
-        })
+        }),
+        checkoutKey
       );
     });
 
@@ -436,6 +466,7 @@ describe('SubscriptionsService.checkout', () => {
         id: userId,
         email: 'user@example.com',
         subscriptionTier: 'pro',
+        trialUsed: true,
         deletedAt: null,
       });
       prisma.subscription.findUnique.mockResolvedValue({
@@ -522,10 +553,13 @@ describe('SubscriptionsService.checkout', () => {
     it('creates a Stripe customer once and persists stripeCustomerId', async () => {
       await service.checkout(userId, { plan: 'pro', interval: 'month' });
 
-      expect(createCustomer).toHaveBeenCalledWith({
-        email: 'user@example.com',
-        metadata: { userId },
-      });
+      expect(createCustomer).toHaveBeenCalledWith(
+        {
+          email: 'user@example.com',
+          metadata: { userId },
+        },
+        { idempotencyKey: `customer-create:${userId}` }
+      );
       expect(prisma.subscription.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -560,7 +594,8 @@ describe('SubscriptionsService.checkout', () => {
         expect.objectContaining({
           customer: 'cus_existing',
           line_items: [{ price: 'price_pro_year', quantity: 1 }],
-        })
+        }),
+        checkoutKey
       );
     });
 
@@ -580,21 +615,43 @@ describe('SubscriptionsService.checkout', () => {
         })
       );
       expect(createCheckoutSession).toHaveBeenCalledWith(
-        expect.objectContaining({ customer: 'cus_from_sub' })
+        expect.objectContaining({ customer: 'cus_from_sub' }),
+        checkoutKey
       );
     });
 
-    it('reuses an untagged Stripe customer with the same email instead of creating another', async () => {
+    it('never reuses an untagged Stripe customer only because its email matches', async () => {
       listCustomers.mockResolvedValue({
         data: [{ id: 'cus_old', email: 'user@example.com', metadata: {} }],
       });
 
       await service.checkout(userId, { plan: 'pro', interval: 'month' });
 
-      expect(createCustomer).not.toHaveBeenCalled();
-      expect(updateCustomer).toHaveBeenCalledWith('cus_old', { metadata: { userId } });
+      expect(updateCustomer).not.toHaveBeenCalled();
+      expect(createCustomer).toHaveBeenCalledWith(
+        { email: 'user@example.com', metadata: { userId } },
+        { idempotencyKey: `customer-create:${userId}` }
+      );
       expect(createCheckoutSession).toHaveBeenCalledWith(
-        expect.objectContaining({ customer: 'cus_old' })
+        expect.objectContaining({ customer: 'cus_new' }),
+        checkoutKey
+      );
+    });
+
+    it('reuses a Stripe customer tagged with this userId', async () => {
+      listCustomers.mockResolvedValue({
+        data: [
+          { id: 'cus_untagged', metadata: {} },
+          { id: 'cus_mine', metadata: { userId } },
+        ],
+      });
+
+      await service.checkout(userId, { plan: 'pro', interval: 'month' });
+
+      expect(createCustomer).not.toHaveBeenCalled();
+      expect(createCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({ customer: 'cus_mine' }),
+        checkoutKey
       );
     });
 
@@ -607,7 +664,8 @@ describe('SubscriptionsService.checkout', () => {
 
       expect(createCustomer).toHaveBeenCalled();
       expect(createCheckoutSession).toHaveBeenCalledWith(
-        expect.objectContaining({ customer: 'cus_new' })
+        expect.objectContaining({ customer: 'cus_new' }),
+        checkoutKey
       );
     });
   });
@@ -652,7 +710,8 @@ describe('SubscriptionsService.checkout', () => {
         expect.objectContaining({
           success_url: `${origin}/account/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/account/billing?checkout=cancel`,
-        })
+        }),
+        checkoutKey
       );
     });
 
@@ -668,7 +727,8 @@ describe('SubscriptionsService.checkout', () => {
         expect.objectContaining({
           success_url: `${origin}/account/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/account/billing?checkout=cancel`,
-        })
+        }),
+        checkoutKey
       );
     });
 
@@ -684,7 +744,8 @@ describe('SubscriptionsService.checkout', () => {
         expect.objectContaining({
           success_url: `${origin}/account/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/account/billing?checkout=cancel`,
-        })
+        }),
+        checkoutKey
       );
     });
 
@@ -695,7 +756,8 @@ describe('SubscriptionsService.checkout', () => {
         expect.objectContaining({
           success_url: `${origin}/account/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/account/billing?checkout=cancel`,
-        })
+        }),
+        checkoutKey
       );
     });
 
@@ -711,7 +773,8 @@ describe('SubscriptionsService.checkout', () => {
         expect.objectContaining({
           success_url: `${origin}/account/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/account/billing?checkout=cancel`,
-        })
+        }),
+        checkoutKey
       );
     });
   });
@@ -762,7 +825,11 @@ describe('SubscriptionsService.checkout', () => {
           sessions: { create: createCheckoutSession, list: listSessions, expire: expireSession },
         },
         customers: { create: createCustomer, list: listCustomers, update: updateCustomer },
-        subscriptions: { retrieve: retrieveSubscription, update: updateSubscription },
+        subscriptions: {
+          retrieve: retrieveSubscription,
+          update: updateSubscription,
+          list: listSubscriptions,
+        },
       };
     });
 
@@ -777,7 +844,8 @@ describe('SubscriptionsService.checkout', () => {
           items: [{ id: 'si_1', price: 'price_biz_month' }],
           proration_behavior: 'always_invoice',
           payment_behavior: 'pending_if_incomplete',
-        })
+        }),
+        { idempotencyKey: expect.stringMatching(/^subscription-change:sub_live:[0-9a-f-]{36}$/) }
       );
       expect(updateSubscription).toHaveBeenNthCalledWith(
         2,

@@ -6,6 +6,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import Stripe from 'stripe';
 import { PrismaService } from '../../database/prisma.module';
 import { EntitlementsService } from './entitlements.service';
@@ -19,6 +20,8 @@ import {
 } from '../payments/payment-env';
 import { TRIAL_PERIOD_DAYS } from '../plans/plans.service';
 import { appOriginFromEnv, safeReturnUrl } from '../../common/utils/url.utils';
+import { lockUserScope } from '../../common/utils/user-lock';
+import { stripeDate, subscriptionPeriod } from '../payments/stripe-period';
 
 type PaidPlan = 'pro' | 'business';
 type BillingInterval = 'month' | 'year';
@@ -33,6 +36,12 @@ const LIVE_STRIPE_STATUSES = new Set<Stripe.Subscription.Status>([
 ]);
 
 const PLAN_RANK: Record<PaidPlan, number> = { pro: 1, business: 2 };
+
+/**
+ * Checkout holds the user's billing lock while it calls Stripe (customer, trial history, open
+ * sessions, new session): allow for a few API round trips.
+ */
+const CHECKOUT_LOCK_TX_OPTIONS = { maxWait: 15_000, timeout: 30_000 } as const;
 
 /**
  * Stripe replaces {CHECKOUT_SESSION_ID} when it redirects back, so the billing page can ask the
@@ -74,9 +83,16 @@ export class SubscriptionsService {
       include: { plan: true },
     });
     const snap = await this.entitlements.snapshot(userId);
+    const trial = await this.prisma.user.findFirst({
+      where: { id: userId },
+      select: { trialUsed: true, trialEndsAt: true },
+    });
     return {
       subscription: sub,
       tier: snap.tier,
+      // The trial is decided here, never by the client: Checkout re-checks it under a lock.
+      trialEligible: trial ? !trial.trialUsed : false,
+      trialEndsAt: trial?.trialEndsAt ?? null,
       entitlements: snap.entitlements,
       cvCount: snap.cvCount,
       cvLimit: snap.cvLimit,
@@ -114,8 +130,19 @@ export class SubscriptionsService {
     if (!sub) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No subscription' });
 
     if (this.stripe && sub.stripeSubscriptionId) {
-      await this.stripe.subscriptions.update(sub.stripeSubscriptionId, {
+      const updated = await this.stripe.subscriptions.update(sub.stripeSubscriptionId, {
         cancel_at_period_end: true,
+      });
+      // Access continues until the Stripe period end: store Stripe's answer, not a local guess.
+      const period = subscriptionPeriod(updated);
+      return this.prisma.subscription.update({
+        where: { userId },
+        data: {
+          cancelAtPeriodEnd: Boolean(updated.cancel_at_period_end),
+          canceledAt: stripeDate(updated.canceled_at) ?? new Date(),
+          currentPeriodStart: period.start,
+          currentPeriodEnd: period.end,
+        },
       });
     }
 
@@ -249,8 +276,26 @@ export class SubscriptionsService {
       });
     }
 
-    const existingSub = await this.prisma.subscription.findUnique({ where: { userId } });
     const priceId = this.requirePriceId(dto.plan, dto.interval);
+
+    // One checkout at a time per user, across every API instance: concurrent clicks or tabs
+    // cannot each open a session (and each get the trial).
+    return this.prisma.$transaction(async (tx) => {
+      await lockUserScope(tx, userId, 'billing:checkout');
+      return this.checkoutLocked(userId, user.email, dto, priceId, successUrl, cancelUrl);
+    }, CHECKOUT_LOCK_TX_OPTIONS);
+  }
+
+  private async checkoutLocked(
+    userId: string,
+    email: string,
+    dto: CheckoutDto,
+    priceId: string,
+    successUrl: string,
+    cancelUrl: string
+  ) {
+    const stripe = this.stripe!;
+    const existingSub = await this.prisma.subscription.findUnique({ where: { userId } });
 
     // One Stripe subscription per user: a subscriber changes plan in place instead of
     // opening a second Checkout (which would bill both subscriptions).
@@ -259,10 +304,8 @@ export class SubscriptionsService {
       return this.changeStripePlan(userId, liveSub, dto, priceId, successUrl);
     }
 
-    const grantTrial =
-      (user.subscriptionTier ?? 'free') === 'free' && !existingSub?.stripeSubscriptionId;
-
-    const stripeCustomerId = await this.ensureStripeCustomerId(userId, user.email, existingSub);
+    const stripeCustomerId = await this.ensureStripeCustomerId(userId, email, existingSub);
+    const grantTrial = await this.isTrialEligible(userId, stripeCustomerId);
     await this.expireOpenCheckoutSessions(stripeCustomerId, userId);
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
@@ -273,17 +316,27 @@ export class SubscriptionsService {
       customer: stripeCustomerId,
       metadata: { userId, plan: dto.plan, interval: dto.interval },
       line_items: [{ price: priceId, quantity: 1 }],
+      payment_method_collection: 'always',
       subscription_data: {
         metadata: {
           userId,
           plan: dto.plan,
           ...(grantTrial ? { trial_days: String(TRIAL_PERIOD_DAYS) } : {}),
         },
-        ...(grantTrial ? { trial_period_days: TRIAL_PERIOD_DAYS } : {}),
+        ...(grantTrial
+          ? {
+              trial_period_days: TRIAL_PERIOD_DAYS,
+              trial_settings: { end_behavior: { missing_payment_method: 'cancel' as const } },
+            }
+          : {}),
       },
     };
 
-    const session = await this.stripe.checkout.sessions.create(sessionParams);
+    // A fresh key per checkout: it makes the SDK's network retries safe without ever replaying
+    // an older session for a later, different request.
+    const session = await stripe.checkout.sessions.create(sessionParams, {
+      idempotencyKey: `checkout-session:${userId}:${randomUUID()}`,
+    });
     if (!session.url) {
       throw new BadRequestException({
         code: 'CHECKOUT_FAILED',
@@ -306,20 +359,23 @@ export class SubscriptionsService {
     provider: 'stripe';
     status?: string;
     periodEnd: Date;
-    periodStart?: Date;
+    periodStart: Date;
     stripeSubscriptionId?: string;
     stripeCustomerId?: string;
     cancelAtPeriodEnd?: boolean;
+    /** Stripe's `canceled_at`; only when Stripe has none is the sync time used. */
+    canceledAt?: Date | null;
   }) {
-    // Stripe status → local status. `incomplete` (first payment not done) and `paused` grant
-    // no access; anything unknown fails closed instead of defaulting to `active`.
+    // Stripe status → local status (access rules: see resolveEffectiveTier). `unpaid` (retries
+    // exhausted), `incomplete` (first payment not done) and `paused` grant no access; anything
+    // unknown fails closed instead of defaulting to `active`.
     const statusMap: Record<string, 'active' | 'canceled' | 'past_due' | 'trialing' | 'suspended'> =
       {
         active: 'active',
         trialing: 'trialing',
         past_due: 'past_due',
         canceled: 'canceled',
-        unpaid: 'past_due',
+        unpaid: 'suspended',
         incomplete: 'suspended',
         paused: 'suspended',
         incomplete_expired: 'canceled',
@@ -329,7 +385,8 @@ export class SubscriptionsService {
     const isCanceled = mappedStatus === 'canceled';
     const grantsAccess = !isCanceled && mappedStatus !== 'suspended';
     const cancelAtPeriodEnd = Boolean(params.cancelAtPeriodEnd) && !isCanceled;
-    const periodStart = params.periodStart ?? new Date();
+    const periodStart = params.periodStart;
+    const canceledAt = isCanceled || cancelAtPeriodEnd ? (params.canceledAt ?? new Date()) : null;
     const tier =
       !grantsAccess || params.plan.toLowerCase() === 'free'
         ? 'free'
@@ -374,7 +431,7 @@ export class SubscriptionsService {
         currentPeriodEnd: params.periodEnd,
         lastPaymentError: null,
         cancelAtPeriodEnd,
-        canceledAt: isCanceled || cancelAtPeriodEnd ? new Date() : null,
+        canceledAt,
         ...providerIds,
       } as never,
       update: {
@@ -385,7 +442,7 @@ export class SubscriptionsService {
         currentPeriodEnd: params.periodEnd,
         lastPaymentError: null,
         cancelAtPeriodEnd,
-        canceledAt: isCanceled || cancelAtPeriodEnd ? new Date() : null,
+        canceledAt,
         ...providerIds,
       } as never,
     });
@@ -502,12 +559,17 @@ export class SubscriptionsService {
     const from = this.planFromPriceId(item.price?.id);
     const upgrade = !from || isUpgrade(from, { plan: dto.plan, interval: dto.interval });
     const trialing = current.status === 'trialing';
-    const updated = await stripe.subscriptions.update(current.id, {
-      items: [{ id: item.id, price: priceId }],
-      proration_behavior: trialing ? 'none' : upgrade ? 'always_invoice' : 'create_prorations',
-      ...(upgrade && !trialing ? { payment_behavior: 'pending_if_incomplete' as const } : {}),
-      expand: ['latest_invoice'],
-    });
+    // A trialing subscription keeps its current trial end: a plan change never starts a new trial.
+    const updated = await stripe.subscriptions.update(
+      current.id,
+      {
+        items: [{ id: item.id, price: priceId }],
+        proration_behavior: trialing ? 'none' : upgrade ? 'always_invoice' : 'create_prorations',
+        ...(upgrade && !trialing ? { payment_behavior: 'pending_if_incomplete' as const } : {}),
+        expand: ['latest_invoice'],
+      },
+      { idempotencyKey: `subscription-change:${current.id}:${randomUUID()}` }
+    );
 
     if (updated.pending_update) {
       // Payment needs the customer (3-D Secure, declined card): Stripe keeps the old plan
@@ -533,17 +595,87 @@ export class SubscriptionsService {
   }
 
   private async syncStripeSubscription(userId: string, plan: PaidPlan, sub: Stripe.Subscription) {
+    const period = subscriptionPeriod(sub);
     await this.applyPaidEntitlement({
       userId,
       plan,
       provider: 'stripe',
       status: sub.status,
-      periodStart: new Date(sub.current_period_start * 1000),
-      periodEnd: new Date(sub.current_period_end * 1000),
+      periodStart: period.start,
+      periodEnd: period.end,
       stripeSubscriptionId: sub.id,
       stripeCustomerId: expandableStripeId(sub.customer),
       cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end),
+      canceledAt: stripeDate(sub.canceled_at),
     });
+  }
+
+  /**
+   * Whether this Checkout may carry the 14-day trial. `users.trial_used` is the record; for
+   * accounts that predate it, Stripe's own history of this customer is checked too. Runs under
+   * the user's checkout lock, so two requests cannot both see the trial as available.
+   */
+  private async isTrialEligible(userId: string, stripeCustomerId: string): Promise<boolean> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId },
+      select: { trialUsed: true },
+    });
+    if (!user || user.trialUsed) return false;
+
+    const past = await this.stripe!.subscriptions.list({
+      customer: stripeCustomerId,
+      status: 'all',
+      limit: 100,
+    });
+    const earlierTrial = past.data.find((sub) => sub.trial_start);
+    if (earlierTrial) {
+      await this.recordTrial(userId, earlierTrial);
+      return false;
+    }
+    return true;
+  }
+
+  /** Marks the account's one trial as used by `sub`. `false` if it was already used. */
+  private async recordTrial(userId: string, sub: Stripe.Subscription): Promise<boolean> {
+    const { count } = await this.prisma.user.updateMany({
+      where: { id: userId, trialUsed: false },
+      data: {
+        trialUsed: true,
+        trialStartedAt: stripeDate(sub.trial_start),
+        trialEndsAt: stripeDate(sub.trial_end),
+        trialStripeSubscriptionId: sub.id,
+      },
+    });
+    return count === 1;
+  }
+
+  /**
+   * Called for every subscription Stripe reports for this user, before it is synced. Records the
+   * trial the subscription consumes; a trial the account is no longer entitled to (an older
+   * Checkout session, legacy data) is ended at once, so Stripe bills the subscription now.
+   */
+  async enforceSingleTrial(userId: string, sub: Stripe.Subscription): Promise<Stripe.Subscription> {
+    if (!sub.trial_start) return sub;
+    if (await this.recordTrial(userId, sub)) return sub;
+    if (sub.status !== 'trialing') return sub;
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId },
+      select: { trialStripeSubscriptionId: true },
+    });
+    if (user?.trialStripeSubscriptionId === sub.id) return sub;
+
+    if (!this.stripe) {
+      throw new Error(`Stripe is not configured: cannot end second trial on ${sub.id}`);
+    }
+    this.logger.warn(
+      `Ending trial of Stripe subscription ${sub.id}: user ${userId} already used the trial`
+    );
+    return this.stripe.subscriptions.update(
+      sub.id,
+      { trial_end: 'now', proration_behavior: 'none' },
+      { idempotencyKey: `trial-end:${sub.id}` }
+    );
   }
 
   private planFromPriceId(
@@ -564,7 +696,7 @@ export class SubscriptionsService {
       const open = await this.stripe!.checkout.sessions.list({
         customer: customerId,
         status: 'open',
-        limit: 10,
+        limit: 100,
       });
       await Promise.all(
         open.data
@@ -572,10 +704,15 @@ export class SubscriptionsService {
           .map((session) => this.stripe!.checkout.sessions.expire(session.id))
       );
     } catch (error) {
-      this.logger.warn(
+      this.logger.error(
         `Could not expire open Checkout sessions for user ${userId}`,
         error instanceof Error ? error.stack : error
       );
+      // A session left open could still start a second subscription (and trial): fail closed.
+      throw new ServiceUnavailableException({
+        code: 'STRIPE_UNAVAILABLE',
+        message: 'Checkout is temporarily unavailable. Please try again later.',
+      });
     }
   }
 
@@ -603,8 +740,9 @@ export class SubscriptionsService {
   }
 
   /**
-   * Reuse the persisted Stripe customer, recover it from an existing Stripe
-   * subscription, or create one. Never pass customer_email (that mints duplicates).
+   * Reuse the persisted Stripe customer, recover it from an existing Stripe subscription or
+   * from a customer tagged with this userId, or create one. Never pass customer_email (that
+   * mints duplicates).
    */
   private async ensureStripeCustomerId(
     userId: string,
@@ -632,22 +770,20 @@ export class SubscriptionsService {
       }
     }
 
-    const listed = await stripe.customers.list({ email, limit: 10 });
+    // Only a customer tagged with this userId is ours. A matching email alone proves nothing
+    // (customer created by hand, by another app, or for a previous owner of the address).
+    const listed = await stripe.customers.list({ email, limit: 100 });
     const owned = listed.data.find((c) => c.metadata?.userId === userId);
-    const untagged = listed.data.find((c) => !c.metadata?.userId);
-    const reused = owned ?? untagged;
-    if (reused) {
-      if (!reused.metadata?.userId) {
-        await stripe.customers.update(reused.id, { metadata: { userId } });
-      }
-      await this.persistStripeCustomerId(userId, reused.id, existing);
-      return reused.id;
+    if (owned) {
+      await this.persistStripeCustomerId(userId, owned.id, existing);
+      return owned.id;
     }
 
-    const customer = await stripe.customers.create({
-      email,
-      metadata: { userId },
-    });
+    // One customer per user, even if the call is retried after a network error.
+    const customer = await stripe.customers.create(
+      { email, metadata: { userId } },
+      { idempotencyKey: `customer-create:${userId}` }
+    );
     await this.persistStripeCustomerId(userId, customer.id, existing);
     return customer.id;
   }

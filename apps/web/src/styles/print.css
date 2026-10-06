@@ -36,6 +36,17 @@
     display: none !important;
   }
 
+  /* Free plan: print only the upgrade notice (see EditorShell `data-print-locked`) */
+  .editor-shell[data-print-locked] > *:not(.cv-print-locked-notice) {
+    display: none !important;
+  }
+
+  .editor-shell[data-print-locked] > .cv-print-locked-notice {
+    display: block !important;
+    margin: 2rem !important;
+    font-size: 14pt;
+  }
+
   html,
   body {
     margin: 0 !important;
@@ -108,6 +119,7 @@
   }
 
   .cv-print-root[data-paper='Letter'] [data-cv-preview] {
+    --cv-paper-height: 11in !important;
     width: 8.5in !important;
     min-height: 11in !important;
   }
@@ -130,6 +142,7 @@
 
 /* Screen-only paper size for letter preview */
 .cv-print-root[data-paper='Letter'] [data-cv-preview] {
+  --cv-paper-height: 11in !important;
   width: 8.5in !important;
   min-height: 11in !important;
 }

@@ -13,6 +13,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useQuery } from '@tanstack/react-query';
+import { queryKeys, subscriptionsApi } from '@/lib/api';
 
 const featureNames: Record<string, { title: string; description: string }> = {
   'cv:create': {
@@ -43,10 +45,6 @@ const featureNames: Record<string, { title: string; description: string }> = {
     title: '✨ Génération IA',
     description: 'La génération de contenu IA est réservée aux utilisateurs Premium.',
   },
-  'marketplace:buy': {
-    title: 'Marketplace Pro',
-    description: 'L’achat de templates créateurs est réservé aux plans Pro et Business.',
-  },
 };
 
 const PREMIUM_BENEFITS = [
@@ -55,7 +53,6 @@ const PREMIUM_BENEFITS = [
   'Optimisation IA du contenu',
   'Templates premium exclusifs',
   'Partage public avec lien et QR code',
-  '14 jours gratuits',
 ] as const;
 
 export type PaywallModalProps = {
@@ -74,6 +71,15 @@ export function PaywallModal({
   cvLimit = 1,
 }: PaywallModalProps) {
   const router = useRouter();
+  // The trial is offered once per account: only advertise it when the server says it is left.
+  // The modal is mounted on every app page: fetch only once it opens (shared, cached query).
+  const { data: subscription } = useQuery({
+    queryKey: queryKeys.subscription,
+    queryFn: () => subscriptionsApi.me(),
+    enabled: isOpen,
+  });
+  const trialEligible = subscription?.trialEligible === true;
+  const benefits = trialEligible ? [...PREMIUM_BENEFITS, '14 jours gratuits'] : PREMIUM_BENEFITS;
   const copy = featureNames[feature] ?? {
     title: '🔒 Fonctionnalité Premium',
     description: 'Cette fonctionnalité est réservée aux utilisateurs Premium.',
@@ -130,7 +136,7 @@ export function PaywallModal({
             Inclus avec Premium
           </p>
           <ul className="space-y-1.5 text-sm text-content-secondary dark:text-neutral-300">
-            {PREMIUM_BENEFITS.map((benefit) => (
+            {benefits.map((benefit) => (
               <li key={benefit} className="flex items-start gap-2">
                 <span className="mt-0.5 text-purple-600 dark:text-purple-400" aria-hidden>
                   ✓
@@ -159,9 +165,11 @@ export function PaywallModal({
           </Button>
         </DialogFooter>
 
-        <p className="text-center text-xs text-content-muted dark:text-neutral-500">
-          Premiers 14 jours gratuits
-        </p>
+        {trialEligible ? (
+          <p className="text-center text-xs text-content-muted dark:text-neutral-500">
+            Premiers 14 jours gratuits
+          </p>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

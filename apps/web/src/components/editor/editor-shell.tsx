@@ -4,13 +4,17 @@ import { useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useEditorStore, emptyContent, type SectionId } from '@/stores/editor-store';
 import { useAutosave, useDebouncedValue } from '@/hooks';
+import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { TemplateWrapper } from '@/components/templates/TemplateWrapper';
 import { ExportPDFButton } from '@/components/cv-editor/ExportPDFButton';
 import { AtsPanel } from '@/components/editor/ats-panel';
+import { TeamShareSelect } from '@/components/team/team-share-select';
+import type { CvAccess } from '@/lib/api';
 import type { TemplateKey } from '@/lib/templates/types';
-import { TEMPLATE_DESIGN_DATA } from '@/lib/templates/catalog';
+import { TEMPLATE_CATALOG, TEMPLATE_DESIGN_DATA, templateKeyOf } from '@/lib/templates/catalog';
+import { templateAccessType } from '@cvstudio/shared-utils';
 import { SAMPLE_CV } from '@/lib/templates/sample-cv';
 import {
   CertificatesForm,
@@ -23,19 +27,19 @@ import {
   SkillsForm,
   SummaryForm,
 } from '@/components/editor/section-forms';
+import { ActivitiesForm, MoreInfoForm } from '@/components/editor/extra-section-forms';
+import { EDITOR_SECTIONS } from '@/components/editor/editor-sections';
 import '@/styles/print.css';
 
-const SECTIONS: { id: SectionId; label: string; short: string }[] = [
-  { id: 'identity', label: 'Profil', short: 'Pro' },
-  { id: 'summary', label: 'Résumé', short: 'Rés' },
-  { id: 'experience', label: 'Expérience', short: 'Exp' },
-  { id: 'education', label: 'Formation', short: 'For' },
-  { id: 'skills', label: 'Skills', short: 'Ski' },
-  { id: 'languages', label: 'Langues', short: 'Lan' },
-  { id: 'projects', label: 'Projets', short: 'Prj' },
-  { id: 'certificates', label: 'Certificats', short: 'Cer' },
-  { id: 'references', label: 'Références', short: 'Réf' },
-];
+/** Access tier per editor key, e.g. `executive` → `pro`. */
+const TEMPLATE_ACCESS = new Map(
+  TEMPLATE_CATALOG.map((t) => [templateKeyOf(t), t.accessTier ?? templateAccessType(t.isPremium)])
+);
+
+/** Display name per editor key, e.g. `sidebar` → « Sidebar sombre ». */
+const TEMPLATE_NAMES = new Map(TEMPLATE_CATALOG.map((t) => [templateKeyOf(t), t.name]));
+
+const SECTIONS = EDITOR_SECTIONS;
 
 function ActiveSectionForm({ section }: { section: SectionId }) {
   switch (section) {
@@ -57,12 +61,25 @@ function ActiveSectionForm({ section }: { section: SectionId }) {
       return <CertificatesForm />;
     case 'references':
       return <ReferencesForm />;
+    case 'activities':
+      return <ActivitiesForm />;
+    case 'more':
+      return <MoreInfoForm />;
     default:
       return null;
   }
 }
 
-export function EditorShell({ resumeId }: { resumeId: string }) {
+export function EditorShell({
+  resumeId,
+  access = 'owner',
+  teamId = null,
+}: {
+  resumeId: string;
+  /** `editor`: a team member editing someone else's CV (no export, no sharing). */
+  access?: CvAccess;
+  teamId?: string | null;
+}) {
   const searchParams = useSearchParams();
   const {
     content,
@@ -80,6 +97,17 @@ export function EditorShell({ resumeId }: { resumeId: string }) {
     setTemplateKey,
     patchCustomization,
   } = useEditorStore();
+  const { canUseTemplateType, canPrint, showUpgrade } = useFeatureGate();
+
+  const isLocked = (k: TemplateKey) => !canUseTemplateType(TEMPLATE_ACCESS.get(k) ?? 'free');
+  const selectTemplate = (k: TemplateKey) => {
+    // Same rule as the API (templates:pro): premium templates need a paid plan.
+    if (k !== templateKey && isLocked(k)) {
+      showUpgrade('templates:pro');
+      return;
+    }
+    setTemplateKey(k);
+  };
 
   useEffect(() => {
     if (!resumeId.startsWith('local-')) return;
@@ -132,9 +160,21 @@ export function EditorShell({ resumeId }: { resumeId: string }) {
 
   useAutosave(resumeId);
   const previewContent = useDebouncedValue(content, 150);
+  // Ctrl+P bypasses the print button: print.css swaps the page for this notice instead.
+  const printLocked = !canPrint && !resumeId.startsWith('local-');
 
   return (
-    <div className="editor-shell flex h-[calc(100dvh-3.5rem)] flex-col" data-testid="cv-editor">
+    <div
+      className="editor-shell flex h-[calc(100dvh-3.5rem)] flex-col"
+      data-testid="cv-editor"
+      data-print-locked={printLocked ? 'true' : undefined}
+    >
+      {printLocked ? (
+        <p className="cv-print-locked-notice hidden" data-testid="print-locked-notice">
+          L’impression est réservée aux plans Pro et Business. Passez à Pro depuis CV Studio AI pour
+          imprimer ou télécharger votre CV.
+        </p>
+      ) : null}
       <div className="flex items-center justify-between border-b border-border bg-surface-card px-3 py-2">
         <div className="flex items-center gap-3">
           <div className="text-sm text-content-secondary" aria-live="polite">
@@ -148,15 +188,29 @@ export function EditorShell({ resumeId }: { resumeId: string }) {
             <select
               className="rounded-md border border-border bg-surface-card px-2 py-1 text-sm"
               value={templateKey}
-              onChange={(e) => setTemplateKey(e.target.value as TemplateKey)}
+              onChange={(e) => selectTemplate(e.target.value as TemplateKey)}
+              data-testid="editor-template-select"
             >
               {(Object.keys(TEMPLATE_DESIGN_DATA) as TemplateKey[]).map((k) => (
                 <option key={k} value={k}>
-                  {k}
+                  {isLocked(k)
+                    ? `${TEMPLATE_NAMES.get(k) ?? k} (Pro)`
+                    : (TEMPLATE_NAMES.get(k) ?? k)}
                 </option>
               ))}
             </select>
           </label>
+          {access === 'owner' && !resumeId.startsWith('local-') ? (
+            <TeamShareSelect cvId={resumeId} teamId={teamId} />
+          ) : null}
+          {access === 'editor' ? (
+            <span
+              className="rounded-full bg-secondary-subtle px-2 py-0.5 text-xs text-secondary"
+              data-testid="team-editing-badge"
+            >
+              CV de l’équipe
+            </span>
+          ) : null}
         </div>
         <div className="flex gap-2">
           <Button
@@ -182,12 +236,14 @@ export function EditorShell({ resumeId }: { resumeId: string }) {
           >
             ATS
           </Button>
-          <ExportPDFButton
-            cvId={resumeId}
-            content={content}
-            templateKey={templateKey}
-            cvName={content.identity.fullName || 'CV'}
-          />
+          {access === 'owner' ? (
+            <ExportPDFButton
+              cvId={resumeId}
+              content={content}
+              templateKey={templateKey}
+              cvName={content.identity.fullName || 'CV'}
+            />
+          ) : null}
         </div>
       </div>
 

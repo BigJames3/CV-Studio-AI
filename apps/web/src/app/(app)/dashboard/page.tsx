@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { useCreateCv, useMe, useUserPlan, useFeatureGate } from '@/hooks';
 import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 import { useCvMutations } from '@/hooks/useCvMutations';
+import { SharedCvsSection } from '@/components/team/shared-cvs-section';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -188,6 +189,11 @@ export default function DashboardPage() {
                         ✓ Publié
                       </span>
                     ) : null}
+                    {cv.teamId ? (
+                      <span className="rounded-full bg-secondary-subtle px-2 py-0.5 text-xs font-medium text-secondary">
+                        Équipe
+                      </span>
+                    ) : null}
                     <Button
                       size="sm"
                       variant="ghost"
@@ -301,6 +307,8 @@ export default function DashboardPage() {
           )}
         </>
       ) : null}
+
+      <SharedCvsSection />
     </div>
   );
 }

@@ -5,10 +5,13 @@ import { getCvLimit } from '@cvstudio/shared-utils';
 import { PrismaService } from '../../database/prisma.module';
 import { RedisService } from '../../redis/redis.module';
 import { isNonPlaceholderSecret } from '../payments/payment-env';
+import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 
 export const PLAN_CACHE_KEY = 'plans:all';
 export const PLAN_CACHE_TTL_SECONDS = 3600;
 export const TRIAL_PERIOD_DAYS = 14;
+/** Free users get every non-premium official template: derived, so the catalog cannot drift. */
+export const FREE_TEMPLATE_COUNT = TEMPLATE_SEEDS.filter((t) => !t.isPremium).length;
 
 export type PlanSlug = 'free' | 'pro' | 'business';
 export type PlanEntitlementDto = BillingCatalogEntitlement;
@@ -43,19 +46,19 @@ type PlanRow = {
 export const CATALOG_FALLBACK_ROWS: PlanRow[] = [
   {
     name: 'Free',
-    description: '1 CV, 5 templates, no PDF export, no AI',
+    description: '1 CV, 10 templates, ATS score, no PDF export, no AI optimization',
     priceMonthly: 0,
     priceYearly: 0,
     cvLimit: 1,
     aiFeatures: false,
     prioritySupport: false,
     customDomain: false,
-    marketplaceAccess: false,
+    marketplaceAccess: true,
     apiAccess: false,
   },
   {
     name: 'Pro',
-    description: '5 CVs, 50+ templates, all AI features, ATS, portfolio',
+    description: '5 CVs, unlimited templates, AI optimization, ATS check',
     priceMonthly: 9.99,
     priceYearly: 99,
     cvLimit: 5,
@@ -116,9 +119,11 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
     { feature: 'downloadPdf', value: String(id !== 'free'), included: id !== 'free' },
     { feature: 'share', value: String(id !== 'free'), included: id !== 'free' },
     { feature: 'aiFeatures', value: String(plan.aiFeatures), included: plan.aiFeatures },
+    // Same rule as the 'ai:ats' entitlement: the ATS score is free on every plan.
+    { feature: 'atsCheck', value: 'true', included: true },
     {
       feature: 'templates',
-      value: id === 'free' ? '5' : 'unlimited',
+      value: id === 'free' ? String(FREE_TEMPLATE_COUNT) : 'unlimited',
       included: true,
     },
     {
@@ -126,11 +131,8 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
       value: String(plan.prioritySupport),
       included: plan.prioritySupport,
     },
-    {
-      feature: 'marketplaceAccess',
-      value: String(plan.marketplaceAccess),
-      included: plan.marketplaceAccess,
-    },
+    // Marketplace licences are one-off purchases open to every plan (`marketplace:buy`).
+    { feature: 'marketplaceAccess', value: 'true', included: true },
   ];
 
   return {

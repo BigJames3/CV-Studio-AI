@@ -1,5 +1,14 @@
 import type { TemplateProps } from './shared';
 import {
+  ExperienceExtras,
+  MoreSections,
+  educationExtras,
+  experienceMeta,
+  joinParts,
+  languageDetail,
+  themeFrom,
+} from './blocks';
+import {
   Photo,
   SectionTitle,
   CertificatesSection,
@@ -27,6 +36,7 @@ export function ModernTemplate({ data, customization: c }: TemplateProps) {
       }}
     >
       <aside
+        data-cv-flow=""
         style={{
           background: '#f8fafc',
           padding: '2rem 1.25rem',
@@ -73,7 +83,7 @@ export function ModernTemplate({ data, customization: c }: TemplateProps) {
               {data.languages.map((l) => (
                 <li key={l.id} style={{ fontSize: '0.8rem', marginBottom: 6 }}>
                   {l.name}
-                  {l.level ? ` — ${l.level}` : ''}
+                  {languageDetail(l) ? ` — ${languageDetail(l)}` : ''}
                 </li>
               ))}
             </ul>
@@ -85,7 +95,7 @@ export function ModernTemplate({ data, customization: c }: TemplateProps) {
         ) : null}
       </aside>
 
-      <main style={{ padding: '2rem 1.75rem' }}>
+      <main data-cv-flow="" style={{ padding: '2rem 1.75rem' }}>
         <h1 style={{ margin: 0, fontFamily: c.headerFont, fontSize: '1.75rem', fontWeight: 700 }}>
           {identity.fullName || 'Your Name'}
         </h1>
@@ -118,13 +128,21 @@ export function ModernTemplate({ data, customization: c }: TemplateProps) {
                   </span>
                 </div>
                 <p style={{ margin: '2px 0 6px', fontSize: '0.8rem', color: c.primaryColor }}>
-                  {exp.company}
+                  {joinParts([exp.company, experienceMeta(exp)])}
                 </p>
-                <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.8rem' }}>
+                <ul
+                  style={{
+                    margin: 0,
+                    paddingLeft: '1.1rem',
+                    fontSize: '0.8rem',
+                    listStyle: 'disc',
+                  }}
+                >
                   {exp.bullets.map((b, i) => (
                     <li key={i}>{b}</li>
                   ))}
                 </ul>
+                <ExperienceExtras exp={exp} muted="#6b7280" />
               </div>
             ))}
           </section>
@@ -145,10 +163,16 @@ export function ModernTemplate({ data, customization: c }: TemplateProps) {
                 <p style={{ margin: '2px 0', fontSize: '0.8rem' }}>
                   {[ed.degree, ed.field].filter(Boolean).join(' · ')}
                 </p>
+                {educationExtras(ed) ? (
+                  <p style={{ margin: '2px 0', fontSize: '0.75rem', color: '#6b7280' }}>
+                    {educationExtras(ed)}
+                  </p>
+                ) : null}
               </div>
             ))}
           </section>
         ) : null}
+        <MoreSections data={data} c={c} theme={themeFrom(c, 'rule')} />
       </main>
     </div>
   );

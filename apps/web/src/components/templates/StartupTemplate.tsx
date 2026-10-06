@@ -1,4 +1,15 @@
 import type { TemplateProps } from './shared';
+import {
+  ExperienceExtras,
+  MoreSections,
+  certMeta,
+  formatPeriod,
+  locationOf,
+  educationExtras,
+  experienceMeta,
+  joinParts,
+  themeFrom,
+} from './blocks';
 import { densityStyle, formatRange } from './shared';
 
 /** Asymétrique, Poppins, accents néon — achievements first */
@@ -7,6 +18,7 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
 
   return (
     <div
+      data-cv-flow=""
       style={{
         ...densityStyle(c.density),
         background: c.backgroundColor,
@@ -19,7 +31,7 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
         gap: '1.25rem',
       }}
     >
-      <div>
+      <div data-cv-flow="body">
         <div
           style={{
             display: 'inline-block',
@@ -52,7 +64,7 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
           </p>
         ) : null}
         <p style={{ margin: '0.5rem 0 0', fontSize: '0.75rem', color: '#64748b' }}>
-          {[identity.email, identity.city, identity.website].filter(Boolean).join('  ·  ')}
+          {[identity.email, locationOf(identity), identity.website].filter(Boolean).join('  ·  ')}
         </p>
 
         {c.showSummary && summary.text ? (
@@ -84,11 +96,16 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
                   borderRadius: 12,
                   border: `1px solid ${c.primaryColor}22`,
                   background: '#fff',
+                  breakInside: 'avoid',
                 }}
               >
                 <strong style={{ fontFamily: c.headerFont }}>{exp.title}</strong>
                 <p style={{ margin: '2px 0 8px', fontSize: '0.75rem', color: '#64748b' }}>
-                  {exp.company} · {formatRange(exp.start, exp.end, exp.current)}
+                  {joinParts([
+                    exp.company,
+                    experienceMeta(exp),
+                    formatRange(exp.start, exp.end, exp.current),
+                  ])}
                 </p>
                 <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.8rem' }}>
                   {exp.bullets.slice(0, 2).map((b, i) => (
@@ -98,6 +115,7 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
                     </li>
                   ))}
                 </ul>
+                <ExperienceExtras exp={exp} muted="#64748b" />
               </div>
             ))}
           </section>
@@ -126,6 +144,7 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
                   borderRadius: 12,
                   border: `1px solid ${c.accentColor}55`,
                   background: '#fff',
+                  breakInside: 'avoid',
                 }}
               >
                 <strong style={{ fontFamily: c.headerFont }}>{p.name}</strong>
@@ -134,16 +153,28 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
                     {p.url.replace(/^https?:\/\//, '')}
                   </p>
                 ) : null}
+                {p.role || p.start || p.current ? (
+                  <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: '#64748b' }}>
+                    {joinParts([p.role, formatPeriod(p.start, p.end, p.current)])}
+                  </p>
+                ) : null}
                 {p.description ? (
                   <p style={{ margin: '4px 0 0', fontSize: '0.8rem' }}>{p.description}</p>
+                ) : null}
+                {p.technologies?.trim() ? (
+                  <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: '#64748b' }}>
+                    Technologies : {p.technologies.trim()}
+                  </p>
                 ) : null}
               </div>
             ))}
           </section>
         ) : null}
+        <MoreSections data={data} c={c} theme={themeFrom(c, 'caps')} />
       </div>
 
       <aside
+        data-cv-flow=""
         style={{
           background: c.primaryColor,
           color: '#f8fafc',
@@ -202,6 +233,9 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
                 <p style={{ margin: '2px 0', opacity: 0.85 }}>
                   {[ed.degree, ed.field].filter(Boolean).join(' · ')}
                 </p>
+                {educationExtras(ed) ? (
+                  <p style={{ margin: '2px 0', opacity: 0.75 }}>{educationExtras(ed)}</p>
+                ) : null}
               </div>
             ))}
           </section>
@@ -224,9 +258,7 @@ export function StartupTemplate({ data, customization: c }: TemplateProps) {
               {certificates.map((cert) => (
                 <li key={cert.id} style={{ fontSize: '0.8rem', marginBottom: 10, opacity: 0.95 }}>
                   <strong>{cert.name}</strong>
-                  <p style={{ margin: '2px 0', opacity: 0.8 }}>
-                    {[cert.issuer, cert.year].filter(Boolean).join(' · ')}
-                  </p>
+                  <p style={{ margin: '2px 0', opacity: 0.8 }}>{certMeta(cert)}</p>
                 </li>
               ))}
             </ul>

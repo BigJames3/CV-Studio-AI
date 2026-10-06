@@ -1,4 +1,5 @@
 import { createPageMetadata } from '@/lib/seo';
+import { TrackView } from './track-view';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
 
@@ -67,6 +68,7 @@ export default async function PublicCvPage({ params }: { params: { slug: string 
 
   return (
     <main id="main" className="mx-auto max-w-3xl px-4 py-12">
+      <TrackView slug={params.slug} />
       <header className="border-b border-border pb-6">
         <p className="text-sm text-content-muted">CV Studio AI · partage public</p>
         <h1 className="mt-2 text-3xl font-semibold">{identity.fullName || cv.title}</h1>

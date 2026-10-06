@@ -8,7 +8,11 @@ import { Button } from '@/components/ui/button';
 import { InvoiceHistory } from '@/components/billing/invoice-history';
 import { BillingPlansSkeleton, PlanGrid } from '@/components/billing/plan-grid';
 import { queryKeys, subscriptionsApi, paymentsApi, plansApi, invoicesApi } from '@/lib/api';
-import { FALLBACK_PLANS } from '@/lib/billing/plans-catalog';
+import { FALLBACK_PLANS, SUPPORT_BUSINESS_MAILTO } from '@/lib/billing/plans-catalog';
+import {
+  billingPortalErrorMessage,
+  checkoutErrorMessage,
+} from '@/lib/billing/checkout-error-message';
 import { useMe, useSubscription, useUserPlan } from '@/hooks';
 import { cn } from '@/lib/utils';
 import { track } from '@/lib/analytics';
@@ -75,6 +79,7 @@ function BillingPageContent() {
   const { tier } = useUserPlan();
 
   const checkoutState = parseCheckoutState(params.get('checkout'));
+  const checkoutSessionId = params.get('session_id');
 
   const [polledTier, setPolledTier] = useState<'free' | 'pro' | 'business' | null>(null);
   const [isPollingActivation, setIsPollingActivation] = useState(false);
@@ -84,6 +89,8 @@ function BillingPageContent() {
   const [cancelConfirm, setCancelConfirm] = useState(false);
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [portalPending, setPortalPending] = useState(false);
+  const [portalError, setPortalError] = useState<string | null>(null);
   const [billingPeriod, setBillingPeriod] = useState<'month' | 'year'>('month');
 
   const {
@@ -155,6 +162,14 @@ function BillingPageContent() {
     const poll = async () => {
       if (cancelled) return;
       try {
+        // Ask the API to confirm the session with Stripe first, so activation does not depend on
+        // the webhook alone. On failure, polling still waits for the webhook.
+        if (attempts === 0 && checkoutSessionId) {
+          await paymentsApi.confirmCheckout(checkoutSessionId).catch((error: unknown) => {
+            console.warn('Checkout confirmation failed:', error);
+          });
+          if (cancelled) return;
+        }
         const result = await subscriptionsApi.me();
         if (cancelled) return;
         if (result.tier && result.tier !== 'free') {
@@ -189,7 +204,7 @@ function BillingPageContent() {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [checkoutState, queryClient, tier]);
+  }, [checkoutSessionId, checkoutState, queryClient, tier]);
 
   async function checkout(plan: 'pro' | 'business', interval: 'month' | 'year') {
     setCheckoutPending(plan);
@@ -198,10 +213,22 @@ function BillingPageContent() {
     try {
       const { url } = await subscriptionsApi.checkout({ plan, interval });
       window.location.href = url;
-    } catch {
+    } catch (error) {
       track('checkout_failed', { plan, interval, payment_method: 'stripe' });
-      setCheckoutError('Le paiement a échoué. Réessayez ou utilisez une autre carte.');
+      setCheckoutError(checkoutErrorMessage(error));
       setCheckoutPending(null);
+    }
+  }
+
+  async function openBillingPortal() {
+    setPortalPending(true);
+    setPortalError(null);
+    try {
+      const { url } = await subscriptionsApi.portal();
+      window.location.href = url;
+    } catch (error) {
+      setPortalError(billingPortalErrorMessage(error));
+      setPortalPending(false);
     }
   }
 
@@ -298,6 +325,35 @@ function BillingPageContent() {
             cette date.
           </p>
         ) : null}
+
+        {subscription?.status === 'past_due' ? (
+          <p className="mt-3 text-sm text-error" data-testid="payment-issue" role="alert">
+            Le dernier paiement a échoué. Mettez à jour votre carte pour garder votre plan.
+          </p>
+        ) : null}
+
+        {subscription?.stripeCustomerId ? (
+          <div className="mt-4">
+            <Button
+              type="button"
+              variant="outline"
+              data-testid="billing-portal"
+              disabled={portalPending}
+              onClick={() => void openBillingPortal()}
+            >
+              {portalPending ? 'Ouverture…' : 'Gérer mon paiement et mes factures'}
+            </Button>
+            {portalError ? (
+              <p
+                className="mt-2 text-sm text-error"
+                data-testid="billing-portal-error"
+                role="alert"
+              >
+                {portalError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <section className="mb-6">
@@ -314,6 +370,7 @@ function BillingPageContent() {
             currentTier={displayTier}
             billingPeriod={billingPeriod}
             checkoutPending={checkoutPending}
+            trialEligible={subData?.trialEligible === true}
             onPeriodChange={setBillingPeriod}
             onCheckout={(plan, interval) => void checkout(plan, interval)}
           />
@@ -383,7 +440,7 @@ function BillingPageContent() {
               équipe.
             </p>
             <a
-              href="mailto:support@cvstudio.ai?subject=Support%20Business%20-%20CV%20Studio"
+              href={SUPPORT_BUSINESS_MAILTO}
               className="mt-4 inline-flex min-h-10 items-center rounded-md bg-content-primary px-4 text-sm font-medium text-white hover:opacity-90"
             >
               Contactez le support

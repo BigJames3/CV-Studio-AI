@@ -109,4 +109,46 @@ test.describe('Billing checkout (Stripe only)', () => {
     await billingPage.startProCheckout();
     await expect.poll(async () => await checkoutBody).toEqual({ plan: 'pro', interval: 'month' });
   });
+
+  test('opens the Stripe billing portal for a card subscriber @payment', async ({
+    page,
+    testUser,
+  }) => {
+    await loginAs(page, testUser);
+    await page.route('**/api/v1/subscriptions/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            subscription: {
+              status: 'past_due',
+              cancelAtPeriodEnd: false,
+              currentPeriodEnd: new Date().toISOString(),
+              currentPeriodStart: new Date().toISOString(),
+              stripeCustomerId: 'cus_e2e',
+            },
+            tier: 'pro',
+            entitlements: { cvCreate: true, aiOptimize: true, exportDocx: false },
+          },
+        }),
+      });
+    });
+    let portalCalls = 0;
+    await page.route('**/api/v1/subscriptions/me/portal', async (route) => {
+      portalCalls += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: { url: '/account/billing?from=portal' } }),
+      });
+    });
+
+    await page.goto('/account/billing');
+    await expect(page.getByTestId('payment-issue')).toBeVisible();
+    await page.getByTestId('billing-portal').click();
+    await expect(page).toHaveURL(/from=portal/);
+    expect(portalCalls).toBe(1);
+  });
 });

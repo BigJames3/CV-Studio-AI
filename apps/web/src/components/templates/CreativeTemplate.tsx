@@ -1,5 +1,13 @@
 import type { TemplateProps } from './shared';
 import {
+  ExperienceExtras,
+  MoreSections,
+  educationExtras,
+  experienceMeta,
+  joinParts,
+  themeFrom,
+} from './blocks';
+import {
   Photo,
   CertificatesSection,
   ProjectsSection,
@@ -63,7 +71,7 @@ export function CreativeTemplate({ data, customization: c }: TemplateProps) {
         </div>
       </header>
 
-      <div style={{ padding: '1.5rem 1.75rem' }}>
+      <div data-cv-flow="body" style={{ padding: '1.5rem 1.75rem' }}>
         {c.showSummary && summary.text ? (
           <section style={{ marginBottom: 'var(--cv-section-gap)' }}>
             <h2
@@ -118,13 +126,21 @@ export function CreativeTemplate({ data, customization: c }: TemplateProps) {
                     </span>
                   </div>
                   <p style={{ margin: '2px 0 6px', color: c.accentColor, fontSize: '0.85rem' }}>
-                    {exp.company}
+                    {joinParts([exp.company, experienceMeta(exp)])}
                   </p>
-                  <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.8rem' }}>
+                  <ul
+                    style={{
+                      margin: 0,
+                      paddingLeft: '1.1rem',
+                      fontSize: '0.8rem',
+                      listStyle: 'disc',
+                    }}
+                  >
                     {exp.bullets.map((b, i) => (
                       <li key={i}>{b}</li>
                     ))}
                   </ul>
+                  <ExperienceExtras exp={exp} muted="#6b7280" />
                 </div>
               ))}
             </div>
@@ -151,6 +167,9 @@ export function CreativeTemplate({ data, customization: c }: TemplateProps) {
                   <p style={{ margin: '2px 0' }}>
                     {[ed.degree, ed.field].filter(Boolean).join(' · ')}
                   </p>
+                  {educationExtras(ed) ? (
+                    <p style={{ margin: '2px 0', color: '#6b7280' }}>{educationExtras(ed)}</p>
+                  ) : null}
                 </div>
               ))}
             </section>
@@ -197,6 +216,8 @@ export function CreativeTemplate({ data, customization: c }: TemplateProps) {
         {c.showCertificates && certificates.length > 0 ? (
           <CertificatesSection certificates={certificates} tone={tone} />
         ) : null}
+
+        <MoreSections data={data} c={c} theme={themeFrom(c, 'bar')} />
       </div>
     </div>
   );

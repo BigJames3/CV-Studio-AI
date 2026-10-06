@@ -39,6 +39,7 @@
     "db:migrate": "pnpm --filter @cvstudio/api exec prisma migrate dev",
     "db:migrate:deploy": "pnpm --filter @cvstudio/api exec prisma migrate deploy",
     "db:seed": "pnpm --filter @cvstudio/api exec prisma db seed",
+    "stripe:check": "pnpm --filter @cvstudio/api stripe:check",
     "db:studio": "pnpm --filter @cvstudio/api exec prisma studio",
     "db:reset": "pnpm --filter @cvstudio/api exec prisma migrate reset",
     "docker:up": "docker compose up -d postgres redis mailpit",

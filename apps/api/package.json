@@ -17,8 +17,8 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:generate": "prisma generate",
-    "payments:expire-pending": "ts-node --compiler-options {\"module\":\"CommonJS\"} src/scripts/expire-pending-payments.ts",
-    "webhook:retry-dlq": "ts-node --compiler-options {\"module\":\"CommonJS\"} src/scripts/retry-webhook-dlq.ts"
+    "webhook:retry-dlq": "ts-node --compiler-options {\"module\":\"CommonJS\"} src/scripts/retry-webhook-dlq.ts",
+    "stripe:check": "ts-node src/scripts/stripe-check.ts"
   },
   "prisma": {
     "schema": "prisma/schema.prisma",

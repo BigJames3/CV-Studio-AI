@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, AuthUser, Public, RequireEntitlement } from '../../common/decorators';
 import { EntitlementsGuard } from '../../common/guards/entitlements.guard';
@@ -24,8 +25,8 @@ export class MarketplaceController {
   @Public()
   @Get('templates')
   @ApiOperation({ summary: 'Browse marketplace listings (no designData)' })
-  list(@Query('q') q?: string, @Query('category') category?: string) {
-    return this.marketplace.listPublished({ q, category });
+  list(@Query('q') q?: string, @Query('category') category?: string, @Query('sort') sort?: string) {
+    return this.marketplace.listPublished({ q, category, sort });
   }
 
   @Public()
@@ -45,10 +46,21 @@ export class MarketplaceController {
   @ApiBearerAuth('JWT')
   @UseGuards(EntitlementsGuard)
   @RequireEntitlement('marketplace:buy')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('templates/:id/payment-intent')
   @ApiOperation({ summary: 'Create Stripe PaymentIntent for a listing' })
   createPaymentIntent(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.marketplace.createPaymentIntent(user.id, id);
+  }
+
+  @ApiBearerAuth('JWT')
+  @UseGuards(EntitlementsGuard)
+  @RequireEntitlement('marketplace:buy')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('templates/:id/checkout')
+  @ApiOperation({ summary: 'Create Stripe Checkout Session for a listing (hosted payment)' })
+  createListingCheckout(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.marketplace.createListingCheckout(user.id, id);
   }
 
   @ApiBearerAuth('JWT')
@@ -119,6 +131,34 @@ export class MarketplaceController {
   @Get('seller/analytics')
   sellerAnalytics(@CurrentUser() user: AuthUser) {
     return this.marketplace.sellerAnalytics(user.id);
+  }
+
+  @ApiBearerAuth('JWT')
+  @Post('seller/connect/onboarding')
+  @ApiOperation({ summary: 'Create Stripe Express Account Link for seller KYC' })
+  startConnectOnboarding(@CurrentUser() user: AuthUser) {
+    return this.marketplace.startConnectOnboarding(user.id);
+  }
+
+  @ApiBearerAuth('JWT')
+  @Post('seller/connect/sync')
+  @ApiOperation({ summary: 'Refresh connected-account payouts status from Stripe' })
+  refreshConnectAccount(@CurrentUser() user: AuthUser) {
+    return this.marketplace.refreshConnectAccount(user.id);
+  }
+
+  @ApiBearerAuth('JWT')
+  @Post('seller/connect/login')
+  @ApiOperation({ summary: 'Express Dashboard login link for the current seller' })
+  createConnectLoginLink(@CurrentUser() user: AuthUser) {
+    return this.marketplace.createConnectLoginLink(user.id);
+  }
+
+  @ApiBearerAuth('JWT')
+  @Get('seller/payouts')
+  @ApiOperation({ summary: 'Seller payout history and Connect status' })
+  listPayouts(@CurrentUser() user: AuthUser) {
+    return this.marketplace.listPayouts(user.id);
   }
 
   @ApiBearerAuth('JWT')

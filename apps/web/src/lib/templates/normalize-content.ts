@@ -8,7 +8,10 @@ type LegacyWrapped = {
 };
 
 /** Flatten legacy API `{ sections: { … } }` into editor `CvContent`. */
-export function normalizeCvContent(raw: unknown, fallbackTemplate: TemplateKey = 'modern'): CvContent {
+export function normalizeCvContent(
+  raw: unknown,
+  fallbackTemplate: TemplateKey = 'modern'
+): CvContent {
   const empty: CvContent = {
     schemaVersion: 1,
     templateKey: fallbackTemplate,
@@ -26,8 +29,7 @@ export function normalizeCvContent(raw: unknown, fallbackTemplate: TemplateKey =
   if (!raw || typeof raw !== 'object') return empty;
 
   const obj = raw as LegacyWrapped & Partial<CvContent>;
-  const sections =
-    obj.sections && typeof obj.sections === 'object' ? obj.sections : null;
+  const sections = obj.sections && typeof obj.sections === 'object' ? obj.sections : null;
   const src = sections ?? obj;
 
   const identity = (src.identity ?? empty.identity) as CvContent['identity'];
@@ -42,6 +44,8 @@ export function normalizeCvContent(raw: unknown, fallbackTemplate: TemplateKey =
       email: identity.email,
       phone: identity.phone,
       city: identity.city,
+      country: identity.country,
+      address: identity.address,
       linkedin: identity.linkedin,
       github: identity.github,
       website: identity.website,
@@ -55,5 +59,17 @@ export function normalizeCvContent(raw: unknown, fallbackTemplate: TemplateKey =
     projects: Array.isArray(src.projects) ? src.projects : [],
     certificates: Array.isArray(src.certificates) ? src.certificates : [],
     references: Array.isArray(src.references) ? src.references : [],
+    awards: listOf(src.awards),
+    volunteering: listOf(src.volunteering),
+    publications: listOf(src.publications),
+    talks: listOf(src.talks),
+    licenses: listOf(src.licenses),
+    interests: listOf(src.interests),
+    additionalInfo: listOf(src.additionalInfo),
+    extras: src.extras && typeof src.extras === 'object' ? src.extras : {},
   };
+}
+
+function listOf<T>(value: T[] | undefined): T[] {
+  return Array.isArray(value) ? value : [];
 }

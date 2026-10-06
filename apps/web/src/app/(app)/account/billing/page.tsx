@@ -2,67 +2,29 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { PaymentMethodSelector } from '@/components/billing/payment-selector';
-import { queryKeys, subscriptionsApi, paymentsApi, type PaymentHistoryItem } from '@/lib/api';
-import { useMe, useSubscription, useUserPlan } from '@/hooks';
-import { cn, suggestPaymentMethod, type PaymentProvider } from '@/lib/utils';
+import { InvoiceHistory } from '@/components/billing/invoice-history';
+import { BillingPlansSkeleton, PlanGrid } from '@/components/billing/plan-grid';
+import { queryKeys, subscriptionsApi, paymentsApi, plansApi, invoicesApi } from '@/lib/api';
+import { FALLBACK_PLANS, SUPPORT_BUSINESS_MAILTO } from '@/lib/billing/plans-catalog';
 import {
-  detectCountry,
-  persistPaymentMethod,
-  readSavedPaymentMethod,
-  GEO_CONSENT_CHANGED_EVENT,
-  type GeoLocation,
-} from '@/lib/geo';
+  billingPortalErrorMessage,
+  checkoutErrorMessage,
+} from '@/lib/billing/checkout-error-message';
+import { useMe, useSubscription, useUserPlan } from '@/hooks';
+import { cn } from '@/lib/utils';
 import { track } from '@/lib/analytics';
 
-const POLL_INTERVAL_MS = 3000;
-const POLL_TIMEOUT_SEC = 300;
 const ACTIVATION_POLL_INTERVAL_MS = 500;
 const ACTIVATION_POLL_MAX_ATTEMPTS = 60;
 
-const PLANS = [
-  {
-    id: 'free' as const,
-    name: 'Gratuit',
-    description: '1 CV max',
-  },
-  {
-    id: 'pro' as const,
-    name: 'Pro',
-    description: 'CV illimités',
-  },
-  {
-    id: 'business' as const,
-    name: 'Business',
-    description: 'Tout illimité',
-  },
-] as const;
-
-const STATUS_LABEL: Record<string, string> = {
-  pending: 'En attente',
-  completed: 'Payé',
-  failed: 'Échoué',
-  refunded: 'Remboursé',
-};
-
 function parseCheckoutState(value: string | null) {
-  if (value === 'success' || value === 'pending' || value === 'cancel' || value === 'failed') {
+  if (value === 'success' || value === 'cancel') {
     return value;
   }
   return null;
-}
-
-function formatPaymentAmount(amount: string | number, currency: string) {
-  const n = typeof amount === 'string' ? Number(amount) : amount;
-  const code = (currency || 'USD').toUpperCase();
-  if (Number.isNaN(n)) return `— ${code}`;
-  if (code === 'XOF' || code === 'XAF') {
-    return `${Math.round(n).toLocaleString('fr-FR')} ${code}`;
-  }
-  return `${n.toFixed(2)} ${code}`;
 }
 
 function CheckoutBanner({
@@ -117,11 +79,8 @@ function BillingPageContent() {
   const { tier } = useUserPlan();
 
   const checkoutState = parseCheckoutState(params.get('checkout'));
-  const provider = params.get('provider');
-  const transactionId = params.get('tx');
-  const checkoutErrorParam = params.get('error');
+  const checkoutSessionId = params.get('session_id');
 
-  const [paymentMethod, setPaymentMethod] = useState<PaymentProvider | null>(null);
   const [polledTier, setPolledTier] = useState<'free' | 'pro' | 'business' | null>(null);
   const [isPollingActivation, setIsPollingActivation] = useState(false);
 
@@ -130,55 +89,31 @@ function BillingPageContent() {
   const [cancelConfirm, setCancelConfirm] = useState(false);
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
-  const [pollingTimeLeft, setPollingTimeLeft] = useState(POLL_TIMEOUT_SEC);
+  const [portalPending, setPortalPending] = useState(false);
+  const [portalError, setPortalError] = useState<string | null>(null);
+  const [billingPeriod, setBillingPeriod] = useState<'month' | 'year'>('month');
 
+  const {
+    data: plans,
+    isLoading: plansLoading,
+    isError: plansError,
+  } = useQuery({
+    queryKey: queryKeys.plans,
+    queryFn: () => plansApi.list(),
+    staleTime: 1000 * 60 * 60,
+  });
+  const { data: invoicesData, isLoading: invoicesLoading } = useQuery({
+    queryKey: queryKeys.invoices,
+    queryFn: () => invoicesApi.list(),
+    enabled: Boolean(user),
+  });
   const { data: paymentsData } = useQuery({
     queryKey: queryKeys.payments,
     queryFn: () => paymentsApi.history(),
     enabled: Boolean(user),
   });
-  const { data: paymentMethods } = useQuery({
-    queryKey: queryKeys.paymentMethods,
-    queryFn: () => paymentsApi.methods(),
-    enabled: Boolean(user),
-  });
-  const cinetpayAvailable = paymentMethods?.cinetpay !== false;
-
-  const [geo, setGeo] = useState<GeoLocation>({
-    countryCode: null,
-    source: 'unknown',
-    consentGiven: false,
-  });
-  const [consentEpoch, setConsentEpoch] = useState(0);
-
-  useEffect(() => {
-    const onConsentChange = () => setConsentEpoch((n) => n + 1);
-    window.addEventListener(GEO_CONSENT_CHANGED_EVENT, onConsentChange);
-    return () => window.removeEventListener(GEO_CONSENT_CHANGED_EVENT, onConsentChange);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void detectCountry(user?.countryCode).then((location) => {
-      if (!cancelled) setGeo(location);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.countryCode, consentEpoch]);
-
-  useEffect(() => {
-    const saved = readSavedPaymentMethod();
-    if (saved) setPaymentMethod(saved);
-  }, []);
-
-  const suggestedProvider = suggestPaymentMethod(geo.countryCode ?? user?.countryCode);
-
-  const selectedMethod: PaymentProvider =
-    (paymentMethod ?? suggestedProvider) === 'cinetpay' && !cinetpayAvailable
-      ? 'stripe'
-      : (paymentMethod ?? suggestedProvider);
   const payments = paymentsData?.items ?? [];
+  const invoices = invoicesData?.items ?? [];
 
   const subscription = subData?.subscription ?? null;
   const cancelAtPeriodEnd = Boolean(subscription?.cancelAtPeriodEnd);
@@ -190,24 +125,21 @@ function BillingPageContent() {
   const displayIsFree = displayTier === 'free';
   const displayIsPro = displayTier === 'pro';
   const displayIsBusiness = displayTier === 'business';
-  const showPaymentSelector = displayIsFree || displayIsPro;
 
   useEffect(() => {
     if (checkoutState === 'success') {
-      track('checkout_succeeded', { provider: provider ?? 'stripe' });
+      track('checkout_succeeded', { provider: 'stripe' });
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
         queryClient.invalidateQueries({ queryKey: queryKeys.payments }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.invoices }),
       ]);
     }
     if (checkoutState === 'cancel') {
-      track('checkout_cancelled', { provider: provider ?? undefined });
+      track('checkout_cancelled', { provider: 'stripe' });
     }
-    if (checkoutState === 'failed') {
-      track('checkout_failed', { error: checkoutErrorParam ?? 'declined' });
-    }
-  }, [checkoutState, checkoutErrorParam, provider, queryClient]);
+  }, [checkoutState, queryClient]);
 
   useEffect(() => {
     if (checkoutState !== 'success') {
@@ -230,6 +162,14 @@ function BillingPageContent() {
     const poll = async () => {
       if (cancelled) return;
       try {
+        // Ask the API to confirm the session with Stripe first, so activation does not depend on
+        // the webhook alone. On failure, polling still waits for the webhook.
+        if (attempts === 0 && checkoutSessionId) {
+          await paymentsApi.confirmCheckout(checkoutSessionId).catch((error: unknown) => {
+            console.warn('Checkout confirmation failed:', error);
+          });
+          if (cancelled) return;
+        }
         const result = await subscriptionsApi.me();
         if (cancelled) return;
         if (result.tier && result.tier !== 'free') {
@@ -239,6 +179,7 @@ function BillingPageContent() {
             queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
             queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
             queryClient.invalidateQueries({ queryKey: queryKeys.payments }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.invoices }),
           ]);
           return;
         }
@@ -263,82 +204,31 @@ function BillingPageContent() {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [checkoutState, queryClient, tier]);
-
-  useEffect(() => {
-    if (checkoutState !== 'pending' || !transactionId) return;
-
-    setPollingTimeLeft(POLL_TIMEOUT_SEC);
-    let cancelled = false;
-    let interval: ReturnType<typeof setInterval> | undefined;
-
-    const poll = async (decrement: boolean) => {
-      if (cancelled) return;
-      try {
-        const result = await paymentsApi.getStatus(transactionId);
-        if (cancelled) return;
-        if (result.status === 'completed') {
-          if (interval) clearInterval(interval);
-          await Promise.all([
-            queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.payments }),
-          ]);
-          window.location.replace(`${window.location.pathname}?checkout=success`);
-          return;
-        }
-        if (result.status === 'failed') {
-          if (interval) clearInterval(interval);
-          window.location.replace(`${window.location.pathname}?checkout=failed`);
-          return;
-        }
-      } catch (error) {
-        console.error('Polling error:', error);
-      }
-
-      if (!decrement || cancelled) return;
-      setPollingTimeLeft((prev) => {
-        if (prev <= POLL_INTERVAL_MS / 1000) {
-          if (interval) clearInterval(interval);
-          window.location.replace(`${window.location.pathname}?checkout=failed&error=timeout`);
-          return 0;
-        }
-        return prev - POLL_INTERVAL_MS / 1000;
-      });
-    };
-
-    void poll(false);
-    interval = setInterval(() => {
-      void poll(true);
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [checkoutState, transactionId, queryClient]);
-
-  const pollingMinutes = useMemo(
-    () => Math.max(0, Math.floor(pollingTimeLeft / 60)),
-    [pollingTimeLeft]
-  );
+  }, [checkoutSessionId, checkoutState, queryClient, tier]);
 
   async function checkout(plan: 'pro' | 'business', interval: 'month' | 'year') {
     setCheckoutPending(plan);
     setCheckoutError(null);
-    track('checkout_started', { plan, interval, payment_method: selectedMethod });
-    persistPaymentMethod(selectedMethod);
+    track('checkout_started', { plan, interval, payment_method: 'stripe' });
     try {
-      const { url } = await subscriptionsApi.checkout({
-        plan,
-        interval,
-        paymentMethod: selectedMethod,
-      });
+      const { url } = await subscriptionsApi.checkout({ plan, interval });
       window.location.href = url;
-    } catch {
-      track('checkout_failed', { plan, interval, payment_method: selectedMethod });
-      setCheckoutError('Le paiement a échoué. Réessayez ou utilisez une autre carte.');
+    } catch (error) {
+      track('checkout_failed', { plan, interval, payment_method: 'stripe' });
+      setCheckoutError(checkoutErrorMessage(error));
       setCheckoutPending(null);
+    }
+  }
+
+  async function openBillingPortal() {
+    setPortalPending(true);
+    setPortalError(null);
+    try {
+      const { url } = await subscriptionsApi.portal();
+      window.location.href = url;
+    } catch (error) {
+      setPortalError(billingPortalErrorMessage(error));
+      setPortalPending(false);
     }
   }
 
@@ -359,9 +249,12 @@ function BillingPageContent() {
     }
   }
 
-  if (isLoading) {
+  if (isLoading || (plansLoading && !plans && !plansError)) {
     return (
-      <div className="mx-auto max-w-content px-4 py-8 text-sm">Chargement de la facturation…</div>
+      <div className="mx-auto max-w-content px-4 py-8">
+        <div className="mb-8 h-10 w-48 animate-pulse rounded bg-surface-app" />
+        <BillingPlansSkeleton />
+      </div>
     );
   }
 
@@ -378,6 +271,7 @@ function BillingPageContent() {
     );
   }
 
+  const catalog = plans && plans.length > 0 ? plans : FALLBACK_PLANS;
   const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email;
   const activationConfirmed = checkoutState === 'success' && displayTier !== 'free';
 
@@ -403,19 +297,6 @@ function BillingPageContent() {
         </CheckoutBanner>
       ) : null}
 
-      {checkoutState === 'pending' ? (
-        <CheckoutBanner
-          variant="info"
-          testId="checkout-pending-banner"
-          title="Confirmation du paiement en cours…"
-        >
-          <p className="mt-1 text-sm">
-            Vérification du statut
-            {provider ? ` via ${provider}` : ''} (délai : {pollingMinutes} min)
-          </p>
-        </CheckoutBanner>
-      ) : null}
-
       {checkoutState === 'cancel' ? (
         <CheckoutBanner
           variant="neutral"
@@ -424,25 +305,18 @@ function BillingPageContent() {
         />
       ) : null}
 
-      {checkoutState === 'failed' ? (
-        <CheckoutBanner
-          variant="error"
-          testId="checkout-failed-banner"
-          title="Le paiement a échoué"
-        >
-          <p className="mt-1 text-sm">
-            {checkoutErrorParam === 'timeout'
-              ? 'La confirmation du paiement a expiré. Veuillez réessayer.'
-              : 'Le paiement a été refusé. Vérifiez votre moyen de paiement et réessayez.'}
-          </p>
-        </CheckoutBanner>
-      ) : null}
-
       <section className="mb-6 rounded-lg border border-border bg-surface-card p-6">
         <h2 className="text-xl font-semibold">Plan actuel</h2>
         <p className="mt-2 text-sm text-content-secondary">Vous êtes actuellement sur</p>
         <p data-testid="plan-badge" className="mt-1 text-2xl font-semibold capitalize">
           Plan {displayTier}
+        </p>
+        <p className="mt-2 text-sm text-content-secondary">
+          {displayIsFree
+            ? 'Créez jusqu’à 1 CV. Passez à un plan supérieur pour débloquer plus de fonctionnalités.'
+            : periodEnd
+              ? `Renouvellement le ${periodEnd}`
+              : null}
         </p>
 
         {cancelAtPeriodEnd && periodEnd ? (
@@ -452,40 +326,59 @@ function BillingPageContent() {
           </p>
         ) : null}
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
-          {PLANS.map((plan) => {
-            const active = displayTier === plan.id;
-            return (
-              <div
-                key={plan.id}
-                className={cn(
-                  'rounded-lg border p-4',
-                  active ? 'border-primary bg-primary-subtle' : 'border-border bg-surface-app'
-                )}
-              >
-                <p className="font-semibold">{plan.name}</p>
-                <p className="mt-1 text-sm text-content-secondary">{plan.description}</p>
-                {active ? <p className="mt-2 text-xs font-medium text-primary">Actuel</p> : null}
-              </div>
-            );
-          })}
-        </div>
+        {subscription?.status === 'past_due' ? (
+          <p className="mt-3 text-sm text-error" data-testid="payment-issue" role="alert">
+            Le dernier paiement a échoué. Mettez à jour votre carte pour garder votre plan.
+          </p>
+        ) : null}
 
-        {showPaymentSelector ? (
-          <div className="mt-6">
-            <PaymentMethodSelector
-              value={selectedMethod}
-              onChange={(method) => {
-                setPaymentMethod(method);
-                persistPaymentMethod(method);
-              }}
-              suggestedProvider={suggestedProvider}
-              geoSource={geo.source}
-              disabled={checkoutPending !== null}
-              cinetpayAvailable={cinetpayAvailable}
-            />
+        {subscription?.stripeCustomerId ? (
+          <div className="mt-4">
+            <Button
+              type="button"
+              variant="outline"
+              data-testid="billing-portal"
+              disabled={portalPending}
+              onClick={() => void openBillingPortal()}
+            >
+              {portalPending ? 'Ouverture…' : 'Gérer mon paiement et mes factures'}
+            </Button>
+            {portalError ? (
+              <p
+                className="mt-2 text-sm text-error"
+                data-testid="billing-portal-error"
+                role="alert"
+              >
+                {portalError}
+              </p>
+            ) : null}
           </div>
         ) : null}
+      </section>
+
+      <section className="mb-6">
+        {plansError ? (
+          <p className="mb-4 text-sm text-error" role="alert">
+            Impossible de charger le détail des plans. Affichage du catalogue par défaut.
+          </p>
+        ) : null}
+        {plansLoading && !plans && !plansError ? (
+          <BillingPlansSkeleton />
+        ) : (
+          <PlanGrid
+            plans={catalog}
+            currentTier={displayTier}
+            billingPeriod={billingPeriod}
+            checkoutPending={checkoutPending}
+            trialEligible={subData?.trialEligible === true}
+            onPeriodChange={setBillingPeriod}
+            onCheckout={(plan, interval) => void checkout(plan, interval)}
+          />
+        )}
+
+        <p className="mt-4 text-sm text-content-secondary" data-testid="payment-provider-note">
+          Paiement sécurisé par carte bancaire via Stripe.
+        </p>
 
         {checkoutError ? (
           <p className="mt-4 text-sm text-error" data-testid="checkout-error" role="alert">
@@ -499,62 +392,9 @@ function BillingPageContent() {
           </p>
         ) : null}
 
-        <div className="mt-6 flex flex-wrap gap-3">
-          {displayIsFree ? (
-            <>
-              <Button
-                data-testid="checkout-pro-month"
-                data-plan="pro"
-                disabled={checkoutPending !== null}
-                onClick={() => void checkout('pro', 'month')}
-              >
-                {checkoutPending === 'pro' ? 'Redirection…' : 'Passer à Pro'}
-              </Button>
-              <Button
-                variant="secondary"
-                data-testid="checkout-pro-year"
-                data-plan="pro"
-                disabled={checkoutPending !== null}
-                onClick={() => void checkout('pro', 'year')}
-              >
-                Pro annuel
-              </Button>
-              <Button
-                variant="outline"
-                data-testid="checkout-business-month"
-                data-plan="business"
-                disabled={checkoutPending !== null}
-                onClick={() => void checkout('business', 'month')}
-              >
-                Upgrade to Business
-              </Button>
-            </>
-          ) : null}
-
-          {displayIsPro ? (
-            <>
-              <Button
-                data-testid="checkout-business-month"
-                data-plan="business"
-                disabled={checkoutPending !== null}
-                onClick={() => void checkout('business', 'month')}
-              >
-                {checkoutPending === 'business' ? 'Redirection…' : 'Passer à Business'}
-              </Button>
-              <Link href="/pricing">
-                <Button variant="outline">Comparer les plans</Button>
-              </Link>
-            </>
-          ) : null}
-
-          {displayIsBusiness ? (
-            <p className="text-sm text-content-secondary">
-              Contactez le support pour les modifications de votre plan Business.
-            </p>
-          ) : null}
-
-          {(displayIsPro || displayIsBusiness) && !cancelAtPeriodEnd ? (
-            cancelConfirm ? (
+        {(displayIsPro || displayIsBusiness) && !cancelAtPeriodEnd ? (
+          <div className="mt-6 flex flex-wrap gap-3">
+            {cancelConfirm ? (
               <div
                 className="flex w-full flex-wrap items-center gap-2"
                 data-testid="cancel-confirm-modal"
@@ -588,63 +428,28 @@ function BillingPageContent() {
               >
                 Annuler l&apos;abonnement
               </Button>
-            )
-          ) : null}
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-border bg-surface-card p-6">
-        <h2 className="text-xl font-semibold">Historique de facturation</h2>
-        {payments.length > 0 ? (
-          <div className="mt-4 overflow-x-auto" data-testid="payment-history">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-content-secondary">
-                  <th className="py-2 pr-3 font-medium">Date</th>
-                  <th className="py-2 pr-3 font-medium">Montant</th>
-                  <th className="py-2 pr-3 font-medium">Méthode</th>
-                  <th className="py-2 font-medium">Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payments.map((payment: PaymentHistoryItem) => (
-                  <tr key={payment.id} className="border-b border-border">
-                    <td className="py-2 pr-3">
-                      {new Date(payment.createdAt).toLocaleDateString('fr-FR')}
-                    </td>
-                    <td className="py-2 pr-3">
-                      {formatPaymentAmount(payment.amount, payment.currency)}
-                    </td>
-                    <td className="py-2 pr-3 capitalize">{payment.paymentMethod}</td>
-                    <td className="py-2">{STATUS_LABEL[payment.status] ?? payment.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            )}
           </div>
-        ) : (
-          <p className="mt-2 text-sm text-content-secondary">Aucune facture pour le moment</p>
-        )}
+        ) : null}
+
+        {displayIsBusiness ? (
+          <div className="mt-6 rounded-lg border border-border bg-surface-app p-6">
+            <h2 className="text-lg font-semibold">Support Business</h2>
+            <p className="mt-2 text-sm text-content-secondary">
+              Besoin d’intégrations personnalisées ou d’aide sur votre compte ? Contactez notre
+              équipe.
+            </p>
+            <a
+              href={SUPPORT_BUSINESS_MAILTO}
+              className="mt-4 inline-flex min-h-10 items-center rounded-md bg-content-primary px-4 text-sm font-medium text-white hover:opacity-90"
+            >
+              Contactez le support
+            </a>
+          </div>
+        ) : null}
       </section>
 
-      <details className="mt-6 rounded-lg border border-border bg-surface-card p-4 text-sm">
-        <summary className="cursor-pointer font-medium text-content-primary">
-          Comment nous utilisons votre localisation
-        </summary>
-        <ul className="mt-3 list-disc space-y-1 pl-5 text-content-secondary">
-          <li>Source : en-têtes géo (adresse IP) uniquement avec votre accord.</li>
-          <li>Usage : suggérer Stripe ou CinetPay. Vous pouvez changer de méthode.</li>
-          <li>Stockage : aucun stockage permanent de votre adresse IP.</li>
-          <li>Partage : jamais partagé avec des tiers.</li>
-          <li>
-            Contrôle :{' '}
-            <Link href="/account/privacy" className="text-primary underline">
-              paramètres de confidentialité
-            </Link>
-            .
-          </li>
-        </ul>
-      </details>
+      <InvoiceHistory invoices={invoices} payments={payments} invoicesLoading={invoicesLoading} />
 
       <div className="mt-8">
         <Button type="button" variant="outline" onClick={() => router.push('/dashboard')}>

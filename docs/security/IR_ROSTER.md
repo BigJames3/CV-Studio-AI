@@ -16,15 +16,15 @@ Do **not** invent personal phone numbers in git. Fill names when people are appo
 
 ## Roles
 
-| Role                 | Primary                             | Backup               | Page                    |
-| -------------------- | ----------------------------------- | -------------------- | ----------------------- |
-| On-call engineer     | `IR_ONCALL_EMAIL`                   | Engineering lead     | Immediate (P0/P1)       |
-| Incident commander   | Engineering lead (interim)          | Founder              | P0 / confirmed breach   |
-| CISO / security lead | **Vacant — founder interim**        | —                    | P0/P1 security          |
-| DPO / privacy        | privacy@cvstudio.ai                 | legal@cvstudio.ai    | Personal-data incidents |
-| Legal                | legal@cvstudio.ai                   | External counsel TBD | Breach notify           |
-| Payments             | Stripe Dashboard + CinetPay console | —                    | PAY-* alerts            |
-| Comms                | Founder interim                     | —                    | User notification       |
+| Role                 | Primary                      | Backup               | Page                    |
+| -------------------- | ---------------------------- | -------------------- | ----------------------- |
+| On-call engineer     | `IR_ONCALL_EMAIL`            | Engineering lead     | Immediate (P0/P1)       |
+| Incident commander   | Engineering lead (interim)   | Founder              | P0 / confirmed breach   |
+| CISO / security lead | **Vacant — founder interim** | —                    | P0/P1 security          |
+| DPO / privacy        | privacy@cvstudio.ai          | legal@cvstudio.ai    | Personal-data incidents |
+| Legal                | legal@cvstudio.ai            | External counsel TBD | Breach notify           |
+| Payments             | Stripe Dashboard             | —                    | PAY-* alerts            |
+| Comms                | Founder interim              | —                    | User notification       |
 
 ## Escalation
 

@@ -1,5 +1,12 @@
 import type { TemplateProps } from './shared';
 import {
+  ExperienceExtras,
+  MoreSections,
+  educationExtras,
+  experienceMeta,
+  themeFrom,
+} from './blocks';
+import {
   Photo,
   SectionTitle,
   CertificatesSection,
@@ -17,6 +24,7 @@ export function ExecutiveTemplate({ data, customization: c }: TemplateProps) {
 
   return (
     <div
+      data-cv-flow=""
       style={{
         ...densityStyle(c.density),
         padding: '1.75rem 2rem',
@@ -94,11 +102,24 @@ export function ExecutiveTemplate({ data, customization: c }: TemplateProps) {
                   {formatRange(exp.start, exp.end, exp.current)}
                 </span>
               </div>
-              <ul style={{ margin: '4px 0 0', paddingLeft: '1.1rem', fontSize: '0.8rem' }}>
+              {experienceMeta(exp) ? (
+                <p style={{ margin: '1px 0 0', fontSize: '0.78rem', color: '#6b7280' }}>
+                  {experienceMeta(exp)}
+                </p>
+              ) : null}
+              <ul
+                style={{
+                  margin: '4px 0 0',
+                  paddingLeft: '1.1rem',
+                  fontSize: '0.8rem',
+                  listStyle: 'disc',
+                }}
+              >
                 {exp.bullets.map((b, i) => (
                   <li key={i}>{b}</li>
                 ))}
               </ul>
+              <ExperienceExtras exp={exp} muted="#6b7280" />
             </div>
           ))}
         </section>
@@ -112,6 +133,7 @@ export function ExecutiveTemplate({ data, customization: c }: TemplateProps) {
               <strong>{ed.degree}</strong>
               {ed.field ? `, ${ed.field}` : ''} — {ed.school}
               {ed.end ? ` (${ed.end})` : ''}
+              {educationExtras(ed) ? ` — ${educationExtras(ed)}` : ''}
             </p>
           ))}
         </section>
@@ -137,6 +159,8 @@ export function ExecutiveTemplate({ data, customization: c }: TemplateProps) {
           title="Professional Certifications"
         />
       ) : null}
+
+      <MoreSections data={data} c={c} theme={themeFrom(c, 'serif')} />
 
       {c.showReferences && references && references.length > 0 ? (
         <section style={{ marginTop: 'var(--cv-section-gap)' }}>

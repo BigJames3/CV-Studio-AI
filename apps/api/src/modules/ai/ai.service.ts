@@ -12,9 +12,13 @@ import {
   type OptimizeResumeResult,
   type CoverLetterResult,
   type AtsExplainResult,
+  type CareerAdviceResult,
+  type InterviewPrepResult,
+  type JobMatchResult,
+  type SkillsSuggestResult,
 } from '@cvstudio/ai-service';
 import { PrismaService } from '../../database/prisma.module';
-import { AiQuotaService } from './ai-quota.service';
+import { AiQuotaService, type AiQuotaReservation } from './ai-quota.service';
 import {
   GenerateCvDto,
   OptimizeResumeDto,
@@ -29,6 +33,14 @@ import {
   LinkedInImportDto,
   ParsePdfDto,
 } from './dto/ai.dto';
+
+type CvInsightResults = {
+  'job-match': JobMatchResult;
+  interview: InterviewPrepResult;
+  'career-advice': CareerAdviceResult;
+  'skills-suggest': SkillsSuggestResult;
+};
+type CvInsightFeature = keyof CvInsightResults;
 
 @Injectable()
 export class AiService {
@@ -51,40 +63,37 @@ export class AiService {
       });
     }
 
-    const quota = await this.quotas.assertOptimizeQuota(userId);
-    const gateway = await runAiFeature({
-      feature: 'optimize-resume',
-      userId,
-      locale: 'en',
-      payload: {
-        bulletText,
-        tone: dto.tone,
-        jobDescription: dto.jobDescription,
-        contextFacts: { cvId: dto.cvId },
-      },
-    });
-
-    if (!gateway.ok || !gateway.data) {
-      throw new ServiceUnavailableException({
-        code: 'AI_PROVIDER_ERROR',
-        message: gateway.error ?? 'Resume optimization failed',
-      });
-    }
-
-    const data = gateway.data as OptimizeResumeResult;
-    if (!data.ok || !data.variants?.length) {
-      throw new BadRequestException({
-        code: 'AI_REFUSED',
-        message: data.refusals?.join('; ') || gateway.error || 'Optimization refused',
-        details: { refusals: data.refusals ?? [], warnings: data.warnings ?? [] },
-      });
-    }
-
-    await this.prisma.aiHistory.create({
-      data: {
+    const quota = await this.quotas.reserveOptimizeQuota(userId, dto.cvId);
+    return this.withReservation(quota, async () => {
+      const gateway = await runAiFeature({
+        feature: 'optimize-resume',
         userId,
-        cvId: dto.cvId,
-        actionType: 'resume_optimization',
+        locale: 'en',
+        payload: {
+          bulletText,
+          tone: dto.tone,
+          jobDescription: dto.jobDescription,
+          contextFacts: { cvId: dto.cvId },
+        },
+      });
+
+      if (!gateway.ok || !gateway.data) {
+        throw new ServiceUnavailableException({
+          code: 'AI_PROVIDER_ERROR',
+          message: gateway.error ?? 'Resume optimization failed',
+        });
+      }
+
+      const data = gateway.data as OptimizeResumeResult;
+      if (!data.ok || !data.variants?.length) {
+        throw new BadRequestException({
+          code: 'AI_REFUSED',
+          message: data.refusals?.join('; ') || gateway.error || 'Optimization refused',
+          details: { refusals: data.refusals ?? [], warnings: data.warnings ?? [] },
+        });
+      }
+
+      await this.quotas.commit(quota, {
         prompt: `optimize_resume.v3 | tone=${dto.tone ?? 'factual'} | ${bulletText.slice(0, 280)}`,
         result: {
           variants: data.variants,
@@ -94,63 +103,59 @@ export class AiService {
           model: gateway.model,
         },
         tokensUsed: gateway.tokensUsed ?? 0,
-      },
-    });
+      });
 
-    return {
-      status: 'completed',
-      feature: 'optimize-resume',
-      promptId: data.promptId,
-      promptVersion: data.promptVersion,
-      model: gateway.model ?? this.modelFor('optimize-resume'),
-      provider: gateway.provider ?? 'heuristic',
-      variants: data.variants,
-      warnings: data.warnings,
-      refusals: data.refusals,
-      quota: {
-        used: quota.used + 1,
-        limit: quota.limit,
-      },
-    };
+      return {
+        status: 'completed',
+        feature: 'optimize-resume',
+        promptId: data.promptId,
+        promptVersion: data.promptVersion,
+        model: gateway.model ?? this.modelFor('optimize-resume'),
+        provider: gateway.provider ?? 'heuristic',
+        variants: data.variants,
+        warnings: data.warnings,
+        refusals: data.refusals,
+        quota: {
+          used: quota.used + 1,
+          limit: quota.limit,
+        },
+      };
+    });
   }
 
   async generateCoverLetter(userId: string, dto: GenerateCoverLetterDto) {
     const cv = await this.assertCvOwnership(userId, dto.cvId);
-    const quota = await this.quotas.assertCoverLetterQuota(userId);
-
-    const gateway = await runAiFeature({
-      feature: 'cover-letter',
-      userId,
-      locale: 'en',
-      payload: {
-        cvFacts: (cv.content as Record<string, unknown>) ?? {},
-        jobDescription: dto.jobDescription,
-        company: dto.company,
-        tone: dto.tone,
-      },
-    });
-
-    if (!gateway.ok || !gateway.data) {
-      throw new ServiceUnavailableException({
-        code: 'AI_PROVIDER_ERROR',
-        message: gateway.error ?? 'Cover letter generation failed',
-      });
-    }
-
-    const data = gateway.data as CoverLetterResult;
-    if (!data.ok || !data.letter?.body) {
-      throw new BadRequestException({
-        code: 'AI_REFUSED',
-        message: data.refusals?.join('; ') || gateway.error || 'Cover letter refused',
-        details: { refusals: data.refusals ?? [], warnings: data.warnings ?? [] },
-      });
-    }
-
-    await this.prisma.aiHistory.create({
-      data: {
+    const quota = await this.quotas.reserveCoverLetterQuota(userId, dto.cvId);
+    return this.withReservation(quota, async () => {
+      const gateway = await runAiFeature({
+        feature: 'cover-letter',
         userId,
-        cvId: dto.cvId,
-        actionType: 'cover_letter',
+        locale: 'en',
+        payload: {
+          cvFacts: (cv.content as Record<string, unknown>) ?? {},
+          jobDescription: dto.jobDescription,
+          company: dto.company,
+          tone: dto.tone,
+        },
+      });
+
+      if (!gateway.ok || !gateway.data) {
+        throw new ServiceUnavailableException({
+          code: 'AI_PROVIDER_ERROR',
+          message: gateway.error ?? 'Cover letter generation failed',
+        });
+      }
+
+      const data = gateway.data as CoverLetterResult;
+      if (!data.ok || !data.letter?.body) {
+        throw new BadRequestException({
+          code: 'AI_REFUSED',
+          message: data.refusals?.join('; ') || gateway.error || 'Cover letter refused',
+          details: { refusals: data.refusals ?? [], warnings: data.warnings ?? [] },
+        });
+      }
+
+      await this.quotas.commit(quota, {
         prompt: `cover_letter.v2 | company=${dto.company ?? ''} | ${dto.jobDescription.slice(0, 280)}`,
         result: {
           letter: data.letter,
@@ -160,104 +165,89 @@ export class AiService {
           model: gateway.model,
         },
         tokensUsed: gateway.tokensUsed ?? 0,
-      },
-    });
+      });
 
-    return {
-      status: 'completed',
-      feature: 'cover-letter',
-      promptId: data.promptId,
-      promptVersion: data.promptVersion,
-      model: gateway.model ?? this.modelFor('cover-letter'),
-      provider: gateway.provider ?? 'heuristic',
-      letter: data.letter,
-      usedEvidence: data.usedEvidence,
-      warnings: data.warnings,
-      quota: { used: quota.used + 1, limit: quota.limit },
-    };
+      return {
+        status: 'completed',
+        feature: 'cover-letter',
+        promptId: data.promptId,
+        promptVersion: data.promptVersion,
+        model: gateway.model ?? this.modelFor('cover-letter'),
+        provider: gateway.provider ?? 'heuristic',
+        letter: data.letter,
+        usedEvidence: data.usedEvidence,
+        warnings: data.warnings,
+        quota: { used: quota.used + 1, limit: quota.limit },
+      };
+    });
   }
 
   async matchJob(userId: string, dto: MatchJobDto) {
-    await this.assertCvOwnership(userId, dto.cvId);
-    return {
-      status: 'completed',
-      feature: 'job-match',
-      promptId: 'job_matcher',
-      model: this.modelFor('job-match'),
-      matchScore: 68,
-      mustHaveGaps: [
-        { requirement: 'Example skill from JD', reason: 'Not found in CV facts (scaffold)' },
-      ],
-      niceToHaveGaps: [],
-      strengths: [],
-      suggestedEdits: [],
-      warnings: ['Wire embeddings + LLM explain in ai-service'],
-    };
+    return this.runCvInsight(userId, dto.cvId, 'job-match', {
+      jobDescription: dto.jobDescription,
+    });
   }
 
   async checkAts(userId: string, dto: CheckAtsDto) {
     const cv = await this.assertCvOwnership(userId, dto.cvId);
-    const quota = await this.quotas.assertAtsExplainQuota(userId);
-    const content = (cv.content as Record<string, unknown>) ?? {};
-    const cvText = JSON.stringify(content).toLowerCase();
-    const jd = (dto.jobDescription ?? '').toLowerCase();
-    const tokens = Array.from(
-      new Set(
-        jd
-          .split(/[^a-z0-9+#.]/i)
-          .map((t) => t.trim())
-          .filter((t) => t.length > 3)
-      )
-    ).slice(0, 40);
+    const quota = await this.quotas.reserveAtsExplainQuota(userId, dto.cvId);
+    return this.withReservation(quota, async () => {
+      const content = (cv.content as Record<string, unknown>) ?? {};
+      const cvText = JSON.stringify(content).toLowerCase();
+      const jd = (dto.jobDescription ?? '').toLowerCase();
+      const tokens = Array.from(
+        new Set(
+          jd
+            .split(/[^a-z0-9+#.]/i)
+            .map((t) => t.trim())
+            .filter((t) => t.length > 3)
+        )
+      ).slice(0, 40);
 
-    const missingKeywords = tokens.filter((t) => !cvText.includes(t)).slice(0, 12);
-    const matched = tokens.length - missingKeywords.length;
-    const atsScore =
-      tokens.length === 0 ? 70 : Math.round((matched / Math.max(tokens.length, 1)) * 1000) / 10;
+      const missingKeywords = tokens.filter((t) => !cvText.includes(t)).slice(0, 12);
+      const matched = tokens.length - missingKeywords.length;
+      const atsScore =
+        tokens.length === 0 ? 70 : Math.round((matched / Math.max(tokens.length, 1)) * 1000) / 10;
 
-    const explainGateway = await runAiFeature({
-      feature: 'ats',
-      userId,
-      locale: 'en',
-      payload: {
-        score: atsScore,
-        breakdown: { missingKeywords, matchedKeywords: tokens.filter((t) => cvText.includes(t)) },
-        cvSummary: {
-          hasExperience: Array.isArray(content.experience),
-          hasEducation: Array.isArray(content.education),
-          hasSkills: Array.isArray(content.skills),
-        },
-        hasJd: Boolean(dto.jobDescription?.trim()),
-      },
-    });
-
-    const explain = (explainGateway.data as AtsExplainResult | undefined) ?? null;
-
-    const report = await this.prisma.atsReport.create({
-      data: {
-        cvId: dto.cvId,
-        jobDescription: dto.jobDescription,
-        atsScore,
-        missingKeywords,
-        recommendations: {
-          format: ['Use standard headings (Experience, Education, Skills)'],
-          content:
-            missingKeywords.length > 0
-              ? [`Add evidence for: ${missingKeywords.slice(0, 5).join(', ')}`]
-              : ['Strong keyword coverage — quantify impact next'],
-          explainPrompt: 'ats_explain.v1',
-          headline: explain?.headline,
-          explanations: explain?.explanations ?? [],
-          quickWins: explain?.quickWins ?? [],
-        },
-      },
-    });
-
-    await this.prisma.aiHistory.create({
-      data: {
+      const explainGateway = await runAiFeature({
+        feature: 'ats',
         userId,
-        cvId: dto.cvId,
-        actionType: 'jd_match',
+        locale: 'en',
+        payload: {
+          score: atsScore,
+          breakdown: { missingKeywords, matchedKeywords: tokens.filter((t) => cvText.includes(t)) },
+          cvSummary: {
+            hasExperience: Array.isArray(content.experience),
+            hasEducation: Array.isArray(content.education),
+            hasSkills: Array.isArray(content.skills),
+          },
+          hasJd: Boolean(dto.jobDescription?.trim()),
+        },
+      });
+
+      const explain = (explainGateway.data as AtsExplainResult | undefined) ?? null;
+
+      const report = await this.prisma.atsReport.create({
+        data: {
+          cvId: dto.cvId,
+          jobDescription: dto.jobDescription,
+          atsScore,
+          missingKeywords,
+          recommendations: {
+            format: ['Use standard headings (Experience, Education, Skills)'],
+            content:
+              missingKeywords.length > 0
+                ? [`Add evidence for: ${missingKeywords.slice(0, 5).join(', ')}`]
+                : ['Strong keyword coverage — quantify impact next'],
+            explainPrompt: 'ats_explain.v1',
+            headline: explain?.headline,
+            explanations: explain?.explanations ?? [],
+            quickWins: explain?.quickWins ?? [],
+          },
+        },
+      });
+
+      await this.quotas.commit(quota, {
         prompt: `ats_explain.v1 | score=${atsScore}`,
         result: {
           score: atsScore,
@@ -266,20 +256,20 @@ export class AiService {
           model: explainGateway.model,
         },
         tokensUsed: explainGateway.tokensUsed ?? 0,
-      },
-    });
+      });
 
-    return {
-      feature: 'ats',
-      model: this.modelFor('ats'),
-      ...report,
-      matchedKeywords: tokens.filter((t) => cvText.includes(t)).slice(0, 20),
-      score: atsScore,
-      explanation: explain?.headline ?? null,
-      explanations: explain?.explanations ?? [],
-      improvements: explain?.quickWins ?? [],
-      quota: { used: quota.used + 1, limit: quota.limit },
-    };
+      return {
+        feature: 'ats',
+        model: this.modelFor('ats'),
+        ...report,
+        matchedKeywords: tokens.filter((t) => cvText.includes(t)).slice(0, 20),
+        score: atsScore,
+        explanation: explain?.headline ?? null,
+        explanations: explain?.explanations ?? [],
+        improvements: explain?.quickWins ?? [],
+        quota: { used: quota.used + 1, limit: quota.limit },
+      };
+    });
   }
 
   /** Explicit ATS explain endpoint (same gateway + quota as check-ats explain layer). */
@@ -288,44 +278,14 @@ export class AiService {
   }
 
   async interviewPrep(userId: string, dto: InterviewPrepDto) {
-    await this.assertCvOwnership(userId, dto.cvId);
-    return {
-      status: 'completed',
-      feature: 'interview',
-      promptId: 'interview_prep',
-      model: this.modelFor('interview'),
-      interviewType: dto.interviewType ?? 'hr',
-      questions: [
-        {
-          question: 'Tell me about a time you delivered under pressure',
-          framework: 'STAR',
-          tips: ['Use a metric', 'Keep under 2 minutes'],
-          needsUserInput: false,
-        },
-      ],
-      disclaimer: 'Practice aid only — not a guarantee of hiring outcomes.',
-    };
+    return this.runCvInsight(userId, dto.cvId, 'interview', {
+      jobDescription: dto.jobDescription,
+      interviewType: dto.interviewType,
+    });
   }
 
   async careerAdvice(userId: string, dto: CareerAdviceDto) {
-    await this.assertCvOwnership(userId, dto.cvId);
-    return {
-      status: 'completed',
-      feature: 'career-advice',
-      promptId: 'career_advisor',
-      model: this.modelFor('career-advice'),
-      cards: [
-        {
-          title: 'Clarify target role keywords',
-          type: 'positioning',
-          body: 'Align headline and top bullets to the target role using existing experience only.',
-          priority: 'high',
-          evidenceBased: true,
-          actions: ['Update headline', 'Run Job Matcher on 3 target JDs'],
-        },
-      ],
-      disclaimer: 'General career information — not certified coaching or legal advice.',
-    };
+    return this.runCvInsight(userId, dto.cvId, 'career-advice', { targetRole: dto.targetRole });
   }
 
   async generatePortfolio(userId: string, dto: GeneratePortfolioDto) {
@@ -347,15 +307,7 @@ export class AiService {
   }
 
   async skillsSuggest(userId: string, dto: SkillsSuggestDto) {
-    await this.assertCvOwnership(userId, dto.cvId);
-    return {
-      status: 'completed',
-      feature: 'skills-suggest',
-      promptId: 'skills_suggest',
-      model: this.modelFor('skills-suggest'),
-      suggestions: [],
-      warnings: ['Scaffold — evidence-gated skill suggestions only'],
-    };
+    return this.runCvInsight(userId, dto.cvId, 'skills-suggest', { targetRole: dto.targetRole });
   }
 
   async linkedInImport(userId: string, dto: LinkedInImportDto) {
@@ -391,6 +343,73 @@ export class AiService {
       input,
       message: 'Wire packages/ai-service + BullMQ ai queue + docs/ai/prompts',
     };
+  }
+
+  /**
+   * CV analysis features (job match, interview prep, career advice, skills suggestions).
+   * They share the daily optimize quota and read only the caller's own CV.
+   */
+  private async runCvInsight<F extends CvInsightFeature>(
+    userId: string,
+    cvId: string,
+    feature: F,
+    input: Record<string, unknown>
+  ) {
+    const cv = await this.assertCvOwnership(userId, cvId);
+    const quota = await this.quotas.reserveOptimizeQuota(userId, cvId);
+    return this.withReservation(quota, async () => {
+      const gateway = await runAiFeature({
+        feature,
+        userId,
+        locale: 'en',
+        payload: { ...input, cvFacts: (cv.content as Record<string, unknown>) ?? {} },
+      });
+
+      const data = gateway.data as CvInsightResults[F] | undefined;
+      if (!data) {
+        throw new ServiceUnavailableException({
+          code: 'AI_PROVIDER_ERROR',
+          message: gateway.error ?? `${feature} failed`,
+        });
+      }
+      if (!gateway.ok || !data.ok) {
+        const refusals = 'refusals' in data ? data.refusals : [];
+        throw new BadRequestException({
+          code: 'AI_REFUSED',
+          message: refusals?.join('; ') || gateway.error || `${feature} refused`,
+          details: { refusals: refusals ?? [] },
+        });
+      }
+
+      const { ok: _ok, ...result } = data;
+      await this.quotas.commit(quota, {
+        prompt: `${feature} | ${JSON.stringify(input).slice(0, 280)}`,
+        result: { ...result, provider: gateway.provider, model: gateway.model },
+        tokensUsed: gateway.tokensUsed ?? 0,
+      });
+
+      return {
+        status: 'completed',
+        feature,
+        ...result,
+        model: gateway.model ?? this.modelFor(feature),
+        provider: gateway.provider ?? 'heuristic',
+        quota: { used: quota.used + 1, limit: quota.limit },
+      };
+    });
+  }
+
+  /** Run a quota-reserved call; the reserved slot is given back if anything fails. */
+  private async withReservation<T>(
+    reservation: AiQuotaReservation,
+    run: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      await this.quotas.release(reservation);
+      throw error;
+    }
   }
 
   private modelFor(feature: AiFeature) {

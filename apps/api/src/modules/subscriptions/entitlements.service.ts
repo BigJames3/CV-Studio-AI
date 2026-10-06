@@ -1,47 +1,139 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
+import { getCvLimit } from '@cvstudio/shared-utils';
 import { PrismaService } from '../../database/prisma.module';
+import { FeatureGateService } from '../../common/services/feature-gate.service';
+import { AuditLogService } from '../../common/services/audit-log.service';
+import { resolveEffectiveTier, TIER_SOURCE_SELECT } from './effective-tier';
 
 /**
- * Server-side feature gates. Redis cache recommended in production.
+ * Server-side feature gates. Loads the effective tier from DB (JWT can be stale after Stripe
+ * webhooks, and expired or canceled subscriptions fall back to free), then delegates the
+ * matrix to FeatureGateService.
  */
 @Injectable()
 export class EntitlementsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly featureGate: FeatureGateService,
+    private readonly auditLog: AuditLogService
+  ) {}
 
-  async getTier(userId: string): Promise<'free' | 'pro' | 'business'> {
-    const user = await this.prisma.user.findUnique({
+  async getTier(
+    userId: string,
+    db: Prisma.TransactionClient = this.prisma
+  ): Promise<'free' | 'pro' | 'business'> {
+    const user = await db.user.findUnique({
       where: { id: userId },
-      select: { subscriptionTier: true },
+      select: TIER_SOURCE_SELECT,
     });
-    return (user?.subscriptionTier as 'free' | 'pro' | 'business') ?? 'free';
+    return user ? resolveEffectiveTier(user) : 'free';
   }
 
-  async can(userId: string, feature: string): Promise<boolean> {
-    const tier = await this.getTier(userId);
+  async gatedUser(userId: string, db: Prisma.TransactionClient = this.prisma) {
+    const subscriptionTier = await this.getTier(userId, db);
+    return { id: userId, subscriptionTier };
+  }
+
+  /**
+   * `db` lets callers read inside their own transaction (see CvsService quota lock): a lock
+   * holder must not ask the pool for a second connection while waiters hold the others.
+   */
+  async can(
+    userId: string,
+    feature: string,
+    db: Prisma.TransactionClient = this.prisma
+  ): Promise<boolean> {
+    const user = await this.gatedUser(userId, db);
 
     if (feature === 'cv:create') {
-      if (tier !== 'free') return true;
-      const count = await this.prisma.cv.count({
+      const count = await db.cv.count({
         where: { userId, deletedAt: null },
       });
-      return count < 1;
+      return this.featureGate.canCreateCV(user, count);
+    }
+
+    if (feature === 'cv:export:pdf' || feature === 'downloadPDF') {
+      return this.featureGate.canDownloadPDF(user);
+    }
+    if (feature === 'cv:print' || feature === 'print') {
+      return this.featureGate.canPrint(user);
+    }
+    if (feature === 'cv:share' || feature === 'share') {
+      return this.featureGate.canShare(user);
+    }
+    if (feature === 'templates:pro' || feature === 'proTemplates') {
+      return this.featureGate.canAccessProTemplates(user);
+    }
+    if (feature === 'templates:business' || feature === 'businessTemplates') {
+      return this.featureGate.canAccessBusinessTemplates(user);
+    }
+    if (feature === 'advancedFeatures') {
+      return this.featureGate.canAccessAdvancedFeatures(user);
     }
 
     const matrix: Record<string, Array<'free' | 'pro' | 'business'>> = {
-      'cv:export:pdf': ['free', 'pro', 'business'],
       // Étape 13: DOCX generator not ready — entitlement hidden until real export ships
       'cv:export:docx': [],
       'ai:generate': ['pro', 'business'],
       'ai:optimize': ['pro', 'business'],
       'ai:cover_letter': ['pro', 'business'],
-      'ai:ats': ['free', 'pro', 'business'], // Free = teaser allowed
+      'ai:ats': ['free', 'pro', 'business'],
       'ai:interview': ['pro', 'business'],
-      'marketplace:buy': ['pro', 'business'],
+      // One-off purchase: no subscription required.
+      'marketplace:buy': ['free', 'pro', 'business'],
       'api:access': ['business'],
+      // Creating a team, inviting members and keeping shared CVs visible to them.
+      'team:manage': ['business'],
+      // Per-CV views, visitors and traffic sources (the basic dashboard stays open to all).
+      'analytics:advanced': ['business'],
     };
 
     const allowed = matrix[feature];
     if (!allowed) return false;
-    return allowed.includes(tier);
+    return allowed.includes(user.subscriptionTier);
+  }
+
+  async snapshot(userId: string) {
+    const user = await this.gatedUser(userId);
+    const cvCount = await this.prisma.cv.count({
+      where: { userId, deletedAt: null },
+    });
+    const cvLimit = getCvLimit(user.subscriptionTier);
+    return {
+      tier: user.subscriptionTier,
+      cvCount,
+      cvLimit,
+      cvRemaining: Math.max(0, cvLimit - cvCount),
+      entitlements: {
+        cvCreate: this.featureGate.canCreateCV(user, cvCount),
+        exportPdf: this.featureGate.canDownloadPDF(user),
+        print: this.featureGate.canPrint(user),
+        share: this.featureGate.canShare(user),
+        proTemplates: this.featureGate.canAccessProTemplates(user),
+        businessTemplates: this.featureGate.canAccessBusinessTemplates(user),
+        advancedFeatures: this.featureGate.canAccessAdvancedFeatures(user),
+        aiOptimize: await this.can(userId, 'ai:optimize'),
+        exportDocx: await this.can(userId, 'cv:export:docx'),
+      },
+    };
+  }
+
+  async assertCan(
+    userId: string,
+    feature: string,
+    message: string,
+    db?: Prisma.TransactionClient
+  ): Promise<void> {
+    const allowed = await this.can(userId, feature, db);
+    if (allowed) return;
+    const tier = await this.getTier(userId, db);
+    void this.auditLog.logFeatureDenial(userId, feature, tier);
+    throw new ForbiddenException({
+      statusCode: 402,
+      code: 'ENTITLEMENT_REQUIRED',
+      message,
+      details: { feature, upgradeUrl: '/pricing' },
+    });
   }
 }

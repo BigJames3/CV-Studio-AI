@@ -92,7 +92,10 @@ export class AuthService {
       where: { email: dto.email.toLowerCase() },
     });
     if (existing) {
-      throw new ConflictException({ code: 'EMAIL_TAKEN', message: 'Email already registered' });
+      throw new ConflictException({
+        code: 'EMAIL_TAKEN',
+        message: 'Cet email est déjà utilisé',
+      });
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
@@ -302,6 +305,35 @@ export class AuthService {
   }
 
   /** Public logout: revoke from refresh cookie/body; Bearer is optional (legacy clients / e2e). */
+  /**
+   * A browser that signs in again (same or another account) must not leave its previous
+   * session active in the background: revoke the session behind the refresh cookie it sent.
+   * Called only after a successful sign-in. Best effort: a missing, invalid or expired cookie
+   * is ignored and never blocks the new session.
+   */
+  async revokeReplacedSession(
+    previousRefreshToken: string | undefined,
+    newRefreshToken: string,
+    ctx: RequestContext
+  ): Promise<void> {
+    if (!previousRefreshToken || previousRefreshToken === newRefreshToken) return;
+    try {
+      const payload = await this.jwt.verifyAsync<RefreshPayload>(previousRefreshToken, {
+        secret: getJwtRefreshSecret(),
+      });
+      if (!payload.sub || !payload.jti) return;
+      await this.sessions.revokeByRefreshJti(payload.sub, payload.jti, payload.fid);
+      await this.audit.log({
+        userId: payload.sub,
+        action: 'auth.session.replaced',
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+      });
+    } catch {
+      // Stale or tampered cookie: nothing to revoke.
+    }
+  }
+
   async logoutFromRefresh(
     refreshToken: string | undefined,
     ctx: RequestContext,

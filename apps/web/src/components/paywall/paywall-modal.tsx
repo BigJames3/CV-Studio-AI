@@ -13,19 +13,33 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useQuery } from '@tanstack/react-query';
+import { queryKeys, subscriptionsApi } from '@/lib/api';
 
 const featureNames: Record<string, { title: string; description: string }> = {
   'cv:create': {
     title: '🎯 Limite atteinte',
-    description: 'Vous avez utilisé votre quota de CV gratuit.',
+    description: 'Vous avez atteint la limite de CV de votre plan.',
   },
   'cv:duplicate': {
     title: '🔒 Fonctionnalité Premium',
     description: 'La duplication de CV est réservée aux utilisateurs Premium.',
   },
-  'cv:export:docx': {
-    title: '📄 Export DOCX',
-    description: "L'export en DOCX est réservé aux utilisateurs Premium.",
+  'cv:export:pdf': {
+    title: '📥 Export PDF',
+    description: "L'export PDF est réservé aux plans Pro et Business.",
+  },
+  'cv:print': {
+    title: '🖨️ Impression',
+    description: "L'impression est réservée aux plans Pro et Business.",
+  },
+  'cv:share': {
+    title: '🔗 Partage de CV',
+    description: 'Le partage public est réservé aux plans Pro et Business.',
+  },
+  'templates:pro': {
+    title: '🎨 Templates premium',
+    description: 'Les templates premium sont inclus dans les plans Pro et Business.',
   },
   'ai:generate': {
     title: '✨ Génération IA',
@@ -34,11 +48,11 @@ const featureNames: Record<string, { title: string; description: string }> = {
 };
 
 const PREMIUM_BENEFITS = [
-  'CV illimités',
-  'Export PDF & DOCX haute qualité',
+  'Jusqu’à 5 CVs (Pro) ou 20 (Business)',
+  'Export PDF haute qualité',
   'Optimisation IA du contenu',
   'Templates premium exclusifs',
-  'Partage public & analytics',
+  'Partage public avec lien et QR code',
 ] as const;
 
 export type PaywallModalProps = {
@@ -57,6 +71,15 @@ export function PaywallModal({
   cvLimit = 1,
 }: PaywallModalProps) {
   const router = useRouter();
+  // The trial is offered once per account: only advertise it when the server says it is left.
+  // The modal is mounted on every app page: fetch only once it opens (shared, cached query).
+  const { data: subscription } = useQuery({
+    queryKey: queryKeys.subscription,
+    queryFn: () => subscriptionsApi.me(),
+    enabled: isOpen,
+  });
+  const trialEligible = subscription?.trialEligible === true;
+  const benefits = trialEligible ? [...PREMIUM_BENEFITS, '14 jours gratuits'] : PREMIUM_BENEFITS;
   const copy = featureNames[feature] ?? {
     title: '🔒 Fonctionnalité Premium',
     description: 'Cette fonctionnalité est réservée aux utilisateurs Premium.',
@@ -113,7 +136,7 @@ export function PaywallModal({
             Inclus avec Premium
           </p>
           <ul className="space-y-1.5 text-sm text-content-secondary dark:text-neutral-300">
-            {PREMIUM_BENEFITS.map((benefit) => (
+            {benefits.map((benefit) => (
               <li key={benefit} className="flex items-start gap-2">
                 <span className="mt-0.5 text-purple-600 dark:text-purple-400" aria-hidden>
                   ✓
@@ -142,9 +165,11 @@ export function PaywallModal({
           </Button>
         </DialogFooter>
 
-        <p className="text-center text-xs text-content-muted dark:text-neutral-500">
-          Premiers 14 jours gratuits
-        </p>
+        {trialEligible ? (
+          <p className="text-center text-xs text-content-muted dark:text-neutral-500">
+            Premiers 14 jours gratuits
+          </p>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

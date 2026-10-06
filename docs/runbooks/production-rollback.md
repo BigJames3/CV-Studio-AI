@@ -49,17 +49,6 @@ curl -fsS -o /dev/null -w "%{http_code}\n" https://cvstudio.ai/marketplace
 - Actions → **Deploy to Production (manual)** is `deploy.yml` (calls `cd-prod.yml`).
 - Actions → **CD Production Blue-Green** → Run workflow with a known-good `image_tag` (`sha-…` already in ECR) to redeploy without rebuilding.
 
-## CinetPay pause (no Stripe rollback)
-
-If CinetPay misbehaves, keep Stripe:
-
-1. Clear `CINETPAY_API_KEY` / `CINETPAY_SITE_ID` (or set `CINETPAY_FAIL_CLOSED=true` with empty keys) in `api-secrets`.
-2. Roll API pods so billing hides Mobile Money.
-3. Do **not** delete `payments` rows (audit).
-4. Late ACCEPTED notifies may still complete a previously timed-out payment — that is intentional.
-
-Never disable Stripe entirely. Never leave users without a payment path — keep cards working and notify via email if Mobile Money is paused.
-
 ## Schema rollback
 
 Application rollback does **not** undo Prisma migrations. If the release migrated, restore from backup / reverse migration — see `docs/infrastructure/DR-RUNBOOK.md`.

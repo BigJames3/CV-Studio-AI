@@ -15,7 +15,9 @@
     "strict": true,
     "esModuleInterop": true,
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@cvstudio/shared-utils": ["../../packages/shared-utils/dist/index.d.ts"],
+      "@cvstudio/shared-types": ["../../packages/shared-types/dist/index.d.ts"]
     }
   },
   "include": ["src/**/*"],

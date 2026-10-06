@@ -2,16 +2,20 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useCreateCv, useMe, useUserPlan } from '@/hooks';
+import { useCreateCv, useMe, useUserPlan, useFeatureGate } from '@/hooks';
 import { useCvsInfinite } from '@/hooks/useCvsInfinite';
 import { useCvMutations } from '@/hooks/useCvMutations';
+import { SharedCvsSection } from '@/components/team/shared-cvs-section';
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { data: user } = useMe();
   const { isFree, tier } = useUserPlan();
+  const { canCreateMoreCVs, canShare, showUpgrade, cvCount, cvLimit } = useFeatureGate();
   const { data, isLoading, isError, isFetchingNextPage, hasNextPage, fetchNextPage } =
     useCvsInfinite();
   const createCv = useCreateCv();
@@ -42,8 +46,9 @@ export default function DashboardPage() {
             {firstName ? `Bonjour, ${firstName}` : 'Dashboard'}
           </h1>
           <p className="text-content-secondary">
-            {cvs.length} CV{cvs.length === 1 ? '' : 's'}
-            {hasNextPage ? '+' : ''}
+            <span data-testid="cv-quota">
+              {cvCount} / {cvLimit} CVs utilisés
+            </span>
             {user ? (
               <>
                 {' '}
@@ -66,12 +71,29 @@ export default function DashboardPage() {
               </Button>
             </Link>
           ) : null}
-          <Link href="/dashboard/templates">
-            <Button variant="secondary">Nouveau depuis template</Button>
-          </Link>
+
+          <Button
+            variant="secondary"
+            data-testid="create-from-template"
+            onClick={() => {
+              if (!canCreateMoreCVs) {
+                showUpgrade('cv:create');
+                return;
+              }
+              router.push('/dashboard/templates');
+            }}
+          >
+            {canCreateMoreCVs
+              ? 'Nouveau depuis template'
+              : `Limite atteinte (${cvCount}/${cvLimit})`}
+          </Button>
           <Button
             data-testid="create-cv"
-            onClick={() =>
+            onClick={() => {
+              if (!canCreateMoreCVs) {
+                showUpgrade('cv:create');
+                return;
+              }
               createCv.mutate(
                 { title: 'Nouveau CV' },
                 {
@@ -80,11 +102,11 @@ export default function DashboardPage() {
                     if (id) window.location.href = `/editor/${id}`;
                   },
                 }
-              )
-            }
+              );
+            }}
             disabled={createCv.isPending}
           >
-            Nouveau CV
+            {canCreateMoreCVs ? 'Nouveau CV' : `Limite atteinte (${cvCount}/${cvLimit})`}
           </Button>
         </div>
       </div>
@@ -167,6 +189,11 @@ export default function DashboardPage() {
                         ✓ Publié
                       </span>
                     ) : null}
+                    {cv.teamId ? (
+                      <span className="rounded-full bg-secondary-subtle px-2 py-0.5 text-xs font-medium text-secondary">
+                        Équipe
+                      </span>
+                    ) : null}
                     <Button
                       size="sm"
                       variant="ghost"
@@ -192,7 +219,13 @@ export default function DashboardPage() {
                     size="sm"
                     variant="outline"
                     disabled={duplicate.isPending}
-                    onClick={() => duplicate.mutate(cv.id)}
+                    onClick={() => {
+                      if (!canCreateMoreCVs) {
+                        showUpgrade('cv:create');
+                        return;
+                      }
+                      duplicate.mutate(cv.id);
+                    }}
                   >
                     {duplicate.isPending ? '⏳ Duplication…' : 'Dupliquer'}
                   </Button>
@@ -200,7 +233,12 @@ export default function DashboardPage() {
                     size="sm"
                     variant="outline"
                     disabled={publish.isPending}
-                    onClick={() =>
+                    title={canShare ? undefined : 'Pro feature'}
+                    onClick={() => {
+                      if (!cv.isPublic && !canShare) {
+                        showUpgrade('cv:share');
+                        return;
+                      }
                       publish.mutate(
                         { id: cv.id, isPublic: !cv.isPublic },
                         {
@@ -215,10 +253,16 @@ export default function DashboardPage() {
                             }
                           },
                         }
-                      )
-                    }
+                      );
+                    }}
                   >
-                    {publish.isPending ? '⏳' : cv.isPublic ? 'Dépublier' : 'Partager'}
+                    {publish.isPending
+                      ? '⏳'
+                      : cv.isPublic
+                        ? 'Dépublier'
+                        : canShare
+                          ? 'Partager'
+                          : '🔒 Partager (Pro)'}
                   </Button>
                   <Button
                     size="sm"
@@ -263,6 +307,8 @@ export default function DashboardPage() {
           )}
         </>
       ) : null}
+
+      <SharedCvsSection />
     </div>
   );
 }

@@ -1,35 +1,53 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, NotImplementedException, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AiService } from './ai.service';
 import {
-  GenerateCvDto,
   OptimizeResumeDto,
   GenerateCoverLetterDto,
   CheckAtsDto,
   InterviewPrepDto,
   MatchJobDto,
   CareerAdviceDto,
-  GeneratePortfolioDto,
-  GrammarCheckDto,
   SkillsSuggestDto,
   LinkedInImportDto,
-  ParsePdfDto,
 } from './dto/ai.dto';
 import { CurrentUser, AuthUser, RequireEntitlement } from '../../common/decorators';
 import { EntitlementsGuard } from '../../common/guards/entitlements.guard';
 
+/**
+ * AI features whose pipeline is not wired yet. They answer 501 instead of the placeholder
+ * payloads in `AiService`, so no client shows fake results as real ones. Remove a feature
+ * from here once its service method does real work.
+ */
+export const UNAVAILABLE_AI_FEATURES = [
+  'generate-cv',
+  'generate-portfolio',
+  'grammar-check',
+  'parse-pdf',
+] as const;
+
+function unavailable(feature: (typeof UNAVAILABLE_AI_FEATURES)[number]): never {
+  throw new NotImplementedException({
+    code: 'AI_FEATURE_UNAVAILABLE',
+    message: `AI feature "${feature}" is not available yet`,
+  });
+}
+
 @ApiTags('AI')
 @ApiBearerAuth('JWT')
 @UseGuards(EntitlementsGuard)
+// Burst limit per client on top of the daily quotas (global default is 120/min).
+@Throttle({ default: { limit: 30, ttl: 60_000 } })
 @Controller('ai')
 export class AiController {
   constructor(private readonly ai: AiService) {}
 
   @Post('generate-cv')
   @RequireEntitlement('ai:generate')
-  @ApiOperation({ summary: 'CV Generator — LinkedIn / PDF facts / scratch' })
-  generateCv(@CurrentUser() user: AuthUser, @Body() dto: GenerateCvDto) {
-    return this.ai.generateCv(user.id, dto);
+  @ApiOperation({ summary: 'CV Generator — not available yet (501)' })
+  generateCv(): never {
+    return unavailable('generate-cv');
   }
 
   @Post('optimize-resume')
@@ -79,14 +97,14 @@ export class AiController {
 
   @Post('generate-portfolio')
   @RequireEntitlement('ai:generate')
-  generatePortfolio(@CurrentUser() user: AuthUser, @Body() dto: GeneratePortfolioDto) {
-    return this.ai.generatePortfolio(user.id, dto);
+  generatePortfolio(): never {
+    return unavailable('generate-portfolio');
   }
 
   @Post('grammar-check')
   @RequireEntitlement('ai:optimize')
-  grammarCheck(@CurrentUser() user: AuthUser, @Body() dto: GrammarCheckDto) {
-    return this.ai.grammarCheck(user.id, dto);
+  grammarCheck(): never {
+    return unavailable('grammar-check');
   }
 
   @Post('skills-suggest')
@@ -103,8 +121,8 @@ export class AiController {
 
   @Post('parse-pdf')
   @RequireEntitlement('ai:generate')
-  @ApiOperation({ summary: 'PDF OCR + structure extraction' })
-  parsePdf(@CurrentUser() user: AuthUser, @Body() dto: ParsePdfDto) {
-    return this.ai.parsePdf(user.id, dto);
+  @ApiOperation({ summary: 'PDF OCR + structure extraction — not available yet (501)' })
+  parsePdf(): never {
+    return unavailable('parse-pdf');
   }
 }

@@ -143,7 +143,10 @@ export function buildPdfHtml(
             (cert) => `
           <article class="cv-item">
             <h3>${escapeHtml(cert.name)}</h3>
-            <div class="meta">${[cert.issuer, cert.year].filter(Boolean).map((x) => escapeHtml(String(x))).join(' · ')}</div>
+            <div class="meta">${[cert.issuer, cert.year]
+              .filter(Boolean)
+              .map((x) => escapeHtml(String(x)))
+              .join(' · ')}</div>
           </article>`
           )
           .join('')}
@@ -158,8 +161,7 @@ export function buildPdfHtml(
         <ul class="lang-list">
           ${cv.languages
             .map(
-              (l) =>
-                `<li>${escapeHtml(l.name)}${l.level ? ` — ${escapeHtml(l.level)}` : ''}</li>`
+              (l) => `<li>${escapeHtml(l.name)}${l.level ? ` — ${escapeHtml(l.level)}` : ''}</li>`
             )
             .join('')}
         </ul>

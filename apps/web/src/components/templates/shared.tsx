@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 import type { CvContent, DensityPreset, TemplateCustomization } from '@/lib/templates/types';
 import { DENSITY_SCALE } from '@/lib/templates/types';
+import { certMeta, formatPeriod, joinParts, locationOf } from './blocks';
 
 export function formatRange(start?: string, end?: string | null, current?: boolean) {
   if (!start) return '';
@@ -18,7 +19,14 @@ export function densityStyle(density: DensityPreset) {
 }
 
 export function contactLine(identity: CvContent['identity']) {
-  return [identity.email, identity.phone, identity.city, identity.linkedin, identity.github, identity.website]
+  return [
+    identity.email,
+    identity.phone,
+    locationOf(identity),
+    identity.linkedin,
+    identity.github,
+    identity.website,
+  ]
     .filter(Boolean)
     .join(' · ');
 }
@@ -54,6 +62,7 @@ export function Photo({
           height: size,
           borderRadius: '9999px',
           objectFit: 'cover',
+          flexShrink: 0,
           border: borderColor ? `3px solid ${borderColor}` : undefined,
         }}
       />
@@ -67,6 +76,7 @@ export function Photo({
         width: size,
         height: size,
         borderRadius: '9999px',
+        flexShrink: 0,
         background: borderColor ?? '#e5e7eb',
         color: '#fff',
         display: 'flex',
@@ -156,13 +166,37 @@ export function ProjectsSection({
               {p.name}
             </strong>
             {p.url ? (
-              <span style={{ fontSize: ats ? '9pt' : '0.7rem', color: tone?.mutedColor ?? '#6b7280' }}>
+              <span
+                style={{ fontSize: ats ? '9pt' : '0.7rem', color: tone?.mutedColor ?? '#6b7280' }}
+              >
                 {p.url.replace(/^https?:\/\//, '')}
               </span>
             ) : null}
           </div>
+          {p.role || p.start || p.end || p.current ? (
+            <p
+              style={{
+                margin: '2px 0 0',
+                fontSize: ats ? '10pt' : '0.75rem',
+                color: tone?.mutedColor ?? '#6b7280',
+              }}
+            >
+              {joinParts([p.role, formatPeriod(p.start, p.end, p.current)])}
+            </p>
+          ) : null}
           {p.description ? (
             <p style={{ margin: '4px 0 0', fontSize: ats ? '10pt' : '0.8rem' }}>{p.description}</p>
+          ) : null}
+          {p.technologies?.trim() ? (
+            <p
+              style={{
+                margin: '2px 0 0',
+                fontSize: ats ? '10pt' : '0.75rem',
+                color: tone?.mutedColor ?? '#6b7280',
+              }}
+            >
+              Technologies : {p.technologies.trim()}
+            </p>
           ) : null}
         </div>
       ))}
@@ -196,8 +230,7 @@ export function CertificatesSection({
           certificates.map((cert) => (
             <p key={cert.id} style={{ margin: '6pt 0 0', fontSize: '10pt' }}>
               {cert.name}
-              {cert.issuer ? ` — ${cert.issuer}` : ''}
-              {cert.year ? ` (${cert.year})` : ''}
+              {certMeta(cert) ? ` — ${certMeta(cert)}` : ''}
             </p>
           ))
         ) : (
@@ -205,11 +238,8 @@ export function CertificatesSection({
             {certificates.map((cert) => (
               <li key={cert.id} style={{ fontSize: '0.8rem', marginBottom: 6 }}>
                 <strong>{cert.name}</strong>
-                {cert.issuer ? (
-                  <span style={{ color: tone?.mutedColor ?? '#6b7280' }}> — {cert.issuer}</span>
-                ) : null}
-                {cert.year ? (
-                  <span style={{ color: tone?.mutedColor ?? '#6b7280' }}> ({cert.year})</span>
+                {certMeta(cert) ? (
+                  <span style={{ color: tone?.mutedColor ?? '#6b7280' }}> — {certMeta(cert)}</span>
                 ) : null}
               </li>
             ))}
@@ -226,9 +256,13 @@ export function CertificatesSection({
       </SectionTitle>
       {certificates.map((cert) => (
         <div key={cert.id} style={{ marginTop: 10 }}>
-          <strong style={{ fontFamily: tone?.headerFont, fontSize: '0.875rem' }}>{cert.name}</strong>
-          <p style={{ margin: '2px 0 0', fontSize: '0.8rem', color: tone?.mutedColor ?? '#6b7280' }}>
-            {[cert.issuer, cert.year].filter(Boolean).join(' · ')}
+          <strong style={{ fontFamily: tone?.headerFont, fontSize: '0.875rem' }}>
+            {cert.name}
+          </strong>
+          <p
+            style={{ margin: '2px 0 0', fontSize: '0.8rem', color: tone?.mutedColor ?? '#6b7280' }}
+          >
+            {certMeta(cert)}
           </p>
         </div>
       ))}

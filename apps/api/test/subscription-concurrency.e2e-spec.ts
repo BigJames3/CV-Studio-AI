@@ -4,6 +4,7 @@ import { createTestApp } from './create-test-app';
 import { PrismaService } from '../src/database/prisma.module';
 import { SubscriptionsService } from '../src/modules/subscriptions/subscriptions.service';
 import { CvsService } from '../src/modules/cvs/cvs.service';
+import { CATALOG_FALLBACK_ROWS } from '../src/modules/plans/plans.service';
 
 /**
  * Concurrency against the real Postgres: the advisory lock and the trial compare-and-set are
@@ -17,6 +18,7 @@ describe('Subscription concurrency (e2e, real database)', () => {
   let subscriptions: SubscriptionsService;
   let cvs: CvsService;
   const userIds: string[] = [];
+  const createdPlanIds: string[] = [];
   const prevPrices = {
     pro: process.env.STRIPE_PRICE_PRO_MONTHLY,
     biz: process.env.STRIPE_PRICE_BUSINESS_MONTHLY,
@@ -108,6 +110,13 @@ describe('Subscription concurrency (e2e, real database)', () => {
     prisma = app.get(PrismaService);
     subscriptions = app.get(SubscriptionsService);
     cvs = app.get(CvsService);
+
+    // CI migrates but does not seed: create the catalog plans that are missing (only those).
+    for (const row of CATALOG_FALLBACK_ROWS) {
+      if (await prisma.plan.findUnique({ where: { name: row.name } })) continue;
+      const plan = await prisma.plan.create({ data: row });
+      createdPlanIds.push(plan.id);
+    }
   });
 
   afterAll(async () => {
@@ -116,6 +125,9 @@ describe('Subscription concurrency (e2e, real database)', () => {
       await prisma.cv.deleteMany({ where: { userId: { in: userIds } } });
       await prisma.subscription.deleteMany({ where: { userId: { in: userIds } } });
       await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    }
+    if (prisma && createdPlanIds.length) {
+      await prisma.plan.deleteMany({ where: { id: { in: createdPlanIds } } });
     }
     if (app) await app.close();
     for (const [key, value] of [

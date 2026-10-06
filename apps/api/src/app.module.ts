@@ -10,6 +10,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { CvsModule } from './modules/cvs/cvs.module';
+import { TeamsModule } from './modules/teams/teams.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { PlansModule } from './modules/plans/plans.module';
@@ -47,6 +48,7 @@ import { shouldSkipThrottle } from './common/utils/throttle-skip';
     AuthModule,
     UsersModule,
     CvsModule,
+    TeamsModule,
     TemplatesModule,
     SubscriptionsModule,
     PlansModule,

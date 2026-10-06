@@ -16,6 +16,11 @@ describe('CvsService feature gates', () => {
   const pdfExport = {
     enqueueFromCvId: jest.fn(),
   };
+  const teams = {
+    cvAccess: jest.fn(),
+    assertCanShareInto: jest.fn(),
+    activeMemberships: jest.fn(),
+  };
 
   let service: CvsService;
 
@@ -43,7 +48,12 @@ describe('CvsService feature gates', () => {
       chain = run.catch(() => undefined);
       return run;
     });
-    service = new CvsService(prisma as never, entitlements as never, pdfExport as never);
+    service = new CvsService(
+      prisma as never,
+      entitlements as never,
+      pdfExport as never,
+      teams as never
+    );
   });
 
   it('create allows first free CV', async () => {
@@ -242,5 +252,136 @@ describe('CvsService feature gates', () => {
     pdfExport.enqueueFromCvId.mockResolvedValue({ status: 'queued', jobId: 'j1', pollUrl: '/x' });
     await service.exportPdf('u1', 'cv-1');
     expect(pdfExport.enqueueFromCvId).toHaveBeenCalledWith('u1', 'cv-1', {});
+  });
+
+  describe('team sharing', () => {
+    const teamCv = {
+      id: 'cv-1',
+      userId: 'owner',
+      teamId: 'team-1',
+      title: 'CV',
+      content: {},
+      deletedAt: null,
+    };
+
+    it('lets a team editor open and edit a shared CV, without touching the owner star', async () => {
+      prisma.cv.findFirst.mockResolvedValue(teamCv);
+      teams.cvAccess.mockResolvedValue('editor');
+
+      await expect(service.getAccessible('member', 'cv-1')).resolves.toMatchObject({
+        access: 'editor',
+      });
+      await service.update('member', 'cv-1', { title: 'New', isStarred: true });
+
+      expect(teams.cvAccess).toHaveBeenCalledWith('member', teamCv);
+      expect(prisma.cv.update).toHaveBeenCalledWith({
+        where: { id: 'cv-1' },
+        data: expect.objectContaining({ title: 'New', isStarred: undefined }),
+      });
+    });
+
+    it('checks a premium template switch against the owner plan, not the editor', async () => {
+      prisma.cv.findFirst.mockResolvedValue({ ...teamCv, content: { templateKey: 'modern' } });
+      teams.cvAccess.mockResolvedValue('editor');
+
+      await service.update('member', 'cv-1', { content: { templateKey: 'executive' } });
+
+      expect(entitlements.assertCan).toHaveBeenCalledWith(
+        'owner',
+        'templates:pro',
+        expect.any(String)
+      );
+      expect(entitlements.assertCan).not.toHaveBeenCalledWith(
+        'member',
+        expect.anything(),
+        expect.anything()
+      );
+    });
+
+    it('keeps team viewers read-only', async () => {
+      prisma.cv.findFirst.mockResolvedValue(teamCv);
+      teams.cvAccess.mockResolvedValue('viewer');
+
+      await expect(service.getAccessible('member', 'cv-1')).resolves.toMatchObject({
+        access: 'viewer',
+      });
+      await expect(service.update('member', 'cv-1', { title: 'x' })).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'READ_ONLY' }),
+      });
+      expect(prisma.cv.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses people outside the team (or an inactive team)', async () => {
+      prisma.cv.findFirst.mockResolvedValue(teamCv);
+      teams.cvAccess.mockResolvedValue(null);
+      await expect(service.getAccessible('stranger', 'cv-1')).rejects.toBeInstanceOf(
+        ForbiddenException
+      );
+    });
+
+    it('keeps owner-only actions for the owner, even for team editors', async () => {
+      prisma.cv.findFirst.mockResolvedValue(teamCv);
+      teams.cvAccess.mockResolvedValue('editor');
+      await expect(service.remove('member', 'cv-1')).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.publish('member', 'cv-1', { isPublic: false })).rejects.toBeInstanceOf(
+        ForbiddenException
+      );
+      await expect(service.setTeam('member', 'cv-1', null)).rejects.toBeInstanceOf(
+        ForbiddenException
+      );
+    });
+
+    it('checks team rights before the owner shares a CV', async () => {
+      prisma.cv.findFirst.mockResolvedValue({ ...teamCv, userId: 'u1', teamId: null });
+      teams.assertCanShareInto.mockRejectedValue(new ForbiddenException('inactive'));
+      await expect(service.setTeam('u1', 'cv-1', 'team-1')).rejects.toBeInstanceOf(
+        ForbiddenException
+      );
+      expect(prisma.cv.update).not.toHaveBeenCalled();
+
+      teams.assertCanShareInto.mockResolvedValue(undefined);
+      await service.setTeam('u1', 'cv-1', null);
+      expect(teams.assertCanShareInto).toHaveBeenCalledTimes(1);
+      expect(prisma.cv.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { teamId: null } })
+      );
+    });
+
+    it('lists only CVs from active teams, never the caller own ones', async () => {
+      teams.activeMemberships.mockResolvedValue([
+        { teamId: 'team-1', teamName: 'Recrutement', access: 'viewer' },
+      ]);
+      (prisma.cv as Record<string, jest.Mock>).findMany = jest.fn().mockResolvedValue([
+        {
+          id: 'cv-9',
+          title: 'CV Ana',
+          templateId: null,
+          teamId: 'team-1',
+          updatedAt: new Date(),
+          user: { firstName: 'Ana', lastName: 'Diallo' },
+        },
+      ]);
+
+      const { items } = await service.listShared('member');
+
+      expect(items).toEqual([
+        expect.objectContaining({
+          id: 'cv-9',
+          ownerName: 'Ana Diallo',
+          teamName: 'Recrutement',
+          access: 'viewer',
+        }),
+      ]);
+      expect((prisma.cv as Record<string, jest.Mock>).findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { teamId: { in: ['team-1'] }, userId: { not: 'member' }, deletedAt: null },
+        })
+      );
+    });
+
+    it('returns nothing without an active team', async () => {
+      teams.activeMemberships.mockResolvedValue([]);
+      await expect(service.listShared('member')).resolves.toEqual({ items: [] });
+    });
   });
 });

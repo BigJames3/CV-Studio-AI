@@ -24,6 +24,7 @@ export function AppTopbar() {
         <nav className="hidden gap-3 text-sm md:flex">
           <Link href="/dashboard">Dashboard</Link>
           <Link href="/dashboard/templates">Templates</Link>
+          <Link href="/dashboard/team">Équipe</Link>
           <Link href="/marketplace">Marketplace</Link>
           <Link href="/account/profile">Profil</Link>
           <Link href="/account/billing">Facturation</Link>

@@ -83,6 +83,8 @@ export class EntitlementsService {
       // One-off purchase: no subscription required.
       'marketplace:buy': ['free', 'pro', 'business'],
       'api:access': ['business'],
+      // Creating a team, inviting members and keeping shared CVs visible to them.
+      'team:manage': ['business'],
     };
 
     const allowed = matrix[feature];

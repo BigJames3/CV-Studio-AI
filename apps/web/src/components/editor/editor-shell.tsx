@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils';
 import { TemplateWrapper } from '@/components/templates/TemplateWrapper';
 import { ExportPDFButton } from '@/components/cv-editor/ExportPDFButton';
 import { AtsPanel } from '@/components/editor/ats-panel';
+import { TeamShareSelect } from '@/components/team/team-share-select';
+import type { CvAccess } from '@/lib/api';
 import type { TemplateKey } from '@/lib/templates/types';
 import { TEMPLATE_CATALOG, TEMPLATE_DESIGN_DATA, templateKeyOf } from '@/lib/templates/catalog';
 import { templateAccessType } from '@cvstudio/shared-utils';
@@ -68,7 +70,16 @@ function ActiveSectionForm({ section }: { section: SectionId }) {
   }
 }
 
-export function EditorShell({ resumeId }: { resumeId: string }) {
+export function EditorShell({
+  resumeId,
+  access = 'owner',
+  teamId = null,
+}: {
+  resumeId: string;
+  /** `editor`: a team member editing someone else's CV (no export, no sharing). */
+  access?: CvAccess;
+  teamId?: string | null;
+}) {
   const searchParams = useSearchParams();
   const {
     content,
@@ -189,6 +200,17 @@ export function EditorShell({ resumeId }: { resumeId: string }) {
               ))}
             </select>
           </label>
+          {access === 'owner' && !resumeId.startsWith('local-') ? (
+            <TeamShareSelect cvId={resumeId} teamId={teamId} />
+          ) : null}
+          {access === 'editor' ? (
+            <span
+              className="rounded-full bg-secondary-subtle px-2 py-0.5 text-xs text-secondary"
+              data-testid="team-editing-badge"
+            >
+              CV de l’équipe
+            </span>
+          ) : null}
         </div>
         <div className="flex gap-2">
           <Button
@@ -214,12 +236,14 @@ export function EditorShell({ resumeId }: { resumeId: string }) {
           >
             ATS
           </Button>
-          <ExportPDFButton
-            cvId={resumeId}
-            content={content}
-            templateKey={templateKey}
-            cvName={content.identity.fullName || 'CV'}
-          />
+          {access === 'owner' ? (
+            <ExportPDFButton
+              cvId={resumeId}
+              content={content}
+              templateKey={templateKey}
+              cvName={content.identity.fullName || 'CV'}
+            />
+          ) : null}
         </div>
       </div>
 

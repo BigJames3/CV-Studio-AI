@@ -292,6 +292,7 @@ model Team {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   members TeamMember[]
+  cvs     Cv[]
 
   @@map("teams")
 }
@@ -362,9 +363,12 @@ model Cv {
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  /// Team the owner shared this CV with (Business). Members read or edit it by team role.
+  teamId      String?   @map("team_id") @db.Uuid
 
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   template       Template?       @relation(fields: [templateId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  team           Team?           @relation(fields: [teamId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   versions       CvVersion[]
   experiences    Experience[]
   education      Education[]
@@ -382,6 +386,7 @@ model Cv {
   @@index([createdAt], map: "idx_cvs_created_at")
   @@index([isPublic], map: "idx_cvs_is_public")
   @@index([deletedAt], map: "idx_cvs_deleted_at")
+  @@index([teamId], map: "idx_cvs_team_id")
   @@map("cvs")
 }
 

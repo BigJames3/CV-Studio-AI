@@ -7,7 +7,3 @@ replicas:
     count: 1
   - name: web
     count: 1
-  - name: worker-pdf
-    count: 1
-  - name: worker-ai
-    count: 1

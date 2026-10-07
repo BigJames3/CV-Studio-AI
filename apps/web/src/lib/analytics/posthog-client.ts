@@ -13,7 +13,7 @@ function projectKey(): string | undefined {
 }
 
 function apiHost(): string {
-  return process.env.NEXT_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com';
+  return process.env.NEXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com';
 }
 
 /** Dev captures by default so local validation works. Prod requires consent. */

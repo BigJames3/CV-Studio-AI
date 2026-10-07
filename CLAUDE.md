@@ -85,7 +85,7 @@ App Router with route groups `(marketing)`, `(auth)` and `(app)`, plus public sh
 ## Git / CI
 
 - Branches: `main` = production, `staging` = pre-production, `feature/*` or technical branches for work. Commits follow Conventional Commits (`feat:`, `fix:`, `ci:`, `chore:` ...).
-- Workflows are in `.github/workflows/`. `ci.yml` is the single CI entrypoint (push/PR, `v*` tags, manual `workflow_dispatch`): quality, build, `e2e-tests.yml` (reusable), Lighthouse, then `cd-staging.yml` / `cd-prod.yml`. Also `pr-checks.yml` (PR title), `deploy.yml` (manual prod deploy of an existing image) and `terraform.yml`.
+- Workflows are in `.github/workflows/`. `ci.yml` is the single CI entrypoint (push/PR, `v*` tags, manual `workflow_dispatch`): quality, build, `e2e-tests.yml` (reusable), Lighthouse, then `deploy-k8s.yml` (reusable deploy to OVHcloud Kubernetes: push to `staging` → staging, `v*` tag → production). Also `pr-checks.yml` (PR title), `deploy.yml` (manual prod redeploy of an existing GHCR image), `k8s-bootstrap.yml` (one-time cluster setup), `k8s-manifests.yml` (kustomize + kubeconform on PRs) and `terraform.yml` (OVHcloud infrastructure, `infrastructure/terraform-ovh`).
 - The maintainer develops on **Windows** (PowerShell, path with spaces); CI runs on Ubuntu. Account for junction vs. symlink and path differences when an issue reproduces in only one environment.
 
 ## Working conventions requested by the maintainer

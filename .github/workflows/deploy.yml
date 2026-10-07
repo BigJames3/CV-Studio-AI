@@ -1,27 +1,27 @@
-name: Deploy to Production (manual)
+name: Deploy to production (manual)
+
+# Redeploy an image that already exists on GHCR (e.g. roll forward or back to a known build).
+# The tag is the API image tag, sha-<12>; the matching web image is sha-<12>-prod.
 
 on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'ECR image tag to deploy (sha-...). Must already exist from a green CI/staging build.'
+        description: 'Existing image tag (sha-<12>) built by a green CI run'
         required: true
         type: string
 
 permissions:
-  id-token: write
   contents: read
-
-concurrency:
-  group: deploy-prod
-  cancel-in-progress: false
 
 jobs:
   deploy:
-    uses: ./.github/workflows/cd-prod.yml
+    uses: ./.github/workflows/deploy-k8s.yml
     with:
+      environment: production
       image_tag: ${{ inputs.image_tag }}
     secrets: inherit
     permissions:
-      id-token: write
       contents: read
+      packages: write
+      id-token: write

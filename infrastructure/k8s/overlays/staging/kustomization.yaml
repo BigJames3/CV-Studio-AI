@@ -38,8 +38,3 @@ patches:
       - op: replace
         path: /spec/maxReplicas
         value: 3
-replicas:
-  - name: api
-    count: 1
-  - name: web
-    count: 1

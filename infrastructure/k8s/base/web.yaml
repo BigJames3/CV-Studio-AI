@@ -1,5 +1,5 @@
 # Next.js standalone server. NEXT_PUBLIC_* values are baked into the image at build time;
-# web-secrets only carries server-side settings (optional).
+# web-secrets only carries server-side settings (optional). The HPA owns the replica count.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,7 +8,11 @@ metadata:
   labels:
     app: web
 spec:
-  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 25%
   selector:
     matchLabels:
       app: web
@@ -17,6 +21,8 @@ spec:
       labels:
         app: web
     spec:
+      imagePullSecrets:
+        - name: ghcr-pull
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001

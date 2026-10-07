@@ -1,5 +1,7 @@
 # The API serves HTTP and also renders PDFs inline with Chromium (pdf-export.service), so it
 # needs a writable /tmp and a /dev/shm on top of its read-only root filesystem.
+# Rolling update with no unavailable pod: a new pod must pass its readiness probe before an
+# old one stops. The HPA owns the replica count, so the Deployment does not set one.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,23 +9,26 @@ metadata:
   namespace: cvstudio
   labels:
     app: api
-    version: blue
 spec:
-  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 25%
   selector:
     matchLabels:
       app: api
-      version: blue
   template:
     metadata:
       labels:
         app: api
-        version: blue
       annotations:
         prometheus.io/scrape: 'true'
         prometheus.io/port: '3001'
         prometheus.io/path: '/metrics'
     spec:
+      imagePullSecrets:
+        - name: ghcr-pull
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -93,7 +98,6 @@ metadata:
 spec:
   selector:
     app: api
-    version: blue
   ports:
     - port: 80
       targetPort: http

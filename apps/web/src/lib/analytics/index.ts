@@ -35,7 +35,7 @@ function superProps(): AnalyticsProps {
     platform: 'web',
     env: process.env.NODE_ENV,
     session_id: sessionId || 'server',
-    app_version: process.env.NEXT_PUBLIC_APP_VERSION ?? '0.1.0',
+    app_version: process.env.NEXT_PUBLIC_APP_VERSION || '0.1.0',
   };
 }
 

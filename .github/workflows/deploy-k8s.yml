@@ -13,6 +13,8 @@ name: Deploy (OVHcloud Kubernetes)
 #   vars     PUBLIC_API_URL   e.g. https://api.cvstudio.ai/api/v1 (baked into the web image)
 #            PUBLIC_SITE_URL  e.g. https://cvstudio.ai
 #            STRIPE_PUBLISHABLE_KEY  pk_... (public by design, baked into the web image)
+#            GOOGLE_CLIENT_ID, LINKEDIN_CLIENT_ID, POSTHOG_KEY, POSTHOG_HOST, SENTRY_DSN_WEB
+#                             optional, public values baked into the web image
 
 on:
   workflow_call:
@@ -64,6 +66,7 @@ jobs:
           echo "api=$REGISTRY/cvstudio-api:$tag" >> "$GITHUB_OUTPUT"
           echo "web=$REGISTRY/cvstudio-web:$tag-$OVERLAY" >> "$GITHUB_OUTPUT"
           echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Check environment configuration
         env:
@@ -112,7 +115,14 @@ jobs:
           tags: ${{ steps.tag.outputs.web }}
           build-args: |
             NEXT_PUBLIC_API_URL=${{ vars.PUBLIC_API_URL }}
+            NEXT_PUBLIC_SITE_URL=${{ vars.PUBLIC_SITE_URL }}
             NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${{ vars.STRIPE_PUBLISHABLE_KEY }}
+            NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ vars.GOOGLE_CLIENT_ID }}
+            NEXT_PUBLIC_LINKEDIN_CLIENT_ID=${{ vars.LINKEDIN_CLIENT_ID }}
+            NEXT_PUBLIC_POSTHOG_KEY=${{ vars.POSTHOG_KEY }}
+            NEXT_PUBLIC_POSTHOG_HOST=${{ vars.POSTHOG_HOST }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ vars.SENTRY_DSN_WEB }}
+            NEXT_PUBLIC_APP_VERSION=${{ steps.tag.outputs.version }}
 
       - name: Check images exist (redeploy)
         if: steps.tag.outputs.build != 'true'

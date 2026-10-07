@@ -1,0 +1,49 @@
+name: Docker images
+
+# Build (never push) the API and web images on PRs that can break them, so a Dockerfile
+# error fails here instead of during a deploy. Also checks that a NEXT_PUBLIC_* build arg
+# really ends up in the web client bundle.
+
+on:
+  pull_request:
+    paths:
+      - 'apps/api/Dockerfile'
+      - 'apps/web/Dockerfile'
+      - '.dockerignore'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/docker-images.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, web]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: false
+          load: true
+          tags: cvstudio-${{ matrix.app }}:ci
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://api.ci-probe.invalid/api/v1
+            NEXT_PUBLIC_GOOGLE_CLIENT_ID=ci-probe-google-client-id
+      - name: Public build args reach the web bundle
+        if: matrix.app == 'web'
+        run: |
+          id=$(docker create cvstudio-web:ci)
+          docker cp "$id:/app" ./web-image
+          docker rm "$id" > /dev/null
+          grep -rqs 'api.ci-probe.invalid' ./web-image --include='*.js'
+          grep -rqs 'ci-probe-google-client-id' ./web-image --include='*.js'
+          echo "NEXT_PUBLIC_* build args are inlined in the bundle"

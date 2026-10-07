@@ -1,0 +1,89 @@
+name: Bootstrap cluster (OVHcloud Kubernetes)
+
+# Run once per cluster after `terraform apply` (and again to upgrade the platform charts):
+# ingress-nginx behind an OVHcloud Load Balancer, cert-manager and the Let's Encrypt issuers.
+# Prints the Load Balancer IP to put in the OVH DNS zone.
+#
+# Uses the deploy environment's OVH_KUBECONFIG secret and its ACME_EMAIL variable.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Cluster to bootstrap'
+        required: true
+        type: choice
+        options: [staging, production]
+
+permissions:
+  contents: read
+
+env:
+  INGRESS_NGINX_CHART_VERSION: 4.11.3
+  CERT_MANAGER_VERSION: v1.16.2
+
+jobs:
+  bootstrap:
+    name: Bootstrap ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Kubeconfig
+        env:
+          OVH_KUBECONFIG: ${{ secrets.OVH_KUBECONFIG }}
+        run: |
+          if [ -z "$OVH_KUBECONFIG" ]; then
+            echo "::error::OVH_KUBECONFIG is not set on the '${{ inputs.environment }}' environment"
+            exit 1
+          fi
+          umask 077
+          printf '%s\n' "$OVH_KUBECONFIG" > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: ingress-nginx
+        run: |
+          helm upgrade --install ingress-nginx ingress-nginx \
+            --repo https://kubernetes.github.io/ingress-nginx \
+            --version "$INGRESS_NGINX_CHART_VERSION" \
+            --namespace ingress-nginx --create-namespace \
+            --set controller.service.externalTrafficPolicy=Local \
+            --wait --timeout 10m
+
+      - name: cert-manager
+        run: |
+          helm upgrade --install cert-manager cert-manager \
+            --repo https://charts.jetstack.io \
+            --version "$CERT_MANAGER_VERSION" \
+            --namespace cert-manager --create-namespace \
+            --set crds.enabled=true \
+            --wait --timeout 10m
+
+      - name: Let's Encrypt issuers
+        env:
+          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+        run: |
+          if [ -z "$ACME_EMAIL" ]; then
+            echo "::error::ACME_EMAIL is not set on the '${{ inputs.environment }}' environment"
+            exit 1
+          fi
+          envsubst '${ACME_EMAIL}' < infrastructure/k8s/platform/cluster-issuer.yaml | kubectl apply -f -
+
+      - name: Load Balancer address (DNS)
+        run: |
+          for i in $(seq 1 30); do
+            ip=$(kubectl -n ingress-nginx get svc ingress-nginx-controller \
+              -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [ -n "$ip" ]; then
+              echo "Load Balancer IP: $ip"
+              echo "### DNS: point the hosts of this environment (A records) to \`$ip\`" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::The Load Balancer has no external IP after 5 minutes"
+          exit 1

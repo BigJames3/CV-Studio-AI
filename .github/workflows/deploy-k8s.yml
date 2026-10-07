@@ -1,0 +1,256 @@
+name: Deploy (OVHcloud Kubernetes)
+
+# Reusable deploy to one environment: build + scan + sign images on GHCR, refresh the
+# cluster secrets, run the database migration, roll out the overlay, smoke test, and roll
+# back automatically when the rollout or the smoke test fails.
+#
+# GitHub environment `staging` / `production` (production with required reviewers):
+#   secrets  OVH_KUBECONFIG   kubeconfig of the cluster (Terraform output `kubeconfig`)
+#            API_ENV_FILE     dotenv content of api-secrets (variables of apps/api/.env.example)
+#            WEB_ENV_FILE     optional dotenv content of web-secrets
+#            GHCR_PULL_TOKEN  fine-grained token, read-only on this repository's packages
+#            SLACK_WEBHOOK_URL optional
+#   vars     PUBLIC_API_URL   e.g. https://api.cvstudio.ai/api/v1 (baked into the web image)
+#            PUBLIC_SITE_URL  e.g. https://cvstudio.ai
+#            STRIPE_PUBLISHABLE_KEY  pk_... (public by design, baked into the web image)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'staging or production'
+        required: true
+        type: string
+      image_tag:
+        description: 'Existing image tag (sha-<12>) to redeploy. Empty = build this commit.'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+  # Keyless cosign signatures (Sigstore OIDC).
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io/bigjames3
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 45
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      OVERLAY: ${{ inputs.environment == 'production' && 'prod' || 'staging' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve image tags
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"; build=false
+          else
+            tag="sha-${GITHUB_SHA::12}"; build=true
+          fi
+          # The API image is the same everywhere; the web image bakes per-environment URLs.
+          echo "api=$REGISTRY/cvstudio-api:$tag" >> "$GITHUB_OUTPUT"
+          echo "web=$REGISTRY/cvstudio-web:$tag-$OVERLAY" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+      - name: Check environment configuration
+        env:
+          OVH_KUBECONFIG: ${{ secrets.OVH_KUBECONFIG }}
+          API_ENV_FILE: ${{ secrets.API_ENV_FILE }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+          PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
+          PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL }}
+        run: |
+          missing=0
+          for name in OVH_KUBECONFIG API_ENV_FILE GHCR_PULL_TOKEN PUBLIC_API_URL PUBLIC_SITE_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not set on the '${{ inputs.environment }}' environment"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.tag.outputs.build == 'true'
+
+      - name: Build & push API
+        id: api
+        if: steps.tag.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ${{ steps.tag.outputs.api }}
+
+      - name: Build & push web
+        id: web
+        if: steps.tag.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ${{ steps.tag.outputs.web }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.PUBLIC_API_URL }}
+            NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${{ vars.STRIPE_PUBLISHABLE_KEY }}
+
+      - name: Check images exist (redeploy)
+        if: steps.tag.outputs.build != 'true'
+        run: |
+          docker manifest inspect "${{ steps.tag.outputs.api }}" > /dev/null
+          docker manifest inspect "${{ steps.tag.outputs.web }}" > /dev/null
+
+      - name: Scan API image (critical CVEs block the deploy)
+        if: steps.tag.outputs.build == 'true'
+        uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          image-ref: ${{ steps.tag.outputs.api }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Scan web image (critical CVEs block the deploy)
+        if: steps.tag.outputs.build == 'true'
+        uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          image-ref: ${{ steps.tag.outputs.web }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - uses: sigstore/cosign-installer@v3
+        if: steps.tag.outputs.build == 'true'
+
+      - name: Sign images (keyless)
+        if: steps.tag.outputs.build == 'true'
+        run: |
+          cosign sign --yes "$REGISTRY/cvstudio-api@${{ steps.api.outputs.digest }}"
+          cosign sign --yes "$REGISTRY/cvstudio-web@${{ steps.web.outputs.digest }}"
+
+      - name: Kubeconfig
+        env:
+          OVH_KUBECONFIG: ${{ secrets.OVH_KUBECONFIG }}
+        run: |
+          umask 077
+          printf '%s\n' "$OVH_KUBECONFIG" > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Namespace and secrets
+        env:
+          API_ENV_FILE: ${{ secrets.API_ENV_FILE }}
+          WEB_ENV_FILE: ${{ secrets.WEB_ENV_FILE }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          umask 077
+          kubectl create namespace cvstudio --dry-run=client -o yaml | kubectl apply -f -
+          printf '%s\n' "$API_ENV_FILE" > "$RUNNER_TEMP/api.env"
+          kubectl -n cvstudio create secret generic api-secrets \
+            --from-env-file="$RUNNER_TEMP/api.env" --dry-run=client -o yaml | kubectl apply -f -
+          if [ -n "$WEB_ENV_FILE" ]; then
+            printf '%s\n' "$WEB_ENV_FILE" > "$RUNNER_TEMP/web.env"
+            kubectl -n cvstudio create secret generic web-secrets \
+              --from-env-file="$RUNNER_TEMP/web.env" --dry-run=client -o yaml | kubectl apply -f -
+          fi
+          kubectl -n cvstudio create secret docker-registry ghcr-pull \
+            --docker-server=ghcr.io \
+            --docker-username="${{ github.repository_owner }}" \
+            --docker-password="$GHCR_PULL_TOKEN" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          rm -f "$RUNNER_TEMP/api.env" "$RUNNER_TEMP/web.env"
+
+      - name: Migrate database (release image)
+        run: |
+          kubectl -n cvstudio delete job db-migrate --ignore-not-found --wait=true
+          sed "s|image: IMAGE|image: ${{ steps.tag.outputs.api }}|" infrastructure/k8s/jobs/db-migrate.yaml \
+            | kubectl apply -f -
+          if ! kubectl -n cvstudio wait --for=condition=complete job/db-migrate --timeout=600s; then
+            kubectl -n cvstudio logs job/db-migrate --tail=200 \
+              || echo "::warning::Could not read the migration logs"
+            echo "::error::Database migration failed: nothing was rolled out"
+            exit 1
+          fi
+          kubectl -n cvstudio logs job/db-migrate --tail=50
+
+      - name: Roll out
+        id: rollout
+        run: |
+          kubectl kustomize "infrastructure/k8s/overlays/$OVERLAY" \
+            | sed -e "s|$REGISTRY/cvstudio-api:replace-me|${{ steps.tag.outputs.api }}|g" \
+                  -e "s|$REGISTRY/cvstudio-web:replace-me|${{ steps.tag.outputs.web }}|g" \
+            > "$RUNNER_TEMP/rendered.yaml"
+          if grep -q 'replace-me' "$RUNNER_TEMP/rendered.yaml"; then
+            echo "::error::An image tag was not substituted"
+            exit 1
+          fi
+          kubectl apply -f "$RUNNER_TEMP/rendered.yaml"
+          kubectl -n cvstudio rollout status deploy/api --timeout=600s
+          kubectl -n cvstudio rollout status deploy/web --timeout=600s
+
+      - name: Smoke test
+        env:
+          PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
+          PUBLIC_SITE_URL: ${{ vars.PUBLIC_SITE_URL }}
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS "$PUBLIC_API_URL/health/ready" > /dev/null; then break; fi
+            [ "$i" = 10 ] && { echo "::error::API not ready at $PUBLIC_API_URL"; exit 1; }
+            sleep 6
+          done
+          body=$(curl -fsS "$PUBLIC_API_URL/health")
+          echo "$body"
+          echo "$body" | grep -q '"status":"ok"'
+          curl -fsS -o /dev/null "$PUBLIC_SITE_URL/"
+          curl -fsS -o /dev/null "$PUBLIC_SITE_URL/pricing"
+
+      - name: Roll back on failure
+        if: failure() && steps.rollout.outcome != 'skipped'
+        run: |
+          echo "::error::Rollout or smoke test failed: rolling back API and web"
+          kubectl -n cvstudio rollout undo deploy/api
+          kubectl -n cvstudio rollout undo deploy/web
+          kubectl -n cvstudio rollout status deploy/api --timeout=600s
+          kubectl -n cvstudio rollout status deploy/web --timeout=600s
+
+      - name: Notify Slack
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL not set: no notification"
+            exit 0
+          fi
+          if [ "${{ job.status }}" = "success" ]; then
+            text="✅ ${{ inputs.environment }} deployed ${{ steps.tag.outputs.api }}"
+          else
+            text="🚨 ${{ inputs.environment }} deploy failed (rolled back if it had started)"
+          fi
+          text="$text — ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          curl -fsS -X POST "$SLACK_WEBHOOK_URL" -H 'Content-type: application/json' \
+            --data "$(jq -n --arg t "$text" '{text: $t}')"

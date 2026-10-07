@@ -397,11 +397,14 @@ jobs:
     if: >
       github.event_name == 'push' &&
       github.ref == 'refs/heads/staging'
-    uses: ./.github/workflows/cd-staging.yml
+    uses: ./.github/workflows/deploy-k8s.yml
+    with:
+      environment: staging
     secrets: inherit
     permissions:
-      id-token: write
       contents: read
+      packages: write
+      id-token: write
 
   # ============================================================
   # 6. PRODUCTION DEPLOY
@@ -413,8 +416,11 @@ jobs:
     if: >
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v')
-    uses: ./.github/workflows/cd-prod.yml
+    uses: ./.github/workflows/deploy-k8s.yml
+    with:
+      environment: production
     secrets: inherit
     permissions:
-      id-token: write
       contents: read
+      packages: write
+      id-token: write

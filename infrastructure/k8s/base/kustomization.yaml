@@ -4,7 +4,6 @@ namespace: cvstudio
 resources:
   - namespace.yaml
   - api.yaml
-  - blue-green-api.yaml
   - web.yaml
   - ingress.yaml
   - stripe-webhook-retry-cronjob.yaml

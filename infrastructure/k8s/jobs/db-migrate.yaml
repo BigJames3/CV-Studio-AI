@@ -1,0 +1,32 @@
+# Applied by the deploy workflow before each release, with the release image:
+#   sed "s|IMAGE|ghcr.io/...:sha-xxx|" jobs/db-migrate.yaml | kubectl apply -f -
+# Kept out of the kustomization: a Job's pod template is immutable, so re-applying the
+# overlay with a new image would fail. The workflow deletes the previous Job first.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  namespace: cvstudio
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: IMAGE
+          command: ['pnpm', 'exec', 'prisma', 'migrate', 'deploy']
+          envFrom:
+            - secretRef:
+                name: api-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']

@@ -4,11 +4,18 @@ namespace: cvstudio
 resources:
   - namespace.yaml
   - api.yaml
-  - web.yaml
-  - workers.yaml
-  - ingress.yaml
-  - migrate-job.yaml
   - blue-green-api.yaml
+  - web.yaml
+  - ingress.yaml
   - stripe-webhook-retry-cronjob.yaml
-commonLabels:
-  app.kubernetes.io/part-of: cvstudio
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: cvstudio
+# Placeholder image names, mapped to GHCR by each overlay; the deploy workflow sets the tag.
+images:
+  - name: cvstudio-api
+    newName: ghcr.io/bigjames3/cvstudio-api
+    newTag: replace-me
+  - name: cvstudio-web
+    newName: ghcr.io/bigjames3/cvstudio-web
+    newTag: replace-me

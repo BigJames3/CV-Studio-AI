@@ -1,18 +1,22 @@
+# ingress-nginx behind the OVHcloud Load Balancer, TLS from cert-manager (Let's Encrypt).
+# Production hosts here; the staging overlay replaces them.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: cvstudio
   namespace: cvstudio
   annotations:
-    kubernetes.ingress.kubernetes.io/scheme: internet-facing
-    kubernetes.ingress.kubernetes.io/target-type: ip
-    kubernetes.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: '443'
-    # ACM ARN set per overlay
-    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:...
-    alb.ingress.kubernetes.io/healthcheck-path: /api/v1/health
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    # The API accepts bodies up to 1.5 MB (main.ts).
+    nginx.ingress.kubernetes.io/proxy-body-size: 2m
 spec:
-  ingressClassName: alb
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.cvstudio.ai
+        - cvstudio.ai
+      secretName: cvstudio-tls
   rules:
     - host: api.cvstudio.ai
       http:
@@ -24,7 +28,7 @@ spec:
                 name: api
                 port:
                   number: 80
-    - host: app.cvstudio.ai
+    - host: cvstudio.ai
       http:
         paths:
           - path: /

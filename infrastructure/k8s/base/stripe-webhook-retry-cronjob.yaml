@@ -17,9 +17,16 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: webhook-retry
-              image: cvstudioai/api:latest
+              # Same image and tag as the API (set by kustomize), never an untagged :latest.
+              image: cvstudio-api
               imagePullPolicy: IfNotPresent
               envFrom:
                 - secretRef:
@@ -31,4 +38,10 @@ spec:
                   value: '1'
                 - name: WEBHOOK_DLQ_RETRY_LIMIT
                   value: '50'
+              # `command` replaces the image entrypoint, so no migration runs every 5 minutes.
               command: ['node', 'dist/scripts/retry-webhook-dlq.js']
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ['ALL']

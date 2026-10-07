@@ -1,3 +1,5 @@
+# The API serves HTTP and also renders PDFs inline with Chromium (pdf-export.service), so it
+# needs a writable /tmp and a /dev/shm on top of its read-only root filesystem.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,14 +24,16 @@ spec:
         prometheus.io/port: '3001'
         prometheus.io/path: '/metrics'
     spec:
-      serviceAccountName: api
       securityContext:
         runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: api
-          image: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/api:sha-replace
+          image: cvstudio-api
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3001
@@ -49,6 +53,7 @@ spec:
             httpGet:
               path: /api/v1/health
               port: http
+            initialDelaySeconds: 30
             periodSeconds: 15
           resources:
             requests:
@@ -56,16 +61,29 @@ spec:
               memory: 512Mi
             limits:
               cpu: '1'
-              memory: 1Gi
+              memory: 1536Mi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ['ALL']
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: dshm
+              mountPath: /dev/shm
           lifecycle:
             preStop:
               exec:
                 command: ['/bin/sh', '-c', 'sleep 10']
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
 ---
 apiVersion: v1
 kind: Service

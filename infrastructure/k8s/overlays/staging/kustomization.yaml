@@ -1,11 +1,45 @@
+# Staging cluster: staging hosts (real Let's Encrypt certificates: Stripe and OAuth callbacks
+# need them), smaller replica floors for the small node pool.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../../base
-images:
-  - name: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/api
-    newTag: staging
-  - name: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/web
-    newTag: staging
-  - name: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/worker
-    newTag: staging
+patches:
+  - target:
+      kind: Ingress
+      name: cvstudio
+    patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts
+        value: [api.staging.cvstudio.ai, staging.cvstudio.ai]
+      - op: replace
+        path: /spec/rules/0/host
+        value: api.staging.cvstudio.ai
+      - op: replace
+        path: /spec/rules/1/host
+        value: staging.cvstudio.ai
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 3
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: web
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 3
+replicas:
+  - name: api
+    count: 1
+  - name: web
+    count: 1

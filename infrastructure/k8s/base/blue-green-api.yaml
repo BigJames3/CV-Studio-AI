@@ -1,4 +1,6 @@
-# Blue-Green: deploy api-green alongside api (blue). Flip Service selector to version=green after smoke.
+# Blue-green: api-green runs the new release next to api (blue). After the smoke test the
+# deploy workflow points the api Service at version=green. Same spec as blue: secrets,
+# volumes and security context must match, or the release smoke-tested is not the one served.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,23 +20,68 @@ spec:
       labels:
         app: api
         version: green
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '3001'
+        prometheus.io/path: '/metrics'
     spec:
-      serviceAccountName: api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: api
-          image: 000000000000.dkr.ecr.eu-west-1.amazonaws.com/cvstudio/api:sha-replace
+          image: cvstudio-api
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3001
               name: http
+          envFrom:
+            - secretRef:
+                name: api-secrets
+          env:
+            - name: STRIPE_FAIL_CLOSED
+              value: '1'
           readinessProbe:
             httpGet:
               path: /api/v1/health/ready
               port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
           resources:
             requests:
               cpu: 250m
               memory: 512Mi
             limits:
               cpu: '1'
-              memory: 1Gi
-# After smoke: kubectl -n cvstudio patch svc api -p '{"spec":{"selector":{"app":"api","version":"green"}}}'
+              memory: 1536Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: dshm
+              mountPath: /dev/shm
+          lifecycle:
+            preStop:
+              exec:
+                command: ['/bin/sh', '-c', 'sleep 10']
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi

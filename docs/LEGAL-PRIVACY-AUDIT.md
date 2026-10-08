@@ -150,19 +150,19 @@ Non traités, **À décider** :
 
 ## G. Tests
 
-| Vérification                                                               | Résultat                 | Commentaire                            |
-| -------------------------------------------------------------------------- | ------------------------ | -------------------------------------- |
-| `pnpm lint`                                                                | ✅ 11/11                 | avertissements existants uniquement    |
-| `pnpm typecheck`                                                           | ✅ 11/11                 |                                        |
-| `pnpm test`                                                                | ✅                       |                                        |
-| API Jest + couverture                                                      | ✅ 592 tests, 53 suites  | seuils par fichier respectés           |
-| API e2e (Postgres + Redis réels)                                           | ✅ 41/41                 |                                        |
-| Build web                                                                  | ✅                       | 6 routes juridiques statiques          |
-| Playwright `legal-privacy.spec.ts`, build de prod avec clé PostHog factice | ✅ 18/18                 |                                        |
-| Playwright `legal-privacy.spec.ts`, `next dev`                             | ✅ 16, 2 ignorés         | les 2 ignorés exigent un build de prod |
-| Playwright, suite complète (hors `@stripe`)                                | voir le rapport de la PR |                                        |
-| Paiements Stripe réels ou en mode test                                     | non exécuté              | aucune clé ; `@stripe` exclu           |
-| Production (DNS, HTTPS, webhooks, sauvegardes)                             | non vérifiable           | environnement pas encore déployé       |
+| Vérification                                                               | Résultat                | Commentaire                                                                                |
+| -------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------ |
+| `pnpm lint`                                                                | ✅ 11/11                | avertissements existants uniquement                                                        |
+| `pnpm typecheck`                                                           | ✅ 11/11                |                                                                                            |
+| `pnpm test`                                                                | ✅                      |                                                                                            |
+| API Jest + couverture                                                      | ✅ 592 tests, 53 suites | seuils par fichier respectés                                                               |
+| API e2e (Postgres + Redis réels)                                           | ✅ 41/41                |                                                                                            |
+| Build web                                                                  | ✅                      | 6 routes juridiques statiques                                                              |
+| Playwright `legal-privacy.spec.ts`, build de prod avec clé PostHog factice | ✅ 18/18                |                                                                                            |
+| Playwright `legal-privacy.spec.ts`, `next dev`                             | ✅ 16, 2 ignorés        | les 2 ignorés exigent un build de prod                                                     |
+| Playwright, suite complète (hors `@stripe`), build de prod                 | ✅ 54 réussis, 1 ignoré | les 4 fichiers paiement/limites relancés avec `DATABASE_URL` (seed direct en base) : 10/10 |
+| Paiements Stripe réels ou en mode test                                     | non exécuté             | aucune clé ; `@stripe` exclu                                                               |
+| Production (DNS, HTTPS, webhooks, sauvegardes)                             | non vérifiable          | environnement pas encore déployé                                                           |
 
 ## H. Fichiers
 

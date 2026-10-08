@@ -1,7 +1,7 @@
 'use client';
 
 import posthog from 'posthog-js';
-import { readConsent, writeConsent } from './consent';
+import { readConsent } from './consent';
 
 let initialized = false;
 
@@ -58,9 +58,9 @@ export function initPostHog(): void {
   });
 }
 
+/** Starts capture. The consent itself is recorded by the caller, on an explicit choice only. */
 export function optInPostHog(): void {
   if (typeof window === 'undefined') return;
-  writeConsent('granted');
   if (!initialized) initPostHog();
   if (initialized) posthog.opt_in_capturing();
 }
@@ -85,7 +85,6 @@ function clearPostHogStorage(): void {
 
 export function optOutPostHog(): void {
   if (typeof window === 'undefined') return;
-  writeConsent('denied');
   if (initialized) {
     posthog.opt_out_capturing();
     posthog.reset();

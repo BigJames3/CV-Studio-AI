@@ -10,6 +10,7 @@ import {
   resetPostHog,
   shouldAutoEnable,
 } from './posthog-client';
+import { writeConsent } from './consent';
 
 type IdentifyTraits = Record<string, string | number | boolean | null | undefined>;
 
@@ -41,6 +42,8 @@ function superProps(): AnalyticsProps {
 
 /** Call after cookie consent accepted (or automatically in development). */
 export function enableAnalytics() {
+  // Recorded only here, on the visitor's choice: page loads must not renew the consent date.
+  writeConsent('granted');
   consented = true;
   ensureSession();
   initPostHog();
@@ -48,6 +51,7 @@ export function enableAnalytics() {
 }
 
 export function disableAnalytics() {
+  writeConsent('denied');
   consented = false;
   optOutPostHog();
 }

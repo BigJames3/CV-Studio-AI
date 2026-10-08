@@ -20,6 +20,7 @@ export function ConsentBanner() {
   const configured = isPostHogConfigured();
   const titleId = useId();
   const firstAction = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (configured && readConsent() === null) setMode('banner');
@@ -36,6 +37,23 @@ export function ConsentBanner() {
     if (mode === 'preferences') firstAction.current?.focus();
   }, [mode]);
 
+  // The panel is fixed at the bottom: reserve its height so the footer (legal links) stays
+  // reachable while it is open.
+  useEffect(() => {
+    const element = panel.current;
+    if (mode === 'hidden' || !element) return;
+    const reserve = () => {
+      document.body.style.paddingBottom = `${element.offsetHeight}px`;
+    };
+    reserve();
+    const observer = new ResizeObserver(reserve);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      document.body.style.paddingBottom = '';
+    };
+  }, [mode]);
+
   if (mode === 'hidden') return null;
 
   const save = (granted: boolean) => {
@@ -46,6 +64,7 @@ export function ConsentBanner() {
 
   return (
     <div
+      ref={panel}
       role="dialog"
       aria-labelledby={titleId}
       data-testid="cookie-consent"

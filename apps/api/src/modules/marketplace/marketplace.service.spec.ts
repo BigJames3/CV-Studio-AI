@@ -8,6 +8,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import Stripe from 'stripe';
 import { MarketplaceService } from './marketplace.service';
 
 function p2002(target: string[]) {
@@ -677,8 +678,70 @@ describe('MarketplaceService security fixes', () => {
         expect.objectContaining({
           amount: 4000,
           destination: 'acct_seller',
-        })
+        }),
+        expect.objectContaining({ idempotencyKey: expect.any(String) })
       );
+    });
+
+    describe('on several API replicas', () => {
+      const seller = {
+        id: 'profile-1',
+        userId: 'seller-1',
+        stripeAccountId: 'acct_seller',
+        payoutsEnabled: true,
+        status: 'active',
+        tier: 'trusted',
+        user: { email: 'ada@example.com' },
+      };
+
+      beforeEach(() => {
+        prisma.sellerProfile.findMany.mockResolvedValue([seller]);
+        prisma.marketplaceLedgerEntry.aggregate
+          .mockResolvedValueOnce({ _sum: { amountCents: 4000 } })
+          .mockResolvedValueOnce({ _sum: { amountCents: 0 } });
+      });
+
+      it('sends the transfer with a key stable for the seller, day and amount', async () => {
+        stripe.transfers.create.mockResolvedValue({ id: 'tr_1' });
+        prisma.sellerPayout.create.mockResolvedValue({ id: 'po-1' });
+
+        await service.processWeeklyPayouts(new Date('2026-09-09T09:00:03Z'));
+
+        expect(stripe.transfers.create).toHaveBeenCalledWith(expect.anything(), {
+          idempotencyKey: 'marketplace-payout:profile-1:2026-09-09:4000',
+        });
+      });
+
+      it('skips without a second ledger row when another replica recorded the transfer', async () => {
+        stripe.transfers.create.mockResolvedValue({ id: 'tr_1' });
+        prisma.sellerPayout.create.mockRejectedValue(
+          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+            code: 'P2002',
+            clientVersion: 'test',
+            meta: { target: ['stripe_transfer_id'] },
+          })
+        );
+
+        const result = await service.processWeeklyPayouts(new Date('2026-09-09T09:00:03Z'));
+
+        expect(result.paidCount).toBe(0);
+        expect(prisma.marketplaceLedgerEntry.create).not.toHaveBeenCalled();
+        expect(prisma.sellerPayout.create).toHaveBeenCalledTimes(1);
+      });
+
+      it('records nothing as failed while another replica holds the key', async () => {
+        stripe.transfers.create.mockRejectedValue(
+          new Stripe.errors.StripeIdempotencyError({
+            message: 'Key in use',
+            type: 'idempotency_error',
+          })
+        );
+
+        const result = await service.processWeeklyPayouts(new Date('2026-09-09T09:00:03Z'));
+
+        expect(result.paidCount).toBe(0);
+        expect(prisma.sellerPayout.create).not.toHaveBeenCalled();
+      });
     });
 
     it('skips sellers below the $25 minimum', async () => {

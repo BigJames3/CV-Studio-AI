@@ -4,12 +4,12 @@ This is the **code-accurate** runbook. Keys are never committed. The 6-minute br
 
 ## What the code does
 
-| Surface | SDK              | Env                                                   | Behavior                                                                      |
-| ------- | ---------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Web     | `posthog-js`     | `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | Client events after consent (auto-on in `development`)                        |
-| API     | `posthog-node`   | `POSTHOG_API_KEY`, `POSTHOG_HOST`                     | Dual-write: `analytics_events` + PostHog                                      |
-| Web     | `@sentry/nextjs` | `NEXT_PUBLIC_SENTRY_DSN`                              | Client + server/edge. Dev events dropped unless `NEXT_PUBLIC_SENTRY_DEV=true` |
-| API     | `@sentry/node`   | `SENTRY_DSN`                                          | 5xx via `GlobalExceptionFilter` + Stripe webhook fatals                       |
+| Surface | SDK              | Env                                                         | Behavior                                                                                               |
+| ------- | ---------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Web     | `posthog-js`     | `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`       | Loaded only after consent (auto-on in `development`)                                                   |
+| API     | `posthog-node`   | `POSTHOG_API_KEY`, `POSTHOG_HOST`, `POSTHOG_SERVER_CAPTURE` | Always `analytics_events`; PostHog only with `POSTHOG_SERVER_CAPTURE=true` (ignores the cookie choice) |
+| Web     | `@sentry/nextjs` | `NEXT_PUBLIC_SENTRY_DSN`                                    | Client + server/edge. Dev events dropped unless `NEXT_PUBLIC_SENTRY_DEV=true`                          |
+| API     | `@sentry/node`   | `SENTRY_DSN`                                                | 5xx via `GlobalExceptionFilter` + Stripe webhook fatals                                                |
 
 EU residency: set host to `https://eu.i.posthog.com` (web + API) and create the PostHog project in the EU cloud.
 

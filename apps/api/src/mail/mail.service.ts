@@ -1,6 +1,29 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 
+/** `a***@example.com`: enough to tell recipients apart in logs without storing the address. */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf('@');
+  if (at < 1) return '***';
+  return `${email[0]}***${email.slice(at)}`;
+}
+
+export function smtpTransportOptions(env: NodeJS.ProcessEnv = process.env) {
+  const host = env.SMTP_HOST ?? 'localhost';
+  const port = Number(env.SMTP_PORT ?? 1025);
+  const user = env.SMTP_USER;
+  const pass = env.SMTP_PASS;
+  return {
+    host,
+    port,
+    // Implicit TLS (port 465); otherwise STARTTLS when the server offers it.
+    secure: env.SMTP_SECURE === 'true' || env.SMTP_SECURE === '1',
+    ...(user && pass ? { auth: { user, pass } } : {}),
+    // Certificates are checked in production; the local catcher (Mailpit) has none.
+    tls: { rejectUnauthorized: env.NODE_ENV === 'production' },
+  };
+}
+
 @Injectable()
 export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
@@ -14,20 +37,15 @@ export class MailService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    const host = process.env.SMTP_HOST ?? 'localhost';
-    const port = Number(process.env.SMTP_PORT ?? 1025);
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: false,
-      tls: { rejectUnauthorized: false },
-    });
+    const options = smtpTransportOptions();
+    const { host, port } = options;
+    this.transporter = nodemailer.createTransport(options);
     try {
       await this.transporter.verify();
       this.logger.log(`SMTP ready ${host}:${port}`);
     } catch (err) {
       this.logger.warn(
-        `SMTP unavailable (${host}:${port}) — emails will be logged only: ${(err as Error).message}`
+        `SMTP unavailable (${host}:${port}) — sending will fail until it is reachable: ${(err as Error).message}`
       );
     }
   }
@@ -42,8 +60,10 @@ export class MailService implements OnModuleInit {
         text: options.text,
       });
     } catch (err) {
-      this.logger.warn(`Failed to send mail to ${options.to}: ${(err as Error).message}`);
-      this.logger.debug(`Mail fallback subject=${options.subject} text=${options.text ?? ''}`);
+      // Never log the body: it carries verification and password-reset links.
+      this.logger.warn(
+        `Failed to send "${options.subject}" to ${maskEmail(options.to)}: ${(err as Error).message}`
+      );
     }
   }
 

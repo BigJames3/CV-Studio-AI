@@ -1,7 +1,9 @@
 import { Controller, Get, Patch, Delete, Body } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
 import { CurrentUser, AuthUser } from '../../common/decorators';
 
 @ApiTags('Users')
@@ -17,7 +19,8 @@ export class UsersController {
   }
 
   @Get('me/export')
-  @ApiOperation({ summary: 'GDPR/CCPA data export (JSON)' })
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Copy of the personal data held on the account (JSON)' })
   exportMe(@CurrentUser() user: AuthUser) {
     return this.users.exportMe(user.id);
   }
@@ -29,8 +32,9 @@ export class UsersController {
   }
 
   @Delete('me')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'Erase account, CV PII, and cancel billing (GDPR Art. 17)' })
-  deleteMe(@CurrentUser() user: AuthUser) {
-    return this.users.deleteMe(user.id);
+  deleteMe(@CurrentUser() user: AuthUser, @Body() dto: DeleteAccountDto) {
+    return this.users.deleteMe(user.id, dto);
   }
 }

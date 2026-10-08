@@ -108,7 +108,7 @@ export function PrivacySettings({ user }: { user: UserProfile }) {
         </Button>
       </section>
 
-      <section className="rounded-md border border-error/40 p-4">
+      <section className="rounded-md border border-error p-4">
         <h2 className="text-lg font-semibold text-error">Supprimer mon compte</h2>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-content-secondary">
           <li>Vos CV, versions, rapports ATS, historique IA et portfolios sont effacés.</li>

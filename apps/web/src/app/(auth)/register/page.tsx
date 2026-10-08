@@ -268,10 +268,6 @@ export default function RegisterPage() {
               J’accepte les{' '}
               <Link href="/terms" className="text-primary underline">
                 conditions d’utilisation
-              </Link>{' '}
-              et la{' '}
-              <Link href="/privacy" className="text-primary underline">
-                politique de confidentialité
               </Link>
               .
             </label>
@@ -280,6 +276,14 @@ export default function RegisterPage() {
             id="acceptedTerms-error"
             message={form.formState.errors.acceptedTerms?.message}
           />
+          <p className="text-xs text-content-secondary" data-testid="register-privacy-notice">
+            Vos données sont traitées pour créer et faire fonctionner votre compte, comme décrit
+            dans la{' '}
+            <Link href="/privacy" className="text-primary underline">
+              politique de confidentialité
+            </Link>
+            . Aucun e-mail marketing ne vous sera envoyé.
+          </p>
 
           <Button
             type="submit"

@@ -75,8 +75,9 @@ export function track(event: AnalyticsEventName, properties: AnalyticsProps = {}
     return;
   }
   ensureReady();
-  ensureSession();
   if (!consented) return;
+  // The session id is analytics storage too: only created once measurement is allowed.
+  ensureSession();
 
   const payload = {
     event,

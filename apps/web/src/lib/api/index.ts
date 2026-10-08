@@ -205,6 +205,8 @@ export type UserProfile = {
   countryCode?: string | null;
   isEmailVerified?: boolean;
   is2faEnabled?: boolean;
+  /** False for OAuth-only accounts: deleting them asks for the e-mail instead. */
+  hasPassword?: boolean;
   lastLoginAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
@@ -224,15 +226,17 @@ export const usersApi = {
   getMe: () => apiClient<UserProfile>('/users/me'),
   updateMe: (body: UpdateProfileInput) =>
     apiClient<UserProfile>('/users/me', { method: 'PATCH', body }),
-  deleteMe: () =>
+  deleteMe: (confirmation: { password?: string; confirmEmail?: string }) =>
     apiClient<{
       deleted: boolean;
       dataPurged?: boolean;
       billingCanceled?: boolean;
       stripeCanceled?: boolean;
-    }>('/users/me', { method: 'DELETE' }),
+    }>('/users/me', { method: 'DELETE', body: confirmation }),
   exportMe: () =>
-    apiClient<{ exportedAt: string; user: UserProfile; cvs: unknown[] }>('/users/me/export'),
+    apiClient<{ exportedAt: string; user: UserProfile; cvs: unknown[] } & Record<string, unknown>>(
+      '/users/me/export'
+    ),
 };
 
 export type CvListItem = {

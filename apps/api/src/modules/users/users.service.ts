@@ -44,10 +44,12 @@ export class UsersService {
   async me(userId: string) {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
-      select: PROFILE_SELECT,
+      select: { ...PROFILE_SELECT, passwordHash: true },
     });
     if (!user) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found' });
-    return user;
+    const { passwordHash, ...profile } = user;
+    // Tells the client which confirmation account deletion needs; the hash never leaves.
+    return { ...profile, hasPassword: Boolean(passwordHash) };
   }
 
   /**

@@ -166,6 +166,16 @@ describe('UsersService.deleteMe / exportMe', () => {
     expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({ action: 'gdpr.export' }));
   });
 
+  it('says whether the account has a password without returning the hash', async () => {
+    const { service, prisma } = createService();
+    prisma.user.findFirst.mockResolvedValue({ id: userId, email: 'a@b.c', passwordHash });
+
+    const profile = await service.me(userId);
+
+    expect(profile).toMatchObject({ id: userId, hasPassword: true });
+    expect(profile).not.toHaveProperty('passwordHash');
+  });
+
   it('exports nothing for a deleted account', async () => {
     const { service, prisma } = createService();
     prisma.user.findFirst.mockResolvedValue(null);

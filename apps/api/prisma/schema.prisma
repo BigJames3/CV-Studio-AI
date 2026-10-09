@@ -135,6 +135,7 @@ enum ModerationDecision {
   approve
   request_changes
   reject
+  suspend
 }
 
 enum DisputeType {

@@ -44,7 +44,13 @@ export function BuyLicenceButton({ listingId }: { listingId: string }) {
         window.location.assign(`/login?next=/marketplace/${listingId}`);
         return;
       }
-      setError(err instanceof Error ? err.message : 'Paiement indisponible pour le moment.');
+      if (err instanceof ApiError && err.code === 'ALREADY_PURCHASED') {
+        setError('Vous possédez déjà ce modèle.');
+      } else if (err instanceof ApiError && err.code === 'OWN_LISTING') {
+        setError('Vous ne pouvez pas acheter votre propre modèle.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Paiement indisponible pour le moment.');
+      }
     } finally {
       setPending(false);
     }

@@ -96,6 +96,17 @@ export class PaymentsService {
       });
     }
 
+    if (session.mode === 'payment' && session.metadata?.type === 'marketplace') {
+      const buyer = session.metadata?.buyerId ?? session.client_reference_id;
+      if (buyer !== userId || !this.marketplace) throw notFound;
+      if (session.status !== 'complete') return { confirmed: false };
+      // Same path as the webhook: the payment is re-read from Stripe and applied once.
+      const result = await this.marketplace.fulfillCheckoutSession(session);
+      return {
+        confirmed: result?.outcome === 'fulfilled' || result?.outcome === 'already_fulfilled',
+      };
+    }
+
     const owner = session.client_reference_id ?? session.metadata?.userId;
     if (owner !== userId || session.mode !== 'subscription') throw notFound;
     if (session.status !== 'complete') return { confirmed: false };
@@ -296,6 +307,12 @@ export class PaymentsService {
         await this.onCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
         break;
       }
+      case 'checkout.session.async_payment_succeeded': {
+        // Delayed payment methods: the licence is granted once the money is actually in.
+        const session = event.data.object as Stripe.Checkout.Session;
+        if (session.metadata?.type === 'marketplace') await this.onCheckoutCompleted(session);
+        break;
+      }
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
         await this.onSubscriptionChanged(event.data.object as Stripe.Subscription);
@@ -308,6 +325,16 @@ export class PaymentsService {
       }
       case 'invoice.payment_failed': {
         await this.onInvoiceFailed(event.data.object as Stripe.Invoice);
+        break;
+      }
+      case 'charge.refunded': {
+        // Marketplace licences only; subscription refunds change nothing here.
+        await this.marketplace?.onChargeRefunded(event.data.object as Stripe.Charge);
+        break;
+      }
+      case 'charge.dispute.created':
+      case 'charge.dispute.closed': {
+        await this.marketplace?.onChargeDispute(event.data.object as Stripe.Dispute, event.type);
         break;
       }
       case 'account.updated': {
@@ -330,8 +357,10 @@ export class PaymentsService {
       if (!this.marketplace) {
         throw new Error(`Marketplace fulfillment not wired (session=${session.id})`);
       }
-      await this.marketplace.fulfillCheckoutSession(session);
-      this.logger.log(`Marketplace licence fulfilled via checkout ${session.id}`);
+      const result = await this.marketplace.fulfillCheckoutSession(session);
+      this.logger.log(
+        `Marketplace checkout ${session.id}: ${result?.outcome ?? 'awaiting_payment'}`
+      );
       return;
     }
 

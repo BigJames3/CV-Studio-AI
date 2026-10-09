@@ -9,11 +9,15 @@ type Env = Record<string, string | undefined>;
 /** Events POST /payments/webhook handles for the platform account. */
 export const ACCOUNT_WEBHOOK_EVENTS = [
   'checkout.session.completed',
+  'checkout.session.async_payment_succeeded',
   'customer.subscription.updated',
   'customer.subscription.deleted',
   'invoice.paid',
   'invoice.payment_succeeded',
   'invoice.payment_failed',
+  'charge.refunded',
+  'charge.dispute.created',
+  'charge.dispute.closed',
 ] as const;
 
 const WEBHOOK_PATH = '/api/v1/payments/webhook';

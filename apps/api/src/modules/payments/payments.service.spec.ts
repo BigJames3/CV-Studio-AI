@@ -694,6 +694,71 @@ describe('PaymentsService webhook fail-closed', () => {
       );
     });
 
+    describe('marketplace sessions', () => {
+      const marketplaceSession = {
+        mode: 'payment',
+        payment_status: 'paid',
+        client_reference_id: 'user-1',
+        metadata: { type: 'marketplace', listingId: 'listing-1', buyerId: 'user-1' },
+        subscription: null,
+        invoice: null,
+      };
+
+      function withMarketplace(outcome: string | null) {
+        const marketplace = {
+          fulfillCheckoutSession: jest
+            .fn()
+            .mockResolvedValue(outcome ? { outcome, purchase: { id: 'pur-1' } } : null),
+        };
+        const withMkt = new PaymentsService(
+          prisma as never,
+          subscriptions as never,
+          mail as never,
+          webhookStore as never,
+          alerts as never,
+          marketplace as never
+        );
+        (withMkt as unknown as { stripe: unknown }).stripe = (
+          service as unknown as { stripe: unknown }
+        ).stripe;
+        return { withMkt, marketplace };
+      }
+
+      it('applies a paid licence from the session read on Stripe', async () => {
+        attachSession(marketplaceSession);
+        const { withMkt, marketplace } = withMarketplace('fulfilled');
+
+        await expect(withMkt.confirmCheckoutSession('user-1', 'cs_test_1')).resolves.toEqual({
+          confirmed: true,
+        });
+        expect(marketplace.fulfillCheckoutSession).toHaveBeenCalled();
+        expect(subscriptions.applyPaidEntitlement).not.toHaveBeenCalled();
+      });
+
+      it("refuses another buyer's session", async () => {
+        attachSession({
+          ...marketplaceSession,
+          metadata: { ...marketplaceSession.metadata, buyerId: 'user-2' },
+        });
+        const { withMkt, marketplace } = withMarketplace('fulfilled');
+
+        await expect(withMkt.confirmCheckoutSession('user-1', 'cs_test_1')).rejects.toMatchObject({
+          response: { code: 'CHECKOUT_SESSION_NOT_FOUND' },
+        });
+        expect(marketplace.fulfillCheckoutSession).not.toHaveBeenCalled();
+      });
+
+      it('is not confirmed while the payment is pending or was a duplicate', async () => {
+        attachSession(marketplaceSession);
+        await expect(
+          withMarketplace(null).withMkt.confirmCheckoutSession('user-1', 'cs_test_1')
+        ).resolves.toEqual({ confirmed: false });
+        await expect(
+          withMarketplace('duplicate_payment').withMkt.confirmCheckoutSession('user-1', 'cs_test_1')
+        ).resolves.toEqual({ confirmed: false });
+      });
+    });
+
     it("refuses another user's session without revealing it", async () => {
       attachSession({ client_reference_id: 'user-2', metadata: { userId: 'user-2' } });
 

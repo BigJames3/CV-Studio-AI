@@ -5,6 +5,7 @@ describe('CvsService feature gates', () => {
   const prisma = {
     cv: { create: jest.fn(), findFirst: jest.fn(), update: jest.fn(), count: jest.fn() },
     template: { findFirst: jest.fn() },
+    marketplacePurchase: { findFirst: jest.fn() },
     $transaction: jest.fn(),
   };
   const tx = { $executeRaw: jest.fn().mockResolvedValue(1), cv: prisma.cv };
@@ -91,6 +92,88 @@ describe('CvsService feature gates', () => {
       'templates:pro',
       'This template requires a Pro or Business plan'
     );
+  });
+
+  describe('marketplace templates follow the licence, not the plan', () => {
+    const SELLER_TEMPLATE = '33333333-3333-4333-8333-333333333333';
+
+    beforeEach(() => {
+      prisma.template.findFirst.mockResolvedValue({
+        isPremium: true,
+        createdBy: 'seller-1',
+        designData: { key: 'executive', defaults: {} },
+      });
+    });
+
+    it('lets a Free buyer create a CV with the purchased design, premium layout included', async () => {
+      prisma.marketplacePurchase.findFirst.mockResolvedValue({ id: 'pur-1' });
+
+      await service.create('u1', {
+        title: 'From marketplace',
+        templateId: SELLER_TEMPLATE,
+        content: { templateKey: 'executive' },
+      });
+
+      expect(prisma.marketplacePurchase.findFirst).toHaveBeenCalledWith({
+        where: { buyerId: 'u1', refundedAt: null, listing: { templateId: SELLER_TEMPLATE } },
+        select: { id: true },
+      });
+      expect(entitlements.assertCan).not.toHaveBeenCalledWith(
+        'u1',
+        'templates:pro',
+        expect.anything()
+      );
+      expect(prisma.cv.create).toHaveBeenCalled();
+    });
+
+    it('refuses the design without a licence, even on a paid plan', async () => {
+      prisma.marketplacePurchase.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.create('u1', { title: 'Copy', templateId: SELLER_TEMPLATE })
+      ).rejects.toMatchObject({ response: { code: 'TEMPLATE_LICENCE_REQUIRED' } });
+      expect(prisma.cv.create).not.toHaveBeenCalled();
+    });
+
+    it('lets the seller use their own design without buying it', async () => {
+      await service.create('seller-1', { title: 'Mine', templateId: SELLER_TEMPLATE });
+      expect(prisma.marketplacePurchase.findFirst).not.toHaveBeenCalled();
+      expect(prisma.cv.create).toHaveBeenCalled();
+    });
+
+    it('does not open other premium layouts to a Free buyer', async () => {
+      prisma.marketplacePurchase.findFirst.mockResolvedValue({ id: 'pur-1' });
+      entitlements.assertCan.mockImplementation(async (_u: string, feature: string) => {
+        if (feature === 'templates:pro')
+          throw new ForbiddenException({ code: 'ENTITLEMENT_REQUIRED' });
+      });
+
+      await expect(
+        service.create('u1', {
+          title: 'Other layout',
+          templateId: SELLER_TEMPLATE,
+          content: { templateKey: 'elegant' },
+        })
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('refuses a copy once the licence was refunded', async () => {
+      prisma.cv.findFirst.mockResolvedValue({
+        id: 'cv-1',
+        userId: 'u1',
+        title: 'CV',
+        content: {},
+        locale: 'fr-FR',
+        paper: 'A4',
+        templateId: SELLER_TEMPLATE,
+        deletedAt: null,
+      });
+      prisma.marketplacePurchase.findFirst.mockResolvedValue(null);
+
+      await expect(service.duplicate('u1', 'cv-1')).rejects.toMatchObject({
+        response: { code: 'TEMPLATE_LICENCE_REQUIRED' },
+      });
+    });
   });
 
   describe('premium template picked in the editor (content.templateKey)', () => {

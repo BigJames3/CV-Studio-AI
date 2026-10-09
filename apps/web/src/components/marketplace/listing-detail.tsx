@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { marketplaceApi, queryKeys } from '@/lib/api';
-import { BuyLicenceButton } from '@/components/marketplace/buy-licence-button';
+import { LicenceAction } from '@/components/marketplace/licence-action';
 import {
   CATEGORY_LABELS,
   formatListingPrice,
@@ -15,6 +15,7 @@ import {
 export function ListingDetail({ listingId }: { listingId: string }) {
   const searchParams = useSearchParams();
   const checkout = searchParams.get('checkout');
+  const checkoutSessionId = checkout === 'success' ? searchParams.get('session_id') : null;
   const {
     data: listing,
     isLoading,
@@ -59,7 +60,7 @@ export function ListingDetail({ listingId }: { listingId: string }) {
             className="mb-4 rounded-lg border border-primary/30 bg-primary-subtle px-3 py-2 text-sm"
             data-testid="marketplace-checkout-success"
           >
-            Paiement reçu. La licence s’active dès confirmation Stripe (quelques secondes).
+            Retour du paiement. La licence s’active dès que Stripe confirme le paiement.
           </p>
         ) : null}
         {checkout === 'cancel' ? (
@@ -85,7 +86,11 @@ export function ListingDetail({ listingId }: { listingId: string }) {
             ? ` · ${rating.toFixed(1)}/5 (${listing.reviewCount ?? listing.reviews?.length ?? 0})`
             : ''}
         </p>
-        <BuyLicenceButton listingId={listing.id} />
+        <LicenceAction
+          listingId={listing.id}
+          title={listing.title}
+          checkoutSessionId={checkoutSessionId}
+        />
         {listing.reviews && listing.reviews.length > 0 ? (
           <section className="mt-8" aria-labelledby="reviews-heading">
             <h2 id="reviews-heading" className="text-lg font-semibold">

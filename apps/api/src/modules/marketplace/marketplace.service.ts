@@ -15,6 +15,7 @@ import { PrismaService } from '../../database/prisma.module';
 import { appOriginFromEnv } from '../../common/utils/url.utils';
 import { stripeSecretForClient } from '../payments/payment-env';
 import { emitSecurityAlert } from '../../observability/security-alert';
+import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 import {
   PAYOUT_MIN_CENTS,
   PRICE_MAX_CENTS,
@@ -43,6 +44,31 @@ const PUBLIC_SELLER_SELECT = {
 } as const;
 
 const TEMPLATE_CATEGORIES = new Set<string>(Object.values(TemplateCategory));
+
+/** Layouts the editor can render: a seller design customises one of them. */
+const EDITOR_TEMPLATE_KEYS: ReadonlySet<string> = new Set(
+  TEMPLATE_SEEDS.map((t) => String(t.designData.key))
+);
+
+function assertRenderableDesign(designData: Record<string, unknown>) {
+  const key = designData.key;
+  const defaults = designData.defaults;
+  if (typeof key !== 'string' || !EDITOR_TEMPLATE_KEYS.has(key)) {
+    throw new BadRequestException({
+      code: 'TEMPLATE_DESIGN_INVALID',
+      message: `designData.key must be one of: ${[...EDITOR_TEMPLATE_KEYS].join(', ')}`,
+    });
+  }
+  if (
+    defaults !== undefined &&
+    (typeof defaults !== 'object' || defaults === null || Array.isArray(defaults))
+  ) {
+    throw new BadRequestException({
+      code: 'TEMPLATE_DESIGN_INVALID',
+      message: 'designData.defaults must be an object',
+    });
+  }
+}
 
 function parseTemplateCategory(raw?: string): TemplateCategory | undefined {
   if (!raw || !TEMPLATE_CATEGORIES.has(raw)) return undefined;
@@ -258,6 +284,8 @@ export class MarketplaceService {
       designData: Record<string, unknown>;
     }
   ) {
+    // Buyers get this design in the editor: it must be one the editor can render.
+    assertRenderableDesign(input.designData);
     return this.prisma.template.create({
       data: {
         name: input.name,

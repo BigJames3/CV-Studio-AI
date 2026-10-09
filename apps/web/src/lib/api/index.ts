@@ -23,6 +23,7 @@ export const queryKeys = {
   marketplaceCatalog: (filters?: { q?: string; category?: string; sort?: string }) =>
     ['marketplace', 'templates', filters ?? {}] as const,
   marketplaceListing: (id: string) => ['marketplace', 'listing', id] as const,
+  marketplaceLicence: (id: string) => ['marketplace', 'licence', id] as const,
   sessions: ['auth', 'sessions'] as const,
   payments: ['payments', 'history'] as const,
   teams: ['teams'] as const,
@@ -569,6 +570,12 @@ export const marketplaceApi = {
     tags?: string[];
   }) => apiClient('/marketplace/seller/listings', { method: 'POST', body }),
   getListing: (id: string) => apiClient<MarketplaceListing>(`/marketplace/templates/${id}`),
+  licence: (id: string) =>
+    apiClient<{
+      listingId: string;
+      templateId: string | null;
+      status: 'none' | 'active' | 'refunded' | 'owner';
+    }>(`/marketplace/templates/${id}/licence`),
   getDesign: (id: string) =>
     apiClient<{ listingId: string; templateId: string; designData: unknown }>(
       `/marketplace/templates/${id}/design`

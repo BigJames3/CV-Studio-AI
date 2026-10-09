@@ -176,6 +176,25 @@ describe('MarketplaceService security fixes', () => {
       });
     });
 
+    it('refuses a design the editor cannot render', async () => {
+      for (const designData of [
+        { defaults: {} },
+        { key: 'made-up' },
+        { key: 'modern', defaults: [] },
+      ]) {
+        await expect(
+          service.createSellerTemplate('seller-1', {
+            name: 'Mine',
+            description: 'A design',
+            category: 'modern',
+            previewImageUrl: '/p.png',
+            designData,
+          })
+        ).rejects.toMatchObject({ response: { code: 'TEMPLATE_DESIGN_INVALID' } });
+      }
+      expect(prisma.template.create).not.toHaveBeenCalled();
+    });
+
     it('createSellerTemplate sets createdBy and stays unpublished', async () => {
       prisma.template.create.mockResolvedValue({
         id: 'tmpl-new',
@@ -189,7 +208,7 @@ describe('MarketplaceService security fixes', () => {
         description: 'A design',
         category: 'modern',
         previewImageUrl: '/p.png',
-        designData: { defaults: {} },
+        designData: { key: 'modern', defaults: {} },
       });
 
       expect(created.createdBy).toBe('seller-1');

@@ -79,8 +79,10 @@ export class CvsService {
   }
 
   async create(userId: string, dto: CreateCvDto) {
-    await this.assertTemplateAccess(userId, dto.templateId);
-    await this.assertTemplateKeyAccess(userId, contentTemplateKey(dto.content));
+    const licensedKey = await this.assertTemplateAccess(userId, dto.templateId);
+    const key = contentTemplateKey(dto.content);
+    // A purchased template may be built on a premium layout: the licence covers that layout.
+    if (key !== licensedKey) await this.assertTemplateKeyAccess(userId, key);
 
     return this.createWithinQuota(userId, {
       userId,
@@ -173,14 +175,20 @@ export class CvsService {
 
   async update(userId: string, id: string, dto: UpdateCvDto) {
     const cv = await this.getAccessible(userId, id, 'edit');
-    // Premium templates follow the CV owner's plan, whoever edits.
-    await this.assertTemplateAccess(cv.userId, dto.templateId);
+    // Premium templates follow the CV owner's plan (marketplace ones, their licence), whoever
+    // edits.
+    const licensedKey = await this.assertTemplateAccess(cv.userId, dto.templateId);
     if (dto.content !== undefined) {
       // The editor switches template through content.templateKey, not templateId. A CV that
       // already uses a premium template (e.g. after a downgrade) stays editable.
       const nextKey = contentTemplateKey(dto.content);
-      if (nextKey !== contentTemplateKey(cv.content)) {
-        await this.assertTemplateKeyAccess(cv.userId, nextKey);
+      if (nextKey !== contentTemplateKey(cv.content) && nextKey !== licensedKey) {
+        // The CV's own marketplace template may cover a premium layout.
+        const coveredKey =
+          dto.templateId === undefined
+            ? await this.licensedTemplateKey(cv.userId, cv.templateId)
+            : undefined;
+        if (nextKey !== coveredKey) await this.assertTemplateKeyAccess(cv.userId, nextKey);
       }
     }
     const content =
@@ -255,6 +263,8 @@ export class CvsService {
 
   async duplicate(userId: string, id: string) {
     const source = await this.get(userId, id);
+    // A copy is a new use of a marketplace licence: refused once it was refunded.
+    await this.assertTemplateAccess(userId, source.templateId, { sellerTemplatesOnly: true });
 
     return this.createWithinQuota(userId, {
       userId,
@@ -372,14 +382,50 @@ export class CvsService {
     return this.getAccessible(userId, cvId);
   }
 
-  private async assertTemplateAccess(userId: string, templateId?: string) {
-    if (!templateId) return;
+  /**
+   * Official premium templates follow the plan. Marketplace (seller) templates follow the
+   * licence instead: the seller and buyers with a non-refunded purchase, whatever their plan,
+   * and nobody else, even on Business. Returns the editor key the licence covers.
+   */
+  private async assertTemplateAccess(
+    userId: string,
+    templateId?: string | null,
+    opts: { sellerTemplatesOnly?: boolean } = {}
+  ): Promise<string | undefined> {
+    if (!templateId) return undefined;
     const template = await this.prisma.template.findFirst({
       where: { id: templateId },
-      select: { isPremium: true },
+      select: { isPremium: true, createdBy: true, designData: true },
     });
-    if (!template?.isPremium) return;
+    if (!template) return undefined;
+    if (template.createdBy) {
+      if (template.createdBy !== userId) {
+        const licence = await this.prisma.marketplacePurchase.findFirst({
+          where: { buyerId: userId, refundedAt: null, listing: { templateId } },
+          select: { id: true },
+        });
+        if (!licence) {
+          throw new ForbiddenException({
+            code: 'TEMPLATE_LICENCE_REQUIRED',
+            message: 'Buy this marketplace template to use it',
+          });
+        }
+      }
+      const key = (template.designData as { key?: unknown } | null)?.key;
+      return typeof key === 'string' ? key : undefined;
+    }
+    if (opts.sellerTemplatesOnly || !template.isPremium) return undefined;
     await this.entitlements.assertCan(userId, 'templates:pro', PREMIUM_TEMPLATE_MESSAGE);
+    return undefined;
+  }
+
+  /** Editor key of a marketplace template the user may use, or undefined. Never throws. */
+  private async licensedTemplateKey(userId: string, templateId?: string | null) {
+    try {
+      return await this.assertTemplateAccess(userId, templateId, { sellerTemplatesOnly: true });
+    } catch {
+      return undefined;
+    }
   }
 
   private async assertTemplateKeyAccess(userId: string, templateKey?: string) {

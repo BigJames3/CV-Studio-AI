@@ -16,11 +16,15 @@ import { ConfirmPurchaseDto } from './dto/confirm-purchase.dto';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { CreateSellerTemplateDto } from './dto/create-seller-template.dto';
 import { MarketplaceService } from './marketplace.service';
+import { MarketplaceModerationService } from './marketplace-moderation.service';
 
 @ApiTags('Marketplace')
 @Controller('marketplace')
 export class MarketplaceController {
-  constructor(private readonly marketplace: MarketplaceService) {}
+  constructor(
+    private readonly marketplace: MarketplaceService,
+    private readonly moderation: MarketplaceModerationService
+  ) {}
 
   @Public()
   @Get('templates')
@@ -118,6 +122,20 @@ export class MarketplaceController {
   @Post('seller/listings')
   createListing(@CurrentUser() user: AuthUser, @Body() body: CreateListingDto) {
     return this.marketplace.submitListing(user.id, body);
+  }
+
+  @ApiBearerAuth('JWT')
+  @Post('seller/listings/:id/unpublish')
+  @ApiOperation({ summary: 'Withdraw your published listing (sales history is kept)' })
+  unpublishListing(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.moderation.unpublishOwn(user.id, id);
+  }
+
+  @ApiBearerAuth('JWT')
+  @Post('seller/listings/:id/resubmit')
+  @ApiOperation({ summary: 'Send your listing back to moderation' })
+  resubmitListing(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.moderation.resubmitOwn(user.id, id);
   }
 
   @ApiBearerAuth('JWT')

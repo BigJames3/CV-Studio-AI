@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { CookiePreferencesButton } from '@/components/analytics/cookie-preferences-button';
+import { LEGAL_LINKS } from '@/components/legal/legal-page';
 
 export function MarketingHeader() {
   return (
@@ -43,25 +45,39 @@ export function MarketingHeader() {
 export function MarketingFooter() {
   return (
     <footer className="border-t border-[#1A3340] bg-[#0B1F2A] text-[#A8C5BE]">
-      <div className="mx-auto flex max-w-content flex-col gap-4 px-4 py-10 text-sm md:flex-row md:justify-between">
+      <div className="mx-auto flex max-w-content flex-col gap-6 px-4 py-10 text-sm md:flex-row md:justify-between">
         <p>© {new Date().getFullYear()} CV Studio AI</p>
-        <div className="flex flex-wrap gap-4">
-          <Link href="/pricing" className="hover:text-white">
-            Pricing
-          </Link>
-          <Link href="/templates" className="hover:text-white">
-            Templates
-          </Link>
-          <Link href="/privacy" className="hover:text-white">
-            Confidentialité
-          </Link>
-          <Link href="/terms" className="hover:text-white">
-            Conditions
-          </Link>
-          <a href="mailto:support@cvstudio.ai" className="hover:text-white">
-            Support
-          </a>
-        </div>
+        <nav aria-label="Pied de page" className="grid gap-6 sm:grid-cols-2">
+          <ul className="space-y-2">
+            <li>
+              <Link href="/pricing" className="hover:text-white">
+                Pricing
+              </Link>
+            </li>
+            <li>
+              <Link href="/templates" className="hover:text-white">
+                Templates
+              </Link>
+            </li>
+            <li>
+              <a href="mailto:support@cvstudio.ai" className="hover:text-white">
+                Support
+              </a>
+            </li>
+          </ul>
+          <ul className="space-y-2">
+            {LEGAL_LINKS.map((link) => (
+              <li key={link.href}>
+                <Link href={link.href} className="hover:text-white">
+                  {link.label}
+                </Link>
+              </li>
+            ))}
+            <li>
+              <CookiePreferencesButton className="hover:text-white" />
+            </li>
+          </ul>
+        </nav>
       </div>
     </footer>
   );

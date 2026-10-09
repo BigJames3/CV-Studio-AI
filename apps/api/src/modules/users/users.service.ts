@@ -1,9 +1,17 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../database/prisma.module';
 import { AuthSessionService } from '../auth/auth-session.service';
 import { AuthAuditService } from '../auth/auth-audit.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
 
 const PROFILE_SELECT = {
   id: true,
@@ -36,32 +44,228 @@ export class UsersService {
   async me(userId: string) {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
-      select: PROFILE_SELECT,
+      select: { ...PROFILE_SELECT, passwordHash: true },
     });
     if (!user) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found' });
-    return user;
+    const { passwordHash, ...profile } = user;
+    // Tells the client which confirmation account deletion needs; the hash never leaves.
+    return { ...profile, hasPassword: Boolean(passwordHash) };
   }
 
+  /**
+   * Copy of the personal data stored in this database for the account. Secrets (password
+   * hash, 2FA secret and backup codes, OAuth tokens, refresh token ids) are never included;
+   * `notIncluded` lists what the export does not cover so the user is not misled.
+   */
   async exportMe(userId: string) {
-    const user = await this.me(userId);
-    const cvs = await this.prisma.cv.findMany({
-      where: { userId, deletedAt: null },
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
       select: {
-        id: true,
-        title: true,
-        content: true,
-        isPublic: true,
-        publicUrl: true,
-        locale: true,
-        paper: true,
-        createdAt: true,
+        ...PROFILE_SELECT,
+        dateOfBirth: true,
+        subscriptionStartDate: true,
+        subscriptionEndDate: true,
+        trialUsed: true,
+        trialStartedAt: true,
+        trialEndsAt: true,
         updatedAt: true,
       },
     });
+    if (!user) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found' });
+
+    const [
+      cvs,
+      aiHistory,
+      subscription,
+      oauthAccounts,
+      sessions,
+      notifications,
+      portfolios,
+      teamMemberships,
+      sellerProfile,
+      marketplacePurchases,
+      templateReviews,
+      disputes,
+      analyticsEvents,
+      securityLog,
+    ] = await Promise.all([
+      this.prisma.cv.findMany({
+        where: { userId, deletedAt: null },
+        select: {
+          id: true,
+          title: true,
+          content: true,
+          isPublic: true,
+          publicUrl: true,
+          locale: true,
+          paper: true,
+          createdAt: true,
+          updatedAt: true,
+          versions: {
+            select: { versionNumber: true, label: true, content: true, createdAt: true },
+          },
+          atsReports: {
+            select: {
+              jobDescription: true,
+              atsScore: true,
+              missingKeywords: true,
+              recommendations: true,
+              createdAt: true,
+            },
+          },
+        },
+      }),
+      this.prisma.aiHistory.findMany({
+        where: { userId },
+        select: { cvId: true, actionType: true, prompt: true, result: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.subscription.findUnique({
+        where: { userId },
+        select: {
+          status: true,
+          currentPeriodStart: true,
+          currentPeriodEnd: true,
+          cancelAtPeriodEnd: true,
+          canceledAt: true,
+          provider: true,
+          createdAt: true,
+          plan: { select: { name: true } },
+          payments: {
+            select: {
+              amount: true,
+              currency: true,
+              status: true,
+              paymentMethod: true,
+              createdAt: true,
+            },
+          },
+          invoices: {
+            select: {
+              invoiceNumber: true,
+              amount: true,
+              currency: true,
+              status: true,
+              dueDate: true,
+              paidAt: true,
+            },
+          },
+        },
+      }),
+      this.prisma.userOauthAccount.findMany({
+        where: { userId },
+        select: { provider: true, providerId: true, createdAt: true },
+      }),
+      this.prisma.authSession.findMany({
+        where: { userId },
+        select: {
+          createdAt: true,
+          lastActivityAt: true,
+          expiresAt: true,
+          revokedAt: true,
+          userAgent: true,
+          ipAddress: true,
+        },
+      }),
+      this.prisma.notification.findMany({
+        where: { userId },
+        select: { type: true, title: true, message: true, isRead: true, createdAt: true },
+      }),
+      this.prisma.portfolio.findMany({
+        where: { userId },
+        select: {
+          title: true,
+          description: true,
+          items: true,
+          publicUrl: true,
+          isPublished: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+      this.prisma.teamMember.findMany({
+        where: { userId },
+        select: { role: true, createdAt: true, team: { select: { name: true } } },
+      }),
+      this.prisma.sellerProfile.findUnique({
+        where: { userId },
+        select: {
+          displayName: true,
+          slug: true,
+          bio: true,
+          avatarUrl: true,
+          country: true,
+          portfolioUrl: true,
+          status: true,
+          tier: true,
+          payoutsEnabled: true,
+          tosAcceptedAt: true,
+          createdAt: true,
+          payouts: {
+            select: { amountCents: true, currency: true, status: true, paidAt: true },
+          },
+        },
+      }),
+      this.prisma.marketplacePurchase.findMany({
+        where: { buyerId: userId },
+        select: {
+          listingId: true,
+          amountCents: true,
+          currency: true,
+          refundedAt: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.templateReview.findMany({
+        where: { reviewerId: userId },
+        select: { marketplaceTemplateId: true, rating: true, comment: true, createdAt: true },
+      }),
+      this.prisma.marketplaceDispute.findMany({
+        where: { buyerId: userId },
+        select: { type: true, status: true, reason: true, createdAt: true, resolvedAt: true },
+      }),
+      this.prisma.analyticsEvent.findMany({
+        where: { userId },
+        select: { eventType: true, eventData: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.auditLog.findMany({
+        where: { userId },
+        select: {
+          action: true,
+          entityType: true,
+          ipAddress: true,
+          userAgent: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    await this.audit.log({ userId, action: 'gdpr.export', entityId: userId });
+
     return {
       exportedAt: new Date().toISOString(),
       user,
       cvs,
+      aiHistory,
+      subscription,
+      oauthAccounts,
+      sessions,
+      notifications,
+      portfolios,
+      teamMemberships,
+      sellerProfile,
+      marketplacePurchases,
+      templateReviews,
+      disputes,
+      analyticsEvents,
+      securityLog,
+      notIncluded: [
+        'Secrets: password hash, two-factor secret and backup codes, OAuth tokens',
+        'Data held by processors (Stripe, PostHog, Sentry, the AI provider, the e-mail relay): ask them or contact us',
+        'Server logs and backups',
+      ],
     };
   }
 
@@ -102,12 +306,13 @@ export class UsersService {
    * GDPR Art. 17: cancel billing immediately, purge CVs/AI/sessions, anonymize
    * the user row (kept for invoice/tax FKs). Never returns a fake purgeScheduled.
    */
-  async deleteMe(userId: string) {
+  async deleteMe(userId: string, dto: DeleteAccountDto = {}) {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, email: true, passwordHash: true },
     });
     if (!user) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found' });
+    await this.assertDeletionConfirmed(user, dto);
 
     await this.sessions.revokeAllForUser(userId);
 
@@ -131,6 +336,17 @@ export class UsersService {
       await tx.authSession.deleteMany({ where: { userId } });
       await tx.notification.deleteMany({ where: { userId } });
       await tx.portfolio.deleteMany({ where: { userId } });
+      await tx.teamMember.deleteMany({ where: { userId } });
+      await tx.collabSession.deleteMany({ where: { userId } });
+      await tx.collabSnapshot.updateMany({
+        where: { createdById: userId },
+        data: { createdById: null },
+      });
+      // Product metrics keep their counts but no longer point to the person.
+      await tx.analyticsEvent.updateMany({
+        where: { userId },
+        data: { userId: null, sessionId: null },
+      });
       await tx.user.update({
         where: { id: userId },
         data: {
@@ -167,5 +383,37 @@ export class UsersService {
       billingCanceled,
       stripeCanceled,
     };
+  }
+
+  /**
+   * A stolen access token alone must not erase an account: password accounts re-enter the
+   * password, OAuth-only accounts type their e-mail. 403 (not 401) so the client does not
+   * try to refresh the session.
+   */
+  private async assertDeletionConfirmed(
+    user: { email: string; passwordHash: string | null },
+    dto: DeleteAccountDto
+  ) {
+    if (user.passwordHash) {
+      if (!dto.password) {
+        throw new BadRequestException({
+          code: 'PASSWORD_REQUIRED',
+          message: 'Enter your password to delete the account',
+        });
+      }
+      if (!(await bcrypt.compare(dto.password, user.passwordHash))) {
+        throw new ForbiddenException({
+          code: 'INVALID_CREDENTIALS',
+          message: 'Password is incorrect',
+        });
+      }
+      return;
+    }
+    if (dto.confirmEmail?.trim().toLowerCase() !== user.email.toLowerCase()) {
+      throw new BadRequestException({
+        code: 'EMAIL_CONFIRMATION_REQUIRED',
+        message: 'Type the e-mail address of the account to delete it',
+      });
+    }
   }
 }

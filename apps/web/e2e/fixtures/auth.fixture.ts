@@ -35,7 +35,7 @@ export const test = base.extend<AuthFixtures>({
   testUser: async ({ request }, use) => {
     const user = await apiRegister(request);
     await use(user);
-    await deleteUser(request, user.accessToken);
+    await deleteUser(request, user.accessToken, user.password);
   },
 });
 

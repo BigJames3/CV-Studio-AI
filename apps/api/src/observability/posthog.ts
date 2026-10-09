@@ -15,9 +15,18 @@ export function getMarketingSpendMonthly(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 0;
 }
 
+/**
+ * Server events carry the account id and do not see the visitor's cookie choice, so a
+ * visitor who refused audience measurement would still be followed. They stay in our own
+ * database (analytics_events) and reach PostHog only when explicitly enabled.
+ */
+export function isServerCaptureEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(env.POSTHOG_API_KEY?.startsWith('phc_')) && env.POSTHOG_SERVER_CAPTURE === 'true';
+}
+
 function getClient(): PostHog | null {
   if (client !== undefined) return client;
-  if (!isPostHogConfigured() || process.env.NODE_ENV === 'test') {
+  if (!isServerCaptureEnabled() || process.env.NODE_ENV === 'test') {
     client = null;
     return client;
   }

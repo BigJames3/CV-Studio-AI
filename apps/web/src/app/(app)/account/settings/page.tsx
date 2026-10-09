@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMe, useUpdateProfile } from '@/hooks';
@@ -9,18 +9,25 @@ import { ChangePasswordForm } from '@/components/profile/ChangePasswordForm';
 import { SessionsList } from '@/components/profile/SessionsList';
 import { LogoutButton } from '@/components/profile/LogoutButton';
 import { TwoFactorSetup } from '@/components/profile/TwoFactorSetup';
+import { PrivacySettings } from '@/components/profile/PrivacySettings';
 import { useAuthStore } from '@/stores/auth-store';
 
 const TABS = [
   { id: 'profile', label: 'Profil' },
   { id: 'security', label: 'Sécurité' },
   { id: 'sessions', label: 'Sessions' },
+  { id: 'privacy', label: 'Confidentialité' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<TabId>('profile');
+  // `?tab=privacy` is linked from the privacy policy.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    if (TABS.some((t) => t.id === requested)) setTab(requested as TabId);
+  }, []);
   const router = useRouter();
   const { data: user, isLoading, isError } = useMe();
   const updateProfile = useUpdateProfile();
@@ -92,6 +99,7 @@ export default function SettingsPage() {
           </div>
         )}
         {tab === 'sessions' && <SessionsList />}
+        {tab === 'privacy' && <PrivacySettings user={user} />}
       </div>
 
       <div className="mt-10 border-t border-border pt-6">

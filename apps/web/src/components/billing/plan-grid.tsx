@@ -1,6 +1,7 @@
 'use client';
 
 import { CheckCircle2, XCircle } from 'lucide-react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { BillingPlan } from '@/lib/api';
@@ -187,6 +188,20 @@ export function PlanGrid({
           );
         })}
       </div>
+      <p className="mt-6 text-xs text-content-secondary" data-testid="plan-grid-terms">
+        Abonnement sans engagement, renouvelé automatiquement à chaque période jusqu’à résiliation
+        depuis votre espace Facturation. Pendant l’essai gratuit, une carte est demandée et le
+        premier paiement a lieu à la fin de l’essai si vous ne résiliez pas avant. En vous abonnant,
+        vous acceptez les{' '}
+        <Link href="/subscription-terms" className="text-primary underline">
+          conditions d’abonnement
+        </Link>{' '}
+        et la{' '}
+        <Link href="/refund-policy" className="text-primary underline">
+          politique de remboursement
+        </Link>
+        .
+      </p>
     </div>
   );
 }

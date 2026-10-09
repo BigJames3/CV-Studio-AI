@@ -1,8 +1,7 @@
 'use client';
 
 import posthog from 'posthog-js';
-
-const CONSENT_KEY = 'cv_analytics_consent';
+import { readConsent } from './consent';
 
 let initialized = false;
 
@@ -20,22 +19,26 @@ function apiHost(): string {
 export function shouldAutoEnable(): boolean {
   if (typeof window === 'undefined') return false;
   if (process.env.NEXT_PUBLIC_POSTHOG_OPT_OUT === 'true') return false;
-  if (window.localStorage.getItem(CONSENT_KEY) === 'granted') return true;
-  if (window.localStorage.getItem(CONSENT_KEY) === 'denied') return false;
+  const consent = readConsent();
+  if (consent) return consent === 'granted';
   return process.env.NODE_ENV === 'development';
 }
 
 export function hasStoredConsent(): boolean {
-  if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem(CONSENT_KEY) === 'granted';
+  return readConsent() === 'granted';
 }
 
 export function isPostHogConfigured(): boolean {
   return Boolean(projectKey());
 }
 
+/**
+ * Loads PostHog. Only called once capture is allowed: PostHog writes its own cookie and
+ * localStorage entry as soon as it starts, even when capture is opted out.
+ */
 export function initPostHog(): void {
   if (typeof window === 'undefined' || initialized) return;
+  if (!shouldAutoEnable()) return;
   const key = projectKey();
   if (!key) return;
 
@@ -55,20 +58,38 @@ export function initPostHog(): void {
   });
 }
 
+/** Starts capture. The consent itself is recorded by the caller, on an explicit choice only. */
 export function optInPostHog(): void {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(CONSENT_KEY, 'granted');
   if (!initialized) initPostHog();
   if (initialized) posthog.opt_in_capturing();
 }
 
+/** Removes what PostHog stored in this browser (cookie `ph_*`, localStorage `ph_*`). */
+function clearPostHogStorage(): void {
+  try {
+    for (const key of Object.keys(window.localStorage)) {
+      if (key.startsWith('ph_') || key.startsWith('__ph_')) window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Storage disabled: nothing was stored.
+  }
+  for (const cookie of document.cookie.split(';')) {
+    const name = cookie.split('=')[0]?.trim();
+    if (name && (name.startsWith('ph_') || name.startsWith('__ph_'))) {
+      document.cookie = `${name}=; Max-Age=0; path=/`;
+      document.cookie = `${name}=; Max-Age=0; path=/; domain=.${window.location.hostname}`;
+    }
+  }
+}
+
 export function optOutPostHog(): void {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(CONSENT_KEY, 'denied');
   if (initialized) {
     posthog.opt_out_capturing();
     posthog.reset();
   }
+  clearPostHogStorage();
 }
 
 export function identifyPostHog(

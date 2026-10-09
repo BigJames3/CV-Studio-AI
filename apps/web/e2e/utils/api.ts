@@ -167,9 +167,11 @@ export async function cancelSubscription(request: APIRequestContext, token: stri
 }
 
 /** GDPR soft-delete — isolates leftover rows from later logins. */
-export async function deleteUser(request: APIRequestContext, token: string) {
+export async function deleteUser(request: APIRequestContext, token: string, password: string) {
   const res = await request.delete(`${API_URL}/users/me`, {
     headers: await apiAuthHeaders(token),
+    // Deleting the account asks for the password again.
+    data: { password },
   });
   if (!res.ok()) {
     // Best-effort teardown: never fail the test after assertions passed.

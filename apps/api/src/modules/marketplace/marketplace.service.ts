@@ -814,48 +814,30 @@ export class MarketplaceService {
       if (available < PAYOUT_MIN_CENTS) continue;
 
       const periodStart = new Date(cutoff);
+      // The cron runs on every API replica. The same seller, day and amount give the same
+      // key, so Stripe returns the first transfer instead of sending the money again.
+      const idempotencyKey = `marketplace-payout:${seller.id}:${now.toISOString().slice(0, 10)}:${available}`;
+      let transfer: Stripe.Transfer;
       try {
-        const transfer = await stripe.transfers.create({
-          amount: available,
-          currency: 'usd',
-          destination: seller.stripeAccountId,
-          metadata: {
-            type: 'marketplace_payout',
-            sellerId: seller.userId,
-            sellerProfileId: seller.id,
+        transfer = await stripe.transfers.create(
+          {
+            amount: available,
+            currency: 'usd',
+            destination: seller.stripeAccountId,
+            metadata: {
+              type: 'marketplace_payout',
+              sellerId: seller.userId,
+              sellerProfileId: seller.id,
+            },
           },
-        });
-
-        const payout = await this.prisma.sellerPayout.create({
-          data: {
-            sellerProfileId: seller.id,
-            amountCents: available,
-            currency: 'USD',
-            status: 'paid',
-            stripeTransferId: transfer.id,
-            periodStart,
-            periodEnd: now,
-            paidAt: now,
-          },
-        });
-
-        await this.prisma.marketplaceLedgerEntry.create({
-          data: {
-            payoutId: payout.id,
-            sellerId: seller.userId,
-            entryType: 'payout',
-            amountCents: available,
-            currency: 'USD',
-          },
-        });
-
-        paid.push({
-          sellerId: seller.userId,
-          email: seller.user.email,
-          amountCents: available,
-          transferId: transfer.id,
-        });
+          { idempotencyKey }
+        );
       } catch (err) {
+        if (err instanceof Stripe.errors.StripeIdempotencyError) {
+          // Another replica holds the key right now; it records the payout.
+          this.logger.warn(`Weekly payout for seller ${seller.userId} already in progress`);
+          continue;
+        }
         this.logger.error(
           `Weekly payout failed for seller ${seller.userId}`,
           err instanceof Error ? err.stack : String(err)
@@ -870,7 +852,52 @@ export class MarketplaceService {
             periodEnd: now,
           },
         });
+        continue;
       }
+
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          const payout = await tx.sellerPayout.create({
+            data: {
+              sellerProfileId: seller.id,
+              amountCents: available,
+              currency: 'USD',
+              status: 'paid',
+              stripeTransferId: transfer.id,
+              periodStart,
+              periodEnd: now,
+              paidAt: now,
+            },
+          });
+          await tx.marketplaceLedgerEntry.create({
+            data: {
+              payoutId: payout.id,
+              sellerId: seller.userId,
+              entryType: 'payout',
+              amountCents: available,
+              currency: 'USD',
+            },
+          });
+        });
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          // Only unique key in this transaction: stripe_transfer_id, recorded by another replica.
+          continue;
+        }
+        // The money left: never record it as failed, which would invite a manual re-send.
+        this.logger.error(
+          `Payout ${transfer.id} for seller ${seller.userId} sent but not recorded`,
+          err instanceof Error ? err.stack : String(err)
+        );
+        continue;
+      }
+
+      paid.push({
+        sellerId: seller.userId,
+        email: seller.user.email,
+        amountCents: available,
+        transferId: transfer.id,
+      });
     }
 
     return { paidCount: paid.length, payouts: paid };

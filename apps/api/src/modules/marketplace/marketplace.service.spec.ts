@@ -34,6 +34,7 @@ function publishedListing(overrides: Record<string, unknown> = {}) {
     title: 'Listed',
     priceCents: 1299,
     currency: 'USD',
+    status: 'published',
     isPublished: true,
     impressionCount: 0,
     template: {
@@ -44,7 +45,7 @@ function publishedListing(overrides: Record<string, unknown> = {}) {
       rating: 0,
       isPremium: true,
     },
-    sellerProfile: { displayName: 'Ada', slug: 'ada', tier: 'new' },
+    sellerProfile: { displayName: 'Ada', slug: 'ada', tier: 'new', status: 'active' },
     reviews: [],
     ...overrides,
   };

@@ -165,6 +165,7 @@ export class MarketplaceService {
       where: {
         isPublished: true,
         status: 'published',
+        sellerProfile: { is: { status: 'active' } },
         ...(q
           ? {
               OR: [
@@ -185,20 +186,28 @@ export class MarketplaceService {
   }
 
   async get(id: string) {
-    const listing = await this.prisma.marketplaceTemplate.findUnique({
+    const found = await this.prisma.marketplaceTemplate.findUnique({
       where: { id },
       include: {
         template: { select: PUBLIC_TEMPLATE_SELECT },
-        sellerProfile: { select: PUBLIC_SELLER_SELECT },
+        sellerProfile: { select: { ...PUBLIC_SELLER_SELECT, status: true } },
         reviews: {
           take: 20,
           orderBy: { createdAt: 'desc' },
         },
       },
     });
-    if (!listing || !listing.isPublished) {
+    // Same rule as the shop: published, approved, from a seller in good standing.
+    if (
+      !found ||
+      !found.isPublished ||
+      found.status !== 'published' ||
+      found.sellerProfile?.status !== 'active'
+    ) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Listing not found' });
     }
+    const { status: _sellerStatus, ...sellerProfile } = found.sellerProfile;
+    const listing = { ...found, sellerProfile };
 
     try {
       await this.prisma.marketplaceTemplate.update({

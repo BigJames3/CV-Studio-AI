@@ -10,6 +10,58 @@ export type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number];
 
 export type MarketplaceSort = 'popular' | 'newest' | 'price_low' | 'price_high' | 'rating';
 
+export type CatalogSource = 'all' | 'official' | 'seller';
+
+export const SOURCE_LABELS: Record<CatalogSource, string> = {
+  all: 'Tous',
+  official: 'Officiels',
+  seller: 'Vendeurs',
+};
+
+/** A card of GET /marketplace/catalog. Never carries designData. */
+export type CatalogItem =
+  | {
+      kind: 'official';
+      id: string;
+      title: string;
+      description: string | null;
+      category: string;
+      layoutKey: string | null;
+      access: 'free' | 'pro';
+      rating: number | null;
+      href: string;
+    }
+  | {
+      kind: 'seller';
+      id: string;
+      title: string;
+      description: string | null;
+      category: string;
+      previewImageUrl: string | null;
+      priceCents: number;
+      currency: string;
+      rating: number | null;
+      reviewCount: number;
+      seller: { displayName: string; slug: string } | null;
+      href: string;
+    };
+
+export type CatalogPage = {
+  items: CatalogItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totals: { official: number; seller: number };
+};
+
+export type CatalogFilters = {
+  source: CatalogSource;
+  q?: string;
+  category?: string;
+  sort: MarketplaceSort;
+  page: number;
+};
+
 export type MarketplaceListing = {
   id: string;
   title: string;

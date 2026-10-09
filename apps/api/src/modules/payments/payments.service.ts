@@ -327,6 +327,16 @@ export class PaymentsService {
         await this.onInvoiceFailed(event.data.object as Stripe.Invoice);
         break;
       }
+      case 'charge.refunded': {
+        // Marketplace licences only; subscription refunds change nothing here.
+        await this.marketplace?.onChargeRefunded(event.data.object as Stripe.Charge);
+        break;
+      }
+      case 'charge.dispute.created':
+      case 'charge.dispute.closed': {
+        await this.marketplace?.onChargeDispute(event.data.object as Stripe.Dispute, event.type);
+        break;
+      }
       case 'account.updated': {
         if (!this.marketplace) {
           this.logger.warn(

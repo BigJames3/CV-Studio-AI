@@ -15,6 +15,9 @@ export const ACCOUNT_WEBHOOK_EVENTS = [
   'invoice.paid',
   'invoice.payment_succeeded',
   'invoice.payment_failed',
+  'charge.refunded',
+  'charge.dispute.created',
+  'charge.dispute.closed',
 ] as const;
 
 const WEBHOOK_PATH = '/api/v1/payments/webhook';

@@ -657,6 +657,79 @@ export class MarketplaceService {
     }
   }
 
+  /**
+   * charge.refunded. A full refund confirmed by Stripe revokes the licence (getDesign and new
+   * CVs check refundedAt) and records the seller's share as a refund_clawback, so it is not
+   * paid out (or is recovered from later payouts). Nothing is deleted. A partial refund
+   * revokes nothing until a policy exists: it is reported. Idempotent on replays.
+   */
+  async onChargeRefunded(charge: Stripe.Charge) {
+    const paymentIntentId =
+      typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id;
+    if (!paymentIntentId) return { outcome: 'not_marketplace' as const };
+    const purchase = await this.prisma.marketplacePurchase.findUnique({
+      where: { stripePaymentIntentId: paymentIntentId },
+      select: { id: true, listingId: true, refundedAt: true, sellerEarningCents: true },
+    });
+    if (!purchase) return { outcome: 'not_marketplace' as const };
+
+    const fullyRefunded = charge.refunded || charge.amount_refunded >= charge.amount;
+    if (!fullyRefunded) {
+      emitSecurityAlert({
+        id: 'MKT-02',
+        severity: 'P2',
+        message: 'Partial marketplace refund: licence kept, decide manually',
+        extra: { purchaseId: purchase.id, amountRefunded: charge.amount_refunded },
+      });
+      return { outcome: 'partial_refund_reported' as const };
+    }
+    if (purchase.refundedAt) return { outcome: 'already_revoked' as const };
+
+    const listing = await this.prisma.marketplaceTemplate.findUnique({
+      where: { id: purchase.listingId },
+      select: { sellerId: true },
+    });
+    await this.prisma.$transaction(async (tx) => {
+      const revoked = await tx.marketplacePurchase.updateMany({
+        where: { id: purchase.id, refundedAt: null },
+        data: { refundedAt: new Date() },
+      });
+      if (revoked.count === 0) return; // a concurrent delivery of the same event did it
+      await tx.marketplaceLedgerEntry.create({
+        data: {
+          purchaseId: purchase.id,
+          sellerId: listing?.sellerId ?? null,
+          entryType: 'refund_clawback',
+          amountCents: -purchase.sellerEarningCents,
+        },
+      });
+    });
+    return { outcome: 'revoked' as const };
+  }
+
+  /**
+   * charge.dispute.*: a dispute is not a refund. The licence stays active; the dispute is
+   * reported so someone answers it. What a lost dispute changes is a policy decision.
+   */
+  async onChargeDispute(dispute: Stripe.Dispute, eventType: string) {
+    const paymentIntentId =
+      typeof dispute.payment_intent === 'string'
+        ? dispute.payment_intent
+        : dispute.payment_intent?.id;
+    if (!paymentIntentId) return;
+    const purchase = await this.prisma.marketplacePurchase.findUnique({
+      where: { stripePaymentIntentId: paymentIntentId },
+      select: { id: true },
+    });
+    if (!purchase) return;
+    emitSecurityAlert({
+      id: 'MKT-03',
+      severity: eventType === 'charge.dispute.created' ? 'P1' : 'P2',
+      message: `Marketplace payment dispute (${eventType}, ${dispute.status})`,
+      extra: { purchaseId: purchase.id, disputeId: dispute.id, status: dispute.status },
+    });
+  }
+
   /** One licence per buyer and listing; sellers never buy their own listing. */
   private async assertCanBuy(buyerId: string, listing: { id: string; sellerId: string }) {
     if (listing.sellerId === buyerId) {

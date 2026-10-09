@@ -70,7 +70,7 @@ describe('MarketplaceService security fixes', () => {
       updateMany: jest.fn(),
       findMany: jest.fn(),
     },
-    marketplacePurchase: { findUnique: jest.fn(), create: jest.fn() },
+    marketplacePurchase: { findUnique: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
     marketplaceLedgerEntry: { createMany: jest.fn(), create: jest.fn(), aggregate: jest.fn() },
     templateReview: { create: jest.fn(), aggregate: jest.fn() },
     marketplaceDispute: { create: jest.fn() },
@@ -933,6 +933,92 @@ describe('MarketplaceService security fixes', () => {
       expect(prisma.marketplacePurchase.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ amountCents: 1299 }),
       });
+    });
+  });
+
+  describe('refunds and disputes (Lot D)', () => {
+    const charge = (overrides: Record<string, unknown> = {}) =>
+      ({
+        id: 'ch_1',
+        payment_intent: 'pi_1',
+        amount: 1299,
+        amount_refunded: 1299,
+        refunded: true,
+        ...overrides,
+      }) as never;
+
+    beforeEach(() => {
+      prisma.marketplacePurchase.findUnique.mockResolvedValue({
+        id: 'pur-1',
+        listingId: 'listing-1',
+        refundedAt: null,
+        sellerEarningCents: 800,
+      });
+      prisma.marketplaceTemplate.findUnique.mockResolvedValue({ sellerId: 'seller-1' });
+      prisma.marketplacePurchase.updateMany.mockResolvedValue({ count: 1 });
+      prisma.marketplaceLedgerEntry.create.mockResolvedValue({});
+    });
+
+    it('revokes the licence and claws back the seller share on a full refund', async () => {
+      await expect(service.onChargeRefunded(charge())).resolves.toEqual({ outcome: 'revoked' });
+
+      expect(prisma.marketplacePurchase.updateMany).toHaveBeenCalledWith({
+        where: { id: 'pur-1', refundedAt: null },
+        data: { refundedAt: expect.any(Date) },
+      });
+      expect(prisma.marketplaceLedgerEntry.create).toHaveBeenCalledWith({
+        data: {
+          purchaseId: 'pur-1',
+          sellerId: 'seller-1',
+          entryType: 'refund_clawback',
+          amountCents: -800,
+        },
+      });
+    });
+
+    it('does nothing twice when the event is replayed', async () => {
+      prisma.marketplacePurchase.findUnique.mockResolvedValue({
+        id: 'pur-1',
+        listingId: 'listing-1',
+        refundedAt: new Date(),
+        sellerEarningCents: 800,
+      });
+      await expect(service.onChargeRefunded(charge())).resolves.toEqual({
+        outcome: 'already_revoked',
+      });
+
+      prisma.marketplacePurchase.findUnique.mockResolvedValue({
+        id: 'pur-1',
+        listingId: 'listing-1',
+        refundedAt: null,
+        sellerEarningCents: 800,
+      });
+      prisma.marketplacePurchase.updateMany.mockResolvedValue({ count: 0 });
+      await service.onChargeRefunded(charge());
+      expect(prisma.marketplaceLedgerEntry.create).not.toHaveBeenCalled();
+    });
+
+    it('keeps the licence on a partial refund and reports it', async () => {
+      await expect(
+        service.onChargeRefunded(charge({ refunded: false, amount_refunded: 300 }))
+      ).resolves.toEqual({ outcome: 'partial_refund_reported' });
+      expect(prisma.marketplacePurchase.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('ignores refunds of non-marketplace payments', async () => {
+      prisma.marketplacePurchase.findUnique.mockResolvedValue(null);
+      await expect(service.onChargeRefunded(charge())).resolves.toEqual({
+        outcome: 'not_marketplace',
+      });
+    });
+
+    it('never treats a dispute as a refund', async () => {
+      await service.onChargeDispute(
+        { id: 'dp_1', payment_intent: 'pi_1', status: 'needs_response' } as never,
+        'charge.dispute.created'
+      );
+      expect(prisma.marketplacePurchase.updateMany).not.toHaveBeenCalled();
+      expect(prisma.marketplaceLedgerEntry.create).not.toHaveBeenCalled();
     });
   });
 });

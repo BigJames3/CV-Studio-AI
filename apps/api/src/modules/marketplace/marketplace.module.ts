@@ -7,6 +7,7 @@ import { SellerPayoutsJob } from './jobs/seller-payouts.job';
 import { MarketplaceModerationController } from './marketplace-moderation.controller';
 import { MarketplaceModerationService } from './marketplace-moderation.service';
 import { MarketplaceModeratorGuard } from './marketplace-moderator.guard';
+import { MarketplaceCatalogService } from './marketplace-catalog.service';
 
 @Module({
   imports: [forwardRef(() => SubscriptionsModule)],
@@ -14,6 +15,7 @@ import { MarketplaceModeratorGuard } from './marketplace-moderator.guard';
   providers: [
     MarketplaceService,
     MarketplaceModerationService,
+    MarketplaceCatalogService,
     MarketplaceModeratorGuard,
     EntitlementsGuard,
     SellerPayoutsJob,

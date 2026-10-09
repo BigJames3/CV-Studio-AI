@@ -17,14 +17,26 @@ import { CreateListingDto } from './dto/create-listing.dto';
 import { CreateSellerTemplateDto } from './dto/create-seller-template.dto';
 import { MarketplaceService } from './marketplace.service';
 import { MarketplaceModerationService } from './marketplace-moderation.service';
+import { MarketplaceCatalogService } from './marketplace-catalog.service';
+import { CatalogQueryDto } from './dto/catalog-query.dto';
 
 @ApiTags('Marketplace')
 @Controller('marketplace')
 export class MarketplaceController {
   constructor(
     private readonly marketplace: MarketplaceService,
-    private readonly moderation: MarketplaceModerationService
+    private readonly moderation: MarketplaceModerationService,
+    private readonly catalogService: MarketplaceCatalogService
   ) {}
+
+  @Public()
+  @Get('catalog')
+  @ApiOperation({
+    summary: 'Unified shop: official templates then approved seller listings (no designData)',
+  })
+  catalog(@Query() query: CatalogQueryDto) {
+    return this.catalogService.catalog(query);
+  }
 
   @Public()
   @Get('templates')

@@ -14,6 +14,7 @@ import Stripe from 'stripe';
 import { PrismaService } from '../../database/prisma.module';
 import { appOriginFromEnv } from '../../common/utils/url.utils';
 import { stripeSecretForClient } from '../payments/payment-env';
+import { lockUserScope } from '../../common/utils/user-lock';
 import { emitSecurityAlert } from '../../observability/security-alert';
 import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 import {
@@ -120,6 +121,18 @@ function marketplacePaymentMetadata(
     priceCents: String(listing.priceCents),
     currency: listing.currency.toLowerCase(),
   };
+}
+
+/** A pending payout older than this was abandoned (crash, timeout) and is resumed. */
+const PAYOUT_RESUME_AFTER_MS = 10 * 60 * 1000;
+
+/** Stripe answered and refused: nothing was transferred, retrying the same call cannot help. */
+function isDefinitiveStripeRefusal(err: unknown): boolean {
+  return (
+    err instanceof Stripe.errors.StripeInvalidRequestError ||
+    err instanceof Stripe.errors.StripePermissionError ||
+    err instanceof Stripe.errors.StripeCardError
+  );
 }
 
 function isUniqueViolation(err: unknown, field?: string): boolean {
@@ -978,9 +991,16 @@ export class MarketplaceService {
   }
 
   /**
-   * Pays platform-held seller earnings to connected accounts (min $25, hold window).
-   * Destination charges already write a `payout` ledger row at purchase — those
-   * balances are skipped so sellers are not paid twice.
+   * Pays platform-held seller earnings to connected accounts (min $25, hold window), in two
+   * phases so no crash, retry or second pod can send a payout twice:
+   * 1. under a per-seller advisory lock, record a `pending` payout for the available balance
+   *    (refused while another one is pending);
+   * 2. send the transfer with the payout id as idempotency key and transfer_group;
+   * 3. mark it paid and write its ledger row.
+   * A payout left pending (crash, timeout, database down after Stripe answered) is resumed on
+   * a later run: Stripe is first asked for a transfer in its group, and only if there is none
+   * is it sent, with the same key. Destination charges already wrote their `payout` row at
+   * purchase and are not paid again.
    */
   async processWeeklyPayouts(now = new Date()) {
     const stripe = this.requireStripe();
@@ -1002,115 +1022,154 @@ export class MarketplaceService {
 
     for (const seller of sellers) {
       if (!seller.stripeAccountId) continue;
-      const holdDays = seller.tier === SellerTier.new ? 14 : 7;
-      const cutoff = new Date(now.getTime() - holdDays * 24 * 60 * 60 * 1000);
-
-      const [earned, alreadyPaid] = await Promise.all([
-        this.prisma.marketplaceLedgerEntry.aggregate({
-          where: {
-            sellerId: seller.userId,
-            entryType: 'seller_earning',
-            createdAt: { lt: cutoff },
-          },
-          _sum: { amountCents: true },
-        }),
-        this.prisma.marketplaceLedgerEntry.aggregate({
-          where: { sellerId: seller.userId, entryType: 'payout' },
-          _sum: { amountCents: true },
-        }),
-      ]);
-
-      const available = (earned._sum.amountCents ?? 0) - (alreadyPaid._sum.amountCents ?? 0);
-      if (available < PAYOUT_MIN_CENTS) continue;
-
-      const periodStart = new Date(cutoff);
-      // The cron runs on every API replica. The same seller, day and amount give the same
-      // key, so Stripe returns the first transfer instead of sending the money again.
-      const idempotencyKey = `marketplace-payout:${seller.id}:${now.toISOString().slice(0, 10)}:${available}`;
-      let transfer: Stripe.Transfer;
       try {
-        transfer = await stripe.transfers.create(
-          {
-            amount: available,
-            currency: 'usd',
-            destination: seller.stripeAccountId,
-            metadata: {
-              type: 'marketplace_payout',
-              sellerId: seller.userId,
-              sellerProfileId: seller.id,
-            },
-          },
-          { idempotencyKey }
-        );
+        const done = await this.payoutSeller(stripe, seller, seller.stripeAccountId, now);
+        if (done) paid.push({ sellerId: seller.userId, email: seller.user.email, ...done });
       } catch (err) {
-        if (err instanceof Stripe.errors.StripeIdempotencyError) {
-          // Another replica holds the key right now; it records the payout.
-          this.logger.warn(`Weekly payout for seller ${seller.userId} already in progress`);
-          continue;
-        }
         this.logger.error(
           `Weekly payout failed for seller ${seller.userId}`,
           err instanceof Error ? err.stack : String(err)
         );
-        await this.prisma.sellerPayout.create({
-          data: {
-            sellerProfileId: seller.id,
-            amountCents: available,
-            currency: 'USD',
-            status: 'failed',
-            periodStart,
-            periodEnd: now,
-          },
-        });
-        continue;
       }
-
-      try {
-        await this.prisma.$transaction(async (tx) => {
-          const payout = await tx.sellerPayout.create({
-            data: {
-              sellerProfileId: seller.id,
-              amountCents: available,
-              currency: 'USD',
-              status: 'paid',
-              stripeTransferId: transfer.id,
-              periodStart,
-              periodEnd: now,
-              paidAt: now,
-            },
-          });
-          await tx.marketplaceLedgerEntry.create({
-            data: {
-              payoutId: payout.id,
-              sellerId: seller.userId,
-              entryType: 'payout',
-              amountCents: available,
-              currency: 'USD',
-            },
-          });
-        });
-      } catch (err) {
-        if (isUniqueViolation(err)) {
-          // Only unique key in this transaction: stripe_transfer_id, recorded by another replica.
-          continue;
-        }
-        // The money left: never record it as failed, which would invite a manual re-send.
-        this.logger.error(
-          `Payout ${transfer.id} for seller ${seller.userId} sent but not recorded`,
-          err instanceof Error ? err.stack : String(err)
-        );
-        continue;
-      }
-
-      paid.push({
-        sellerId: seller.userId,
-        email: seller.user.email,
-        amountCents: available,
-        transferId: transfer.id,
-      });
     }
 
     return { paidCount: paid.length, payouts: paid };
+  }
+
+  private async payoutSeller(
+    stripe: Stripe,
+    seller: { id: string; userId: string; tier: SellerTier },
+    destination: string,
+    now: Date
+  ): Promise<{ amountCents: number; transferId: string } | null> {
+    const holdDays = seller.tier === SellerTier.new ? 14 : 7;
+    const cutoff = new Date(now.getTime() - holdDays * 24 * 60 * 60 * 1000);
+
+    // Phase 1: one pending payout per seller, decided under a lock shared by every pod.
+    const reserved = await this.prisma.$transaction(async (tx) => {
+      await lockUserScope(tx, seller.userId, 'marketplace:payout');
+      const pending = await tx.sellerPayout.findFirst({
+        where: { sellerProfileId: seller.id, status: { in: ['pending', 'in_transit'] } },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (pending) return { payout: pending, resumed: true };
+
+      const available = await this.availableForPayout(tx, seller.userId, cutoff);
+      if (available < PAYOUT_MIN_CENTS) return null;
+      const payout = await tx.sellerPayout.create({
+        data: {
+          sellerProfileId: seller.id,
+          amountCents: available,
+          currency: 'USD',
+          status: 'pending',
+          periodStart: cutoff,
+          periodEnd: now,
+        },
+      });
+      return { payout, resumed: false };
+    });
+    if (!reserved) return null;
+    const { payout, resumed } = reserved;
+    // A young pending payout is another pod's, still in flight.
+    if (resumed && now.getTime() - payout.createdAt.getTime() < PAYOUT_RESUME_AFTER_MS) {
+      return null;
+    }
+
+    // Phase 2: the transfer, at most once per payout.
+    const transferGroup = `payout_${payout.id}`;
+    let transfer: Stripe.Transfer | undefined;
+    try {
+      if (resumed) {
+        const found = await stripe.transfers.list({ transfer_group: transferGroup, limit: 1 });
+        transfer = found.data[0];
+      }
+      transfer ??= await stripe.transfers.create(
+        {
+          amount: payout.amountCents,
+          currency: 'usd',
+          destination,
+          transfer_group: transferGroup,
+          metadata: {
+            type: 'marketplace_payout',
+            payoutId: payout.id,
+            sellerId: seller.userId,
+            sellerProfileId: seller.id,
+          },
+        },
+        { idempotencyKey: `seller-payout:${payout.id}` }
+      );
+    } catch (err) {
+      if (isDefinitiveStripeRefusal(err)) {
+        // Stripe refused it: no money moved, the balance stays available for the next run.
+        await this.prisma.sellerPayout.updateMany({
+          where: { id: payout.id, status: 'pending' },
+          data: { status: 'failed' },
+        });
+        this.logger.error(
+          `Payout ${payout.id} refused by Stripe for seller ${seller.userId}`,
+          err instanceof Error ? err.stack : String(err)
+        );
+        return null;
+      }
+      // Unknown outcome (network, timeout, 5xx, key in use): stays pending, resumed later.
+      this.logger.warn(`Payout ${payout.id} outcome unknown, left pending: ${String(err)}`);
+      return null;
+    }
+
+    // Phase 3: record it. If this fails the payout stays pending and is resumed (and found).
+    const finalized = await this.prisma.$transaction(async (tx) => {
+      const marked = await tx.sellerPayout.updateMany({
+        where: { id: payout.id, status: { in: ['pending', 'in_transit'] } },
+        data: { status: 'paid', stripeTransferId: transfer.id, paidAt: now },
+      });
+      if (marked.count === 0) return false;
+      await tx.marketplaceLedgerEntry.create({
+        data: {
+          payoutId: payout.id,
+          sellerId: seller.userId,
+          entryType: 'payout',
+          amountCents: payout.amountCents,
+          currency: 'USD',
+        },
+      });
+      return true;
+    });
+    return finalized ? { amountCents: payout.amountCents, transferId: transfer.id } : null;
+  }
+
+  /**
+   * Earnings past the hold window, minus what was already paid (weekly payouts and
+   * destination charges) and minus refunds of platform-held sales.
+   */
+  private async availableForPayout(
+    tx: Prisma.TransactionClient,
+    sellerId: string,
+    cutoff: Date
+  ): Promise<number> {
+    const [earned, clawedBack, alreadyPaid] = await Promise.all([
+      tx.marketplaceLedgerEntry.aggregate({
+        where: { sellerId, entryType: 'seller_earning', createdAt: { lt: cutoff } },
+        _sum: { amountCents: true },
+      }),
+      // Destination charges are refunded with the transfer reversed: not clawed back here.
+      tx.marketplaceLedgerEntry.aggregate({
+        where: {
+          sellerId,
+          entryType: 'refund_clawback',
+          purchase: { ledger: { none: { entryType: 'payout' } } },
+        },
+        _sum: { amountCents: true },
+      }),
+      tx.marketplaceLedgerEntry.aggregate({
+        where: { sellerId, entryType: 'payout' },
+        _sum: { amountCents: true },
+      }),
+    ]);
+    return (
+      (earned._sum.amountCents ?? 0) +
+      (clawedBack._sum.amountCents ?? 0) -
+      (alreadyPaid._sum.amountCents ?? 0)
+    );
   }
 
   private async requireActiveSeller(userId: string) {

@@ -75,7 +75,7 @@ describe('MarketplaceService security fixes', () => {
     templateReview: { create: jest.fn(), aggregate: jest.fn() },
     marketplaceDispute: { create: jest.fn() },
     user: { findUnique: jest.fn() },
-    sellerPayout: { findMany: jest.fn(), create: jest.fn() },
+    sellerPayout: { findMany: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
     subscription: { findUnique: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -94,7 +94,7 @@ describe('MarketplaceService security fixes', () => {
       createLoginLink: jest.fn(),
     },
     accountLinks: { create: jest.fn() },
-    transfers: { create: jest.fn() },
+    transfers: { create: jest.fn(), list: jest.fn() },
   };
 
   let service: MarketplaceService;
@@ -678,37 +678,7 @@ describe('MarketplaceService security fixes', () => {
       expect(rows.some((r) => r.entryType === 'payout')).toBe(true);
     });
 
-    it('transfers platform-held earnings when the balance is at least $25', async () => {
-      prisma.sellerProfile.findMany.mockResolvedValue([
-        {
-          id: 'profile-1',
-          userId: 'seller-1',
-          stripeAccountId: 'acct_seller',
-          payoutsEnabled: true,
-          status: 'active',
-          tier: 'trusted',
-          user: { email: 'ada@example.com' },
-        },
-      ]);
-      prisma.marketplaceLedgerEntry.aggregate
-        .mockResolvedValueOnce({ _sum: { amountCents: 4000 } })
-        .mockResolvedValueOnce({ _sum: { amountCents: 0 } });
-      stripe.transfers.create.mockResolvedValue({ id: 'tr_1' });
-      prisma.sellerPayout.create.mockResolvedValue({ id: 'po-1' });
-      prisma.marketplaceLedgerEntry.create.mockResolvedValue({});
-
-      const result = await service.processWeeklyPayouts(new Date('2026-09-09T12:00:00Z'));
-      expect(result.paidCount).toBe(1);
-      expect(stripe.transfers.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          amount: 4000,
-          destination: 'acct_seller',
-        }),
-        expect.objectContaining({ idempotencyKey: expect.any(String) })
-      );
-    });
-
-    describe('on several API replicas', () => {
+    describe('two-phase payouts', () => {
       const seller = {
         id: 'profile-1',
         userId: 'seller-1',
@@ -718,76 +688,189 @@ describe('MarketplaceService security fixes', () => {
         tier: 'trusted',
         user: { email: 'ada@example.com' },
       };
+      const NOW = new Date('2026-09-09T09:00:00Z');
+      const tx = {
+        $executeRaw: jest.fn().mockResolvedValue(1),
+        sellerPayout: { findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
+        marketplaceLedgerEntry: { aggregate: jest.fn(), create: jest.fn() },
+      };
+      const balance = (earned: number, clawedBack = 0, paid = 0) =>
+        tx.marketplaceLedgerEntry.aggregate
+          .mockResolvedValueOnce({ _sum: { amountCents: earned } })
+          .mockResolvedValueOnce({ _sum: { amountCents: clawedBack } })
+          .mockResolvedValueOnce({ _sum: { amountCents: paid } });
 
       beforeEach(() => {
+        jest.clearAllMocks();
+        prisma.$transaction.mockImplementation(async (fn: (t: typeof tx) => unknown) => fn(tx));
         prisma.sellerProfile.findMany.mockResolvedValue([seller]);
-        prisma.marketplaceLedgerEntry.aggregate
-          .mockResolvedValueOnce({ _sum: { amountCents: 4000 } })
-          .mockResolvedValueOnce({ _sum: { amountCents: 0 } });
+        tx.sellerPayout.findFirst.mockResolvedValue(null);
+        tx.sellerPayout.create.mockImplementation(async ({ data }) => ({
+          id: 'po-1',
+          createdAt: NOW,
+          ...data,
+        }));
+        tx.sellerPayout.updateMany.mockResolvedValue({ count: 1 });
+        tx.marketplaceLedgerEntry.create.mockResolvedValue({});
+        prisma.sellerPayout.updateMany.mockResolvedValue({ count: 1 });
+        stripe.transfers.create.mockResolvedValue({ id: 'tr_1' });
+        stripe.transfers.list.mockResolvedValue({ data: [] });
       });
 
-      it('sends the transfer with a key stable for the seller, day and amount', async () => {
-        stripe.transfers.create.mockResolvedValue({ id: 'tr_1' });
-        prisma.sellerPayout.create.mockResolvedValue({ id: 'po-1' });
+      it('records the payout as pending under the seller lock before calling Stripe', async () => {
+        balance(4000);
+        const order: string[] = [];
+        tx.$executeRaw.mockImplementation(async () => order.push('lock'));
+        tx.sellerPayout.create.mockImplementation(async ({ data }) => {
+          order.push('pending');
+          return { id: 'po-1', createdAt: NOW, ...data };
+        });
+        stripe.transfers.create.mockImplementation(async () => {
+          order.push('stripe');
+          return { id: 'tr_1' };
+        });
 
-        await service.processWeeklyPayouts(new Date('2026-09-09T09:00:03Z'));
+        const result = await service.processWeeklyPayouts(NOW);
+
+        expect(order).toEqual(['lock', 'pending', 'stripe']);
+        expect(tx.sellerPayout.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ status: 'pending', amountCents: 4000 }),
+        });
+        expect(stripe.transfers.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            amount: 4000,
+            destination: 'acct_seller',
+            transfer_group: 'payout_po-1',
+          }),
+          { idempotencyKey: 'seller-payout:po-1' }
+        );
+        expect(tx.sellerPayout.updateMany).toHaveBeenCalledWith({
+          where: { id: 'po-1', status: { in: ['pending', 'in_transit'] } },
+          data: { status: 'paid', stripeTransferId: 'tr_1', paidAt: NOW },
+        });
+        expect(tx.marketplaceLedgerEntry.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            entryType: 'payout',
+            amountCents: 4000,
+            payoutId: 'po-1',
+          }),
+        });
+        expect(result.paidCount).toBe(1);
+      });
+
+      it('does not pay refunded platform-held sales', async () => {
+        balance(4000, -2000);
+        const result = await service.processWeeklyPayouts(NOW);
+        expect(result.paidCount).toBe(0);
+        expect(stripe.transfers.create).not.toHaveBeenCalled();
+      });
+
+      it('skips sellers below the $25 minimum', async () => {
+        balance(1000);
+        const result = await service.processWeeklyPayouts(NOW);
+        expect(result.paidCount).toBe(0);
+        expect(tx.sellerPayout.create).not.toHaveBeenCalled();
+      });
+
+      it('leaves a young pending payout to the pod that created it', async () => {
+        tx.sellerPayout.findFirst.mockResolvedValue({
+          id: 'po-1',
+          amountCents: 4000,
+          status: 'pending',
+          createdAt: new Date(NOW.getTime() - 60_000),
+        });
+
+        await service.processWeeklyPayouts(NOW);
+
+        expect(stripe.transfers.list).not.toHaveBeenCalled();
+        expect(stripe.transfers.create).not.toHaveBeenCalled();
+        expect(tx.sellerPayout.create).not.toHaveBeenCalled();
+      });
+
+      it('resumes an abandoned payout by finding its transfer, without sending again', async () => {
+        tx.sellerPayout.findFirst.mockResolvedValue({
+          id: 'po-1',
+          amountCents: 4000,
+          status: 'pending',
+          createdAt: new Date(NOW.getTime() - 60 * 60_000),
+        });
+        stripe.transfers.list.mockResolvedValue({ data: [{ id: 'tr_existing' }] });
+
+        const result = await service.processWeeklyPayouts(NOW);
+
+        expect(stripe.transfers.list).toHaveBeenCalledWith({
+          transfer_group: 'payout_po-1',
+          limit: 1,
+        });
+        expect(stripe.transfers.create).not.toHaveBeenCalled();
+        expect(tx.sellerPayout.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: 'paid', stripeTransferId: 'tr_existing' }),
+          })
+        );
+        expect(result.paidCount).toBe(1);
+      });
+
+      it('sends an abandoned payout Stripe never received, with the same key', async () => {
+        tx.sellerPayout.findFirst.mockResolvedValue({
+          id: 'po-1',
+          amountCents: 4000,
+          status: 'pending',
+          createdAt: new Date(NOW.getTime() - 60 * 60_000),
+        });
+
+        await service.processWeeklyPayouts(NOW);
 
         expect(stripe.transfers.create).toHaveBeenCalledWith(expect.anything(), {
-          idempotencyKey: 'marketplace-payout:profile-1:2026-09-09:4000',
+          idempotencyKey: 'seller-payout:po-1',
         });
       });
 
-      it('skips without a second ledger row when another replica recorded the transfer', async () => {
-        stripe.transfers.create.mockResolvedValue({ id: 'tr_1' });
-        prisma.sellerPayout.create.mockRejectedValue(
-          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-            code: 'P2002',
-            clientVersion: 'test',
-            meta: { target: ['stripe_transfer_id'] },
-          })
-        );
-
-        const result = await service.processWeeklyPayouts(new Date('2026-09-09T09:00:03Z'));
-
-        expect(result.paidCount).toBe(0);
-        expect(prisma.marketplaceLedgerEntry.create).not.toHaveBeenCalled();
-        expect(prisma.sellerPayout.create).toHaveBeenCalledTimes(1);
-      });
-
-      it('records nothing as failed while another replica holds the key', async () => {
+      it('keeps the payout pending when the outcome is unknown', async () => {
+        balance(4000);
         stripe.transfers.create.mockRejectedValue(
-          new Stripe.errors.StripeIdempotencyError({
-            message: 'Key in use',
-            type: 'idempotency_error',
+          new Stripe.errors.StripeConnectionError({ message: 'socket hang up', type: 'api_error' })
+        );
+
+        const result = await service.processWeeklyPayouts(NOW);
+
+        expect(result.paidCount).toBe(0);
+        expect(prisma.sellerPayout.updateMany).not.toHaveBeenCalled();
+        expect(tx.marketplaceLedgerEntry.create).not.toHaveBeenCalled();
+      });
+
+      it('marks the payout failed when Stripe refuses it', async () => {
+        balance(4000);
+        stripe.transfers.create.mockRejectedValue(
+          new Stripe.errors.StripeInvalidRequestError({
+            message: 'Insufficient funds',
+            type: 'invalid_request_error',
           })
         );
 
-        const result = await service.processWeeklyPayouts(new Date('2026-09-09T09:00:03Z'));
+        await service.processWeeklyPayouts(NOW);
 
-        expect(result.paidCount).toBe(0);
-        expect(prisma.sellerPayout.create).not.toHaveBeenCalled();
+        expect(prisma.sellerPayout.updateMany).toHaveBeenCalledWith({
+          where: { id: 'po-1', status: 'pending' },
+          data: { status: 'failed' },
+        });
       });
-    });
 
-    it('skips sellers below the $25 minimum', async () => {
-      prisma.sellerProfile.findMany.mockResolvedValue([
-        {
-          id: 'profile-1',
-          userId: 'seller-1',
-          stripeAccountId: 'acct_seller',
-          payoutsEnabled: true,
-          status: 'active',
-          tier: 'new',
-          user: { email: 'ada@example.com' },
-        },
-      ]);
-      prisma.marketplaceLedgerEntry.aggregate
-        .mockResolvedValueOnce({ _sum: { amountCents: 1000 } })
-        .mockResolvedValueOnce({ _sum: { amountCents: 0 } });
+      it('stays pending when the database fails after Stripe answered', async () => {
+        balance(4000);
+        let calls = 0;
+        prisma.$transaction.mockImplementation(async (fn: (t: typeof tx) => unknown) => {
+          calls += 1;
+          if (calls === 2) throw new Error('database unavailable');
+          return fn(tx);
+        });
 
-      const result = await service.processWeeklyPayouts();
-      expect(result.paidCount).toBe(0);
-      expect(stripe.transfers.create).not.toHaveBeenCalled();
+        const result = await service.processWeeklyPayouts(NOW);
+
+        // Logged per seller; the next run lists transfer_group payout_po-1 and records it.
+        expect(result.paidCount).toBe(0);
+        expect(prisma.sellerPayout.updateMany).not.toHaveBeenCalled();
+      });
     });
   });
 

@@ -104,6 +104,7 @@ describe('MarketplaceService security fixes', () => {
     service = new MarketplaceService(prisma as never);
     (service as unknown as { stripe: typeof stripe }).stripe = stripe;
     prisma.subscription.findUnique.mockResolvedValue(null);
+    prisma.marketplacePurchase.findUnique.mockResolvedValue(null);
     prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) =>
       fn(prisma)
     );
@@ -268,7 +269,8 @@ describe('MarketplaceService security fixes', () => {
         status: 'requires_payment_method',
         amount: 1299,
         amount_received: 0,
-        metadata: { listingId: 'listing-1', buyerId: 'buyer-1' },
+        currency: 'usd',
+        metadata: { type: 'marketplace', listingId: 'listing-1', buyerId: 'buyer-1' },
       });
 
       await expect(service.purchase('buyer-1', 'listing-1', 'pi_fake')).rejects.toBeInstanceOf(
@@ -289,7 +291,8 @@ describe('MarketplaceService security fixes', () => {
         status: 'succeeded',
         amount: 500,
         amount_received: 500,
-        metadata: { listingId: 'listing-1', buyerId: 'buyer-1' },
+        currency: 'usd',
+        metadata: { type: 'marketplace', listingId: 'listing-1', buyerId: 'buyer-1' },
       });
 
       await expect(service.purchase('buyer-1', 'listing-1', 'pi_low')).rejects.toMatchObject({
@@ -303,7 +306,8 @@ describe('MarketplaceService security fixes', () => {
         status: 'succeeded',
         amount: 1299,
         amount_received: 1299,
-        metadata: { listingId: 'listing-other', buyerId: 'buyer-1' },
+        currency: 'usd',
+        metadata: { type: 'marketplace', listingId: 'listing-other', buyerId: 'buyer-1' },
       });
 
       await expect(service.purchase('buyer-1', 'listing-1', 'pi_ok')).rejects.toBeInstanceOf(
@@ -398,7 +402,8 @@ describe('MarketplaceService security fixes', () => {
         status: 'succeeded',
         amount: 1299,
         amount_received: 1299,
-        metadata: { listingId: 'listing-1', buyerId: 'buyer-1' },
+        currency: 'usd',
+        metadata: { type: 'marketplace', listingId: 'listing-1', buyerId: 'buyer-1' },
       });
       prisma.marketplacePurchase.create.mockResolvedValue({
         id: 'pur-1',
@@ -636,7 +641,8 @@ describe('MarketplaceService security fixes', () => {
         status: 'succeeded',
         amount: 1299,
         amount_received: 1299,
-        metadata: { listingId: 'listing-1', buyerId: 'buyer-1' },
+        currency: 'usd',
+        metadata: { type: 'marketplace', listingId: 'listing-1', buyerId: 'buyer-1' },
         transfer_data: { destination: 'acct_seller' },
       });
       prisma.marketplacePurchase.create.mockResolvedValue({
@@ -763,6 +769,151 @@ describe('MarketplaceService security fixes', () => {
       const result = await service.processWeeklyPayouts();
       expect(result.paidCount).toBe(0);
       expect(stripe.transfers.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('one licence per buyer (Lot C)', () => {
+    const paidIntent = (overrides: Record<string, unknown> = {}) => ({
+      id: 'pi_1',
+      status: 'succeeded',
+      amount: 1299,
+      amount_received: 1299,
+      currency: 'usd',
+      metadata: {
+        type: 'marketplace',
+        listingId: 'listing-1',
+        buyerId: 'buyer-1',
+        priceCents: '1299',
+        currency: 'usd',
+      },
+      ...overrides,
+    });
+    const paidSession = (overrides: Record<string, unknown> = {}) =>
+      ({
+        id: 'cs_1',
+        payment_status: 'paid',
+        payment_intent: 'pi_1',
+        client_reference_id: 'buyer-1',
+        metadata: { type: 'marketplace', listingId: 'listing-1', buyerId: 'buyer-1' },
+        ...overrides,
+      }) as never;
+
+    beforeEach(() => {
+      prisma.marketplaceTemplate.findUnique.mockResolvedValue(publishedListing());
+      prisma.marketplacePurchase.create.mockResolvedValue({ id: 'pur-1' });
+      prisma.marketplaceLedgerEntry.createMany.mockResolvedValue({ count: 4 });
+      prisma.marketplaceTemplate.update.mockResolvedValue({});
+      stripe.checkout.sessions.create.mockResolvedValue({ id: 'cs_1', url: 'https://stripe/cs_1' });
+    });
+
+    it('refuses a checkout for a licence the buyer already holds', async () => {
+      prisma.marketplacePurchase.findUnique.mockResolvedValue({ refundedAt: null });
+      await expect(service.createListingCheckout('buyer-1', 'listing-1')).rejects.toMatchObject({
+        response: { code: 'ALREADY_PURCHASED' },
+      });
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a new payment after a refund, which could not be delivered', async () => {
+      prisma.marketplacePurchase.findUnique.mockResolvedValue({ refundedAt: new Date() });
+      await expect(service.createListingCheckout('buyer-1', 'listing-1')).rejects.toMatchObject({
+        response: { code: 'REPURCHASE_UNAVAILABLE' },
+      });
+    });
+
+    it('never lets a seller buy their own listing', async () => {
+      await expect(service.createListingCheckout('seller-1', 'listing-1')).rejects.toMatchObject({
+        response: { code: 'OWN_LISTING' },
+      });
+      await expect(service.createPaymentIntent('seller-1', 'listing-1')).rejects.toMatchObject({
+        response: { code: 'OWN_LISTING' },
+      });
+    });
+
+    it('puts the session id in the success URL and the charged price in the metadata', async () => {
+      await service.createListingCheckout('buyer-1', 'listing-1');
+      const params = stripe.checkout.sessions.create.mock.calls[0][0];
+      expect(params.success_url).toContain('session_id={CHECKOUT_SESSION_ID}');
+      expect(params.metadata).toMatchObject({ priceCents: '1299', currency: 'usd' });
+    });
+
+    it('grants nothing while an asynchronous payment is pending', async () => {
+      const result = await service.fulfillCheckoutSession(
+        paidSession({ payment_status: 'unpaid' })
+      );
+      expect(result).toBeNull();
+      expect(stripe.paymentIntents.retrieve).not.toHaveBeenCalled();
+      expect(prisma.marketplacePurchase.create).not.toHaveBeenCalled();
+    });
+
+    it('returns the existing licence when the same payment is replayed', async () => {
+      stripe.paymentIntents.retrieve.mockResolvedValue(paidIntent());
+      prisma.marketplacePurchase.findUnique.mockResolvedValue({ id: 'pur-1' });
+
+      const result = await service.fulfillCheckoutSession(paidSession());
+
+      expect(result).toEqual({ outcome: 'already_fulfilled', purchase: { id: 'pur-1' } });
+      expect(prisma.marketplacePurchase.create).not.toHaveBeenCalled();
+      expect(prisma.marketplaceLedgerEntry.createMany).not.toHaveBeenCalled();
+    });
+
+    it('reports a second payment for an owned licence and grants nothing', async () => {
+      stripe.paymentIntents.retrieve.mockResolvedValue(paidIntent({ id: 'pi_2' }));
+      prisma.marketplacePurchase.findUnique.mockResolvedValue(null);
+      prisma.$transaction.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+          meta: { target: ['listing_id', 'buyer_id'] },
+        })
+      );
+
+      const result = await service.fulfillCheckoutSession(paidSession({ payment_intent: 'pi_2' }));
+
+      expect(result).toEqual({ outcome: 'duplicate_payment', purchase: null });
+
+      // The client-side confirmation says so instead of pretending it worked.
+      prisma.$transaction.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        })
+      );
+      await expect(service.purchase('buyer-1', 'listing-1', 'pi_2')).rejects.toMatchObject({
+        response: { code: 'ALREADY_PURCHASED' },
+      });
+    });
+
+    it('still delivers a paid licence when the listing was withdrawn meanwhile', async () => {
+      prisma.marketplaceTemplate.findUnique.mockResolvedValue(
+        publishedListing({ isPublished: false, status: 'suspended' })
+      );
+      stripe.paymentIntents.retrieve.mockResolvedValue(paidIntent());
+
+      const result = await service.fulfillCheckoutSession(paidSession());
+
+      expect(result?.outcome).toBe('fulfilled');
+    });
+
+    it('rejects a payment in another currency', async () => {
+      stripe.paymentIntents.retrieve.mockResolvedValue(paidIntent({ currency: 'eur' }));
+      await expect(service.fulfillCheckoutSession(paidSession())).rejects.toMatchObject({
+        response: { code: 'CURRENCY_MISMATCH' },
+      });
+    });
+
+    it('checks the amount against what was charged, not the current price', async () => {
+      prisma.marketplaceTemplate.findUnique.mockResolvedValue(
+        publishedListing({ priceCents: 1999 })
+      );
+      stripe.paymentIntents.retrieve.mockResolvedValue(paidIntent());
+
+      const result = await service.fulfillCheckoutSession(paidSession());
+
+      expect(result?.outcome).toBe('fulfilled');
+      expect(prisma.marketplacePurchase.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ amountCents: 1299 }),
+      });
     });
   });
 });

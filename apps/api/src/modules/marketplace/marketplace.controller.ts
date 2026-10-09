@@ -48,6 +48,13 @@ export class MarketplaceController {
   }
 
   @ApiBearerAuth('JWT')
+  @Get('templates/:id/licence')
+  @ApiOperation({ summary: 'Licence state of the caller: none | active | refunded | owner' })
+  licence(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.marketplace.licence(user.id, id);
+  }
+
+  @ApiBearerAuth('JWT')
   @UseGuards(EntitlementsGuard)
   @RequireEntitlement('marketplace:buy')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })

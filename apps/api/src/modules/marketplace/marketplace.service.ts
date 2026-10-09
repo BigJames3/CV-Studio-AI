@@ -14,6 +14,7 @@ import Stripe from 'stripe';
 import { PrismaService } from '../../database/prisma.module';
 import { appOriginFromEnv } from '../../common/utils/url.utils';
 import { stripeSecretForClient } from '../payments/payment-env';
+import { emitSecurityAlert } from '../../observability/security-alert';
 import {
   PAYOUT_MIN_CENTS,
   PRICE_MAX_CENTS,
@@ -82,13 +83,16 @@ function sortListings(
 
 function marketplacePaymentMetadata(
   buyerId: string,
-  listing: { id: string; sellerId: string }
+  listing: { id: string; sellerId: string; priceCents: number; currency: string }
 ): Stripe.MetadataParam {
   return {
     type: 'marketplace',
     listingId: listing.id,
     buyerId,
     sellerId: listing.sellerId,
+    // What was charged, so fulfilment checks the payment against it rather than today's price.
+    priceCents: String(listing.priceCents),
+    currency: listing.currency.toLowerCase(),
   };
 }
 
@@ -352,6 +356,7 @@ export class MarketplaceService {
   async createPaymentIntent(buyerId: string, listingId: string) {
     const stripe = this.requireStripe();
     const listing = await this.getPublishedListing(listingId);
+    await this.assertCanBuy(buyerId, listing);
     const metadata = marketplacePaymentMetadata(buyerId, listing);
     const stripeCustomerId = await this.existingStripeCustomerId(buyerId);
 
@@ -370,6 +375,7 @@ export class MarketplaceService {
   async createListingCheckout(buyerId: string, listingId: string) {
     const stripe = this.requireStripe();
     const listing = await this.getPublishedListing(listingId);
+    await this.assertCanBuy(buyerId, listing);
     const origin = appOriginFromEnv();
     const metadata = marketplacePaymentMetadata(buyerId, listing);
     const destination = this.destinationChargeParams(listing);
@@ -378,7 +384,9 @@ export class MarketplaceService {
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       client_reference_id: buyerId,
-      success_url: `${origin}/marketplace/${listingId}?checkout=success`,
+      // The redirect proves nothing: the page sends session_id back to /payments/checkout/confirm,
+      // which reads the session from Stripe.
+      success_url: `${origin}/marketplace/${listingId}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/marketplace/${listingId}?checkout=cancel`,
       metadata,
       ...(stripeCustomerId ? { customer: stripeCustomerId } : {}),
@@ -411,6 +419,36 @@ export class MarketplaceService {
     return { url: session.url, sessionId: session.id };
   }
 
+  /** Licence state of the caller for a listing (drives the buy / use buttons). */
+  async licence(userId: string, listingId: string) {
+    const listing = await this.prisma.marketplaceTemplate.findUnique({
+      where: { id: listingId },
+      select: { sellerId: true, templateId: true },
+    });
+    if (!listing) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Listing not found' });
+    }
+    if (listing.sellerId === userId) {
+      return { listingId, templateId: listing.templateId, status: 'owner' as const };
+    }
+    const purchase = await this.prisma.marketplacePurchase.findUnique({
+      where: { listingId_buyerId: { listingId, buyerId: userId } },
+      select: { refundedAt: true, createdAt: true },
+    });
+    if (!purchase) return { listingId, templateId: null, status: 'none' as const };
+    if (purchase.refundedAt) return { listingId, templateId: null, status: 'refunded' as const };
+    return {
+      listingId,
+      templateId: listing.templateId,
+      status: 'active' as const,
+      purchasedAt: purchase.createdAt,
+    };
+  }
+
+  /**
+   * checkout.session.completed / async_payment_succeeded, and the success-page confirmation.
+   * Returns null when the session is not paid yet (asynchronous payment methods).
+   */
   async fulfillCheckoutSession(session: Stripe.Checkout.Session) {
     const listingId = session.metadata?.listingId;
     const buyerId = session.metadata?.buyerId ?? session.client_reference_id ?? undefined;
@@ -424,20 +462,40 @@ export class MarketplaceService {
         `marketplace checkout.session.completed missing listing, buyer, or payment (session=${session.id})`
       );
     }
-
-    try {
-      return await this.purchase(buyerId, listingId, paymentIntentId);
-    } catch (err) {
-      if (err instanceof ConflictException) {
-        return null;
-      }
-      throw err;
+    if (session.payment_status !== 'paid') {
+      this.logger.log(
+        `Marketplace checkout ${session.id} not paid yet (${session.payment_status})`
+      );
+      return null;
     }
+
+    return this.fulfillPayment(buyerId, listingId, paymentIntentId);
   }
 
+  /** Client-side confirmation of a PaymentIntent (Elements flow). */
   async purchase(buyerId: string, listingId: string, paymentIntentId: string) {
+    const result = await this.fulfillPayment(buyerId, listingId, paymentIntentId);
+    if (result.outcome === 'duplicate_payment') {
+      throw new ConflictException({
+        code: 'ALREADY_PURCHASED',
+        message: 'You already own this licence; this payment will be refunded by support',
+      });
+    }
+    return result.purchase;
+  }
+
+  /**
+   * Grants the licence for a payment read from Stripe, never from the client. Idempotent:
+   * the same payment returns the existing licence; a second payment for a licence the buyer
+   * already holds is reported for refund and grants nothing.
+   */
+  private async fulfillPayment(buyerId: string, listingId: string, paymentIntentId: string) {
     const stripe = this.requireStripe();
-    const listing = await this.getPublishedListing(listingId);
+    // A listing suspended or withdrawn after the payment is still delivered: the buyer paid.
+    const listing = await this.prisma.marketplaceTemplate.findUnique({ where: { id: listingId } });
+    if (!listing) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Listing not found' });
+    }
 
     let intent: Stripe.PaymentIntent;
     try {
@@ -455,28 +513,43 @@ export class MarketplaceService {
         HttpStatus.PAYMENT_REQUIRED
       );
     }
-
-    const paid = intent.amount_received || intent.amount;
-    if (paid !== listing.priceCents) {
-      throw new BadRequestException({
-        code: 'AMOUNT_MISMATCH',
-        message: 'Payment amount does not match listing price',
-      });
-    }
-    if (intent.metadata?.listingId !== listingId || intent.metadata?.buyerId !== buyerId) {
+    if (
+      intent.metadata?.type !== 'marketplace' ||
+      intent.metadata?.listingId !== listingId ||
+      intent.metadata?.buyerId !== buyerId
+    ) {
       throw new BadRequestException({
         code: 'PAYMENT_MISMATCH',
         message: 'Payment does not match this listing or buyer',
       });
     }
+    const expectedCents = Number(intent.metadata?.priceCents ?? listing.priceCents);
+    const expectedCurrency = (intent.metadata?.currency ?? listing.currency).toLowerCase();
+    if (intent.amount_received !== expectedCents || intent.amount !== expectedCents) {
+      throw new BadRequestException({
+        code: 'AMOUNT_MISMATCH',
+        message: 'Payment amount does not match listing price',
+      });
+    }
+    if (intent.currency.toLowerCase() !== expectedCurrency) {
+      throw new BadRequestException({
+        code: 'CURRENCY_MISMATCH',
+        message: 'Payment currency does not match listing currency',
+      });
+    }
 
-    const amountCents = listing.priceCents;
+    const existing = await this.prisma.marketplacePurchase.findUnique({
+      where: { stripePaymentIntentId: paymentIntentId },
+    });
+    if (existing) return { outcome: 'already_fulfilled' as const, purchase: existing };
+
+    const amountCents = expectedCents;
     const stripeFeeCents = estimateStripeFeeCents(amountCents);
     const { platformFeeCents, sellerEarningCents } = splitSale(amountCents, stripeFeeCents);
     const destinationSettled = Boolean(intent.transfer_data?.destination);
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const purchase = await this.prisma.$transaction(async (tx) => {
         const purchase = await tx.marketplacePurchase.create({
           data: {
             listingId,
@@ -533,17 +606,53 @@ export class MarketplaceService {
         });
         return purchase;
       });
+      return { outcome: 'fulfilled' as const, purchase };
     } catch (err) {
-      if (isUniqueViolation(err, 'stripe_payment_intent_id')) {
-        throw new ConflictException({
-          code: 'PAYMENT_ALREADY_USED',
-          message: 'This payment was already applied',
-        });
-      }
-      if (isUniqueViolation(err)) {
-        throw new ConflictException({ code: 'ALREADY_PURCHASED', message: 'Already owned' });
-      }
-      throw err;
+      if (!isUniqueViolation(err)) throw err;
+      // Same payment applied concurrently (webhook and confirmation at once): already done.
+      const sameIntent = await this.prisma.marketplacePurchase.findUnique({
+        where: { stripePaymentIntentId: paymentIntentId },
+      });
+      if (sameIntent) return { outcome: 'already_fulfilled' as const, purchase: sameIntent };
+      // Two payments for one licence (two checkouts opened in parallel): the second one grants
+      // nothing and must be refunded. Never silent.
+      this.logger.error(
+        `Duplicate marketplace payment ${paymentIntentId} for listing ${listingId}: refund it`
+      );
+      emitSecurityAlert({
+        id: 'MKT-01',
+        severity: 'P1',
+        message: 'Duplicate marketplace payment to refund',
+        extra: { paymentIntentId, listingId },
+      });
+      return { outcome: 'duplicate_payment' as const, purchase: null };
+    }
+  }
+
+  /** One licence per buyer and listing; sellers never buy their own listing. */
+  private async assertCanBuy(buyerId: string, listing: { id: string; sellerId: string }) {
+    if (listing.sellerId === buyerId) {
+      throw new ForbiddenException({
+        code: 'OWN_LISTING',
+        message: 'You cannot buy your own listing',
+      });
+    }
+    const purchase = await this.prisma.marketplacePurchase.findUnique({
+      where: { listingId_buyerId: { listingId: listing.id, buyerId } },
+      select: { refundedAt: true },
+    });
+    if (purchase && !purchase.refundedAt) {
+      throw new ConflictException({
+        code: 'ALREADY_PURCHASED',
+        message: 'You already own this licence',
+      });
+    }
+    if (purchase) {
+      // The licence row is unique per buyer and listing: a new payment could not be delivered.
+      throw new ConflictException({
+        code: 'REPURCHASE_UNAVAILABLE',
+        message: 'This licence was refunded and cannot be bought again; contact support',
+      });
     }
   }
 

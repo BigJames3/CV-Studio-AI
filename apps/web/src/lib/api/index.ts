@@ -1,7 +1,7 @@
 import { apiClient, ensureAccessToken, setLogoutInProgress } from './client';
 import { useAuthStore } from '@/stores/auth-store';
 import type { PublicBillingPlan } from '@cvstudio/shared-types';
-import type { MarketplaceListing } from '@/lib/marketplace/types';
+import type { CatalogFilters, CatalogPage, MarketplaceListing } from '@/lib/marketplace/types';
 
 export const queryKeys = {
   user: {
@@ -20,8 +20,8 @@ export const queryKeys = {
   analyticsDashboard: ['analytics', 'dashboard'] as const,
   cvAnalytics: (days: number) => ['analytics', 'cvs', days] as const,
   marketplace: ['marketplace', 'templates'] as const,
-  marketplaceCatalog: (filters?: { q?: string; category?: string; sort?: string }) =>
-    ['marketplace', 'templates', filters ?? {}] as const,
+  marketplaceCatalog: (filters?: Record<string, string | number | undefined>) =>
+    ['marketplace', 'catalog', filters ?? {}] as const,
   marketplaceListing: (id: string) => ['marketplace', 'listing', id] as const,
   marketplaceLicence: (id: string) => ['marketplace', 'licence', id] as const,
   sessions: ['auth', 'sessions'] as const,
@@ -539,6 +539,17 @@ export const aiApi = {
 };
 
 export const marketplaceApi = {
+  catalog: (filters: CatalogFilters, pageSize = 24) => {
+    const q = new URLSearchParams({
+      source: filters.source,
+      sort: filters.sort,
+      page: String(filters.page),
+      pageSize: String(pageSize),
+    });
+    if (filters.q) q.set('q', filters.q);
+    if (filters.category) q.set('category', filters.category);
+    return apiClient<CatalogPage>(`/marketplace/catalog?${q.toString()}`);
+  },
   listTemplates: (params?: { q?: string; category?: string; sort?: string }) => {
     const q = new URLSearchParams();
     if (params?.q) q.set('q', params.q);

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { TemplateGrid } from './components/TemplateGrid';
 import { TemplateCustomizer } from './components/TemplateCustomizer';
@@ -22,6 +23,16 @@ export default function TemplatesPage() {
     cvCount,
     cvLimit,
   } = useTemplateSelection();
+
+  // Opened from the marketplace: `?template=<id>` selects that official template. Its plan
+  // rule still applies when the CV is created.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('template');
+    const template = id ? templates.find((t) => t.id === id) : undefined;
+    if (template) selectTemplate(template);
+    // Only on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-8">

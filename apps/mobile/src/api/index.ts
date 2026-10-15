@@ -13,10 +13,10 @@ export const authApi = {
       body: { email, password },
       auth: false,
     }),
-  register: (email: string, password: string, name?: string) =>
+  register: (email: string, password: string, firstName: string, lastName: string) =>
     apiClient<LoginResponse>('/auth/register', {
       method: 'POST',
-      body: { email, password, name },
+      body: { email, password, firstName, lastName },
       auth: false,
     }),
   logout: (refreshToken?: string | null) =>

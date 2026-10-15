@@ -10,7 +10,8 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 
 export function RegisterScreen(_props: Props) {
   const setSession = useAuthStore((s) => s.setSession);
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -20,7 +21,7 @@ export function RegisterScreen(_props: Props) {
     setLoading(true);
     setError(null);
     try {
-      const res = await authApi.register(email.trim(), password, name.trim() || undefined);
+      const res = await authApi.register(email.trim(), password, firstName.trim(), lastName.trim());
       await setSession(res.accessToken, res.refreshToken, res.user.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Register failed');
@@ -31,7 +32,18 @@ export function RegisterScreen(_props: Props) {
 
   return (
     <View style={styles.root}>
-      <TextInput style={styles.input} placeholder="Name" value={name} onChangeText={setName} />
+      <TextInput
+        style={styles.input}
+        placeholder="First name"
+        value={firstName}
+        onChangeText={setFirstName}
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Last name"
+        value={lastName}
+        onChangeText={setLastName}
+      />
       <TextInput
         style={styles.input}
         autoCapitalize="none"

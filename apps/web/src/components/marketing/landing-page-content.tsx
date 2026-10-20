@@ -180,7 +180,9 @@ export function LandingPageContent() {
           <h2 className="font-[family-name:var(--font-landing-display)] text-3xl text-[#0B1F2A] md:text-4xl">
             Tarifs clairs
           </h2>
-          <p className="mt-3 text-[#4A5F5A]">Gratuit · Pro 9,99 €/mois · Business 29,99 €/mois</p>
+          <p className="mt-3 text-[#4A5F5A]">
+            Gratuit · Pro 6 600 F CFA/mois · Business 19 700 F CFA/mois
+          </p>
           <div className="mt-10 flex flex-wrap gap-4">
             <Link href="/pricing">
               <Button size="lg">Voir le détail</Button>
@@ -276,7 +278,7 @@ export function LandingPageContent() {
             offers: {
               '@type': 'Offer',
               price: '0',
-              priceCurrency: 'USD',
+              priceCurrency: 'XOF',
             },
             description: 'Builder de CV ATS-ready avec aperçu live, templates pro et export PDF.',
           }),

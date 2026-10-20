@@ -11,18 +11,12 @@ export function checkoutErrorMessage(error: unknown): string {
   }
 
   switch (error.code) {
-    case 'STRIPE_NOT_CONFIGURED':
-    case 'STRIPE_PRICE_NOT_CONFIGURED':
-    case 'STRIPE_LIVE_KEY_BLOCKED':
-      return 'Le paiement par carte n’est pas disponible pour le moment. Réessayez plus tard ou contactez le support.';
-    case 'ALREADY_SUBSCRIBED':
-      return 'Vous êtes déjà abonné à ce plan.';
-    case 'SUBSCRIPTION_PAYMENT_ISSUE':
-      return 'Une facture de votre abonnement est impayée. Mettez à jour votre carte avec « Gérer mon paiement » avant de changer de plan.';
-    case 'STRIPE_UNAVAILABLE':
-      return 'Impossible de vérifier votre abonnement actuel. Réessayez dans un instant.';
-    case 'STRIPE_SUBSCRIPTION_INVALID':
-      return 'Votre abonnement actuel ne peut pas être modifié. Contactez le support.';
+    case 'PAYMENTS_NOT_CONFIGURED':
+    case 'PRICE_NOT_CONFIGURED':
+    case 'PAYSTACK_LIVE_KEY_BLOCKED':
+      return 'Le paiement n’est pas disponible pour le moment. Réessayez plus tard ou contactez le support.';
+    case 'PAYMENT_PROVIDER_UNAVAILABLE':
+      return 'Le service de paiement est momentanément indisponible. Réessayez dans un instant.';
     case 'PLAN_NOT_FOUND':
       return 'Ce plan n’est pas disponible pour le moment.';
     case 'VALIDATION_ERROR':
@@ -39,19 +33,4 @@ export function checkoutErrorMessage(error: unknown): string {
     return 'Le service de paiement est momentanément indisponible. Réessayez dans un instant.';
   }
   return 'Impossible de démarrer le paiement. Réessayez dans un instant.';
-}
-
-/** User-facing message when the Stripe Customer Portal cannot be opened. */
-export function billingPortalErrorMessage(error: unknown): string {
-  if (!(error instanceof ApiError)) {
-    return 'Impossible de joindre le serveur. Vérifiez votre connexion ou réessayez dans un instant.';
-  }
-  switch (error.code) {
-    case 'NO_BILLING_ACCOUNT':
-      return 'Aucun paiement par carte n’a encore été effectué sur ce compte.';
-    case 'STRIPE_NOT_CONFIGURED':
-    case 'BILLING_PORTAL_UNAVAILABLE':
-      return 'La gestion du paiement est momentanément indisponible. Réessayez plus tard ou contactez le support.';
-  }
-  return 'Impossible d’ouvrir la gestion du paiement. Réessayez dans un instant.';
 }

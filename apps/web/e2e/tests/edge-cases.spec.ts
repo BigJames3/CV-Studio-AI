@@ -25,7 +25,7 @@ test.describe('Edge cases', () => {
       'Impossible de démarrer le paiement'
     );
     await expect(page).toHaveURL(/account\/billing/);
-    await expect(page).not.toHaveURL(/checkout\.stripe\.com/);
+    await expect(page).not.toHaveURL(/checkout\.paystack\.com/);
   });
 
   test('unauthenticated billing redirects to login @auth', async ({ page }) => {

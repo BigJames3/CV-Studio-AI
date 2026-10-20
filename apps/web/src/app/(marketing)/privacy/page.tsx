@@ -60,10 +60,11 @@ export default function PrivacyPage() {
             et les résultats proposés (voir section 4).
           </li>
           <li>
-            <strong>Abonnement et paiements</strong> : formule, statut, dates de période et d’essai,
-            montants, numéros de facture et identifiants client et abonnement chez Stripe. Vos
-            données de carte bancaire sont saisies sur les pages de Stripe et ne sont jamais reçues
-            ni stockées par nos serveurs.
+            <strong>Abonnement et paiements</strong> : formule, statut, dates de période, montants,
+            numéros de facture, références de transaction et identifiant client chez Paystack (et,
+            pour les abonnements antérieurs, chez Stripe). Vos données de carte bancaire ou de
+            Mobile Money sont saisies sur les pages de Paystack et ne sont jamais reçues ni stockées
+            par nos serveurs.
           </li>
           <li>
             <strong>Sécurité et technique</strong> : adresse IP et navigateur (user-agent) des
@@ -87,8 +88,10 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>Marketplace</strong> (vendeurs et acheteurs de modèles) : profil vendeur (nom
-            affiché, présentation, pays, lien de portfolio), achats, avis, litiges. La vérification
-            d’identité des vendeurs et les versements sont réalisés par Stripe.
+            affiché, présentation, pays, lien de portfolio), achats, avis, litiges, et pour les
+            versements : banque ou opérateur Mobile Money et quatre derniers chiffres du compte. Le
+            numéro de compte complet est transmis à Paystack, qui vérifie le compte et réalise les
+            versements.
           </li>
           <li>
             <strong>Support</strong> : le contenu des messages que vous nous envoyez.
@@ -161,7 +164,7 @@ export default function PrivacyPage() {
             {HOSTING.provider} : hébergement de l’application et des bases de données (
             {HOSTING.location}).
           </li>
-          <li>Stripe : paiements, factures, abonnements et versements aux vendeurs.</li>
+          <li>Paystack : paiements, remboursements et versements aux vendeurs.</li>
           <li>OpenAI : optimisation de lignes de CV, si l’option est activée (voir section 4).</li>
           <li>PostHog : mesure d’audience, uniquement avec votre accord.</li>
           <li>Sentry : détection des erreurs techniques, sans contenu de CV.</li>
@@ -177,7 +180,7 @@ export default function PrivacyPage() {
       <LegalSection title="6. Transferts hors de l’Union européenne">
         <p>
           L’hébergement principal est situé dans l’Union européenne. Certains prestataires (OpenAI,
-          PostHog, Sentry, Stripe, Google, LinkedIn) peuvent traiter des données aux États-Unis ou
+          PostHog, Sentry, Paystack, Google, LinkedIn) peuvent traiter des données aux États-Unis ou
           dans d’autres pays. Les garanties encadrant ces transferts (clauses contractuelles types
           de la Commission européenne ou équivalent) sont{' '}
           {missing('garanties de transfert vérifiées pour chaque prestataire')}.
@@ -227,7 +230,7 @@ export default function PrivacyPage() {
             sessions, comptes Google ou LinkedIn liés, appartenances aux équipes ;
           </li>
           <li>
-            résilie immédiatement un abonnement en cours, sans remboursement automatique de la
+            met fin immédiatement à la période payée en cours, sans remboursement automatique de la
             période restante ;
           </li>
           <li>
@@ -241,7 +244,7 @@ export default function PrivacyPage() {
           </li>
         </LegalList>
         <p>
-          Les données détenues par nos prestataires (par exemple le dossier client chez Stripe) ne
+          Les données détenues par nos prestataires (par exemple le dossier client chez Paystack) ne
           sont pas supprimées automatiquement : écrivez-nous pour en demander l’effacement lorsque
           la loi le permet.
         </p>

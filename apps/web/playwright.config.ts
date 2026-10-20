@@ -7,10 +7,9 @@ loadTestEnv();
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
 const repoRoot = path.resolve(__dirname, '../..');
 const e2eDir = path.join(__dirname, 'e2e');
-const stripe = process.env.E2E_STRIPE === '1';
 /** @mobile-wip: specs for the mobile nav / editor tabs UI, not implemented yet. */
 const mobileWip = process.env.E2E_MOBILE_WIP === '1';
-const excludedTags = [...(stripe ? [] : [/@stripe/]), ...(mobileWip ? [] : [/@mobile-wip/])];
+const excludedTags = mobileWip ? [] : [/@mobile-wip/];
 const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEBSERVER === '1';
 const isCi = process.env.CI === 'true' || process.env.CI === '1';
 

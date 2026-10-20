@@ -2,23 +2,22 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { InvoiceHistory } from '@/components/billing/invoice-history';
 import { BillingPlansSkeleton, PlanGrid } from '@/components/billing/plan-grid';
 import { queryKeys, subscriptionsApi, paymentsApi, plansApi, invoicesApi } from '@/lib/api';
 import { FALLBACK_PLANS, SUPPORT_BUSINESS_MAILTO } from '@/lib/billing/plans-catalog';
-import {
-  billingPortalErrorMessage,
-  checkoutErrorMessage,
-} from '@/lib/billing/checkout-error-message';
+import { checkoutErrorMessage } from '@/lib/billing/checkout-error-message';
 import { useMe, useSubscription, useUserPlan } from '@/hooks';
 import { cn } from '@/lib/utils';
 import { track } from '@/lib/analytics';
 
 const ACTIVATION_POLL_INTERVAL_MS = 500;
 const ACTIVATION_POLL_MAX_ATTEMPTS = 60;
+/** The API e-mails a reminder 7 days before a prepaid period ends; the page warns as well. */
+const RENEWAL_WARNING_MS = 7 * 24 * 60 * 60 * 1000;
 
 function parseCheckoutState(value: string | null) {
   if (value === 'success' || value === 'cancel') {
@@ -79,7 +78,9 @@ function BillingPageContent() {
   const { tier } = useUserPlan();
 
   const checkoutState = parseCheckoutState(params.get('checkout'));
-  const checkoutSessionId = params.get('session_id');
+  // Paystack appends `trxref` and `reference` (the same value) to the return URL.
+  const checkoutReference = params.get('reference') ?? params.get('trxref');
+  const confirmedReference = useRef<string | null>(null);
 
   const [polledTier, setPolledTier] = useState<'free' | 'pro' | 'business' | null>(null);
   const [isPollingActivation, setIsPollingActivation] = useState(false);
@@ -89,8 +90,6 @@ function BillingPageContent() {
   const [cancelConfirm, setCancelConfirm] = useState(false);
   const [cancelPending, setCancelPending] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
-  const [portalPending, setPortalPending] = useState(false);
-  const [portalError, setPortalError] = useState<string | null>(null);
   const [billingPeriod, setBillingPeriod] = useState<'month' | 'year'>('month');
 
   const {
@@ -116,10 +115,16 @@ function BillingPageContent() {
   const invoices = invoicesData?.items ?? [];
 
   const subscription = subData?.subscription ?? null;
+  // Paystack plans are prepaid periods: nothing renews or needs cancelling.
+  const isPrepaid = subscription?.provider === 'paystack';
   const cancelAtPeriodEnd = Boolean(subscription?.cancelAtPeriodEnd);
-  const periodEnd = subscription?.currentPeriodEnd
-    ? new Date(subscription.currentPeriodEnd).toLocaleDateString('fr-FR')
+  const periodEndDate = subscription?.currentPeriodEnd
+    ? new Date(subscription.currentPeriodEnd)
     : null;
+  const periodEnd = periodEndDate ? periodEndDate.toLocaleDateString('fr-FR') : null;
+  const msLeft = periodEndDate ? periodEndDate.getTime() - Date.now() : null;
+  const prepaidEndsSoon = isPrepaid && msLeft != null && msLeft > 0 && msLeft <= RENEWAL_WARNING_MS;
+  const prepaidExpired = isPrepaid && msLeft != null && msLeft <= 0;
 
   const displayTier = polledTier || tier;
   const displayIsFree = displayTier === 'free';
@@ -128,7 +133,7 @@ function BillingPageContent() {
 
   useEffect(() => {
     if (checkoutState === 'success') {
-      track('checkout_succeeded', { provider: 'stripe' });
+      track('checkout_succeeded', { provider: 'paystack' });
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.user.me() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.subscription }),
@@ -137,19 +142,13 @@ function BillingPageContent() {
       ]);
     }
     if (checkoutState === 'cancel') {
-      track('checkout_cancelled', { provider: 'stripe' });
+      track('checkout_cancelled', { provider: 'paystack' });
     }
   }, [checkoutState, queryClient]);
 
   useEffect(() => {
     if (checkoutState !== 'success') {
       setPolledTier(null);
-      setIsPollingActivation(false);
-      return;
-    }
-
-    if (tier !== 'free') {
-      setPolledTier(tier);
       setIsPollingActivation(false);
       return;
     }
@@ -162,10 +161,12 @@ function BillingPageContent() {
     const poll = async () => {
       if (cancelled) return;
       try {
-        // Ask the API to confirm the session with Stripe first, so activation does not depend on
-        // the webhook alone. On failure, polling still waits for the webhook.
-        if (attempts === 0 && checkoutSessionId) {
-          await paymentsApi.confirmCheckout(checkoutSessionId).catch((error: unknown) => {
+        // Ask the API to verify the payment with Paystack first, so activation (or the extension
+        // of a plan already active) does not depend on the webhook alone. On failure, polling
+        // still waits for the webhook. Once per reference: the API applies it idempotently anyway.
+        if (checkoutReference && confirmedReference.current !== checkoutReference) {
+          confirmedReference.current = checkoutReference;
+          await paymentsApi.confirmCheckout(checkoutReference).catch((error: unknown) => {
             console.warn('Checkout confirmation failed:', error);
           });
           if (cancelled) return;
@@ -204,31 +205,19 @@ function BillingPageContent() {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [checkoutSessionId, checkoutState, queryClient, tier]);
+  }, [checkoutReference, checkoutState, queryClient]);
 
   async function checkout(plan: 'pro' | 'business', interval: 'month' | 'year') {
     setCheckoutPending(plan);
     setCheckoutError(null);
-    track('checkout_started', { plan, interval, payment_method: 'stripe' });
+    track('checkout_started', { plan, interval, payment_method: 'paystack' });
     try {
       const { url } = await subscriptionsApi.checkout({ plan, interval });
       window.location.href = url;
     } catch (error) {
-      track('checkout_failed', { plan, interval, payment_method: 'stripe' });
+      track('checkout_failed', { plan, interval, payment_method: 'paystack' });
       setCheckoutError(checkoutErrorMessage(error));
       setCheckoutPending(null);
-    }
-  }
-
-  async function openBillingPortal() {
-    setPortalPending(true);
-    setPortalError(null);
-    try {
-      const { url } = await subscriptionsApi.portal();
-      window.location.href = url;
-    } catch (error) {
-      setPortalError(billingPortalErrorMessage(error));
-      setPortalPending(false);
     }
   }
 
@@ -291,7 +280,9 @@ function BillingPageContent() {
         >
           <p className="mt-1 text-sm" data-testid="checkout-activation-status">
             {activationConfirmed
-              ? `Votre plan ${displayTier} est maintenant actif.`
+              ? `Votre plan ${displayTier} est maintenant actif${
+                  isPrepaid && periodEnd ? ` jusqu’au ${periodEnd}` : ''
+                }.`
               : `Activation en cours${isPollingActivation ? '…' : ''}`}
           </p>
         </CheckoutBanner>
@@ -311,15 +302,35 @@ function BillingPageContent() {
         <p data-testid="plan-badge" className="mt-1 text-2xl font-semibold capitalize">
           Plan {displayTier}
         </p>
-        <p className="mt-2 text-sm text-content-secondary">
+        <p className="mt-2 text-sm text-content-secondary" data-testid="plan-period">
           {displayIsFree
             ? 'Créez jusqu’à 1 CV. Passez à un plan supérieur pour débloquer plus de fonctionnalités.'
-            : periodEnd
-              ? `Renouvellement le ${periodEnd}`
-              : null}
+            : isPrepaid && periodEnd
+              ? `Valable jusqu’au ${periodEnd}`
+              : periodEnd
+                ? `Renouvellement le ${periodEnd}`
+                : null}
         </p>
 
-        {cancelAtPeriodEnd && periodEnd ? (
+        {displayIsFree && prepaidExpired && periodEnd ? (
+          <p className="mt-3 text-sm text-content-secondary" data-testid="prepaid-expired">
+            Votre dernière période payée s’est terminée le {periodEnd}. Choisissez un plan
+            ci-dessous pour le réactiver.
+          </p>
+        ) : null}
+
+        {!displayIsFree && isPrepaid ? (
+          <p
+            className={cn('mt-3 text-sm', prepaidEndsSoon ? 'text-warning' : 'text-content-muted')}
+            data-testid="prepaid-renewal-note"
+          >
+            {prepaidEndsSoon ? 'Votre plan arrive bientôt à échéance. ' : null}
+            Rien n’est prélevé automatiquement : prolongez votre plan ci-dessous pour ajouter un
+            mois ou un an à la date de fin.
+          </p>
+        ) : null}
+
+        {!isPrepaid && cancelAtPeriodEnd && periodEnd ? (
           <p className="mt-3 text-sm text-warning" data-testid="cancel-pending">
             L&apos;abonnement se terminera le {periodEnd}. Vous conservez l&apos;accès jusqu&apos;à
             cette date.
@@ -328,31 +339,8 @@ function BillingPageContent() {
 
         {subscription?.status === 'past_due' ? (
           <p className="mt-3 text-sm text-error" data-testid="payment-issue" role="alert">
-            Le dernier paiement a échoué. Mettez à jour votre carte pour garder votre plan.
+            Le dernier paiement a échoué. Payez une nouvelle période pour garder votre plan.
           </p>
-        ) : null}
-
-        {subscription?.stripeCustomerId ? (
-          <div className="mt-4">
-            <Button
-              type="button"
-              variant="outline"
-              data-testid="billing-portal"
-              disabled={portalPending}
-              onClick={() => void openBillingPortal()}
-            >
-              {portalPending ? 'Ouverture…' : 'Gérer mon paiement et mes factures'}
-            </Button>
-            {portalError ? (
-              <p
-                className="mt-2 text-sm text-error"
-                data-testid="billing-portal-error"
-                role="alert"
-              >
-                {portalError}
-              </p>
-            ) : null}
-          </div>
         ) : null}
       </section>
 
@@ -371,13 +359,14 @@ function BillingPageContent() {
             billingPeriod={billingPeriod}
             checkoutPending={checkoutPending}
             trialEligible={subData?.trialEligible === true}
+            canRenew={!displayIsFree}
             onPeriodChange={setBillingPeriod}
             onCheckout={(plan, interval) => void checkout(plan, interval)}
           />
         )}
 
         <p className="mt-4 text-sm text-content-secondary" data-testid="payment-provider-note">
-          Paiement sécurisé par carte bancaire via Stripe.
+          Paiement sécurisé via Paystack : Orange Money, MTN Mobile Money, Wave ou carte bancaire.
         </p>
 
         {checkoutError ? (
@@ -392,7 +381,7 @@ function BillingPageContent() {
           </p>
         ) : null}
 
-        {(displayIsPro || displayIsBusiness) && !cancelAtPeriodEnd ? (
+        {(displayIsPro || displayIsBusiness) && !isPrepaid && !cancelAtPeriodEnd ? (
           <div className="mt-6 flex flex-wrap gap-3">
             {cancelConfirm ? (
               <div

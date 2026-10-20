@@ -15,7 +15,7 @@ import {
 export function ListingDetail({ listingId }: { listingId: string }) {
   const searchParams = useSearchParams();
   const checkout = searchParams.get('checkout');
-  const checkoutSessionId = checkout === 'success' ? searchParams.get('session_id') : null;
+  const checkoutReference = checkout === 'success' ? searchParams.get('reference') : null;
   const {
     data: listing,
     isLoading,
@@ -60,7 +60,7 @@ export function ListingDetail({ listingId }: { listingId: string }) {
             className="mb-4 rounded-lg border border-primary/30 bg-primary-subtle px-3 py-2 text-sm"
             data-testid="marketplace-checkout-success"
           >
-            Retour du paiement. La licence s’active dès que Stripe confirme le paiement.
+            Retour du paiement. La licence s’active dès que Paystack confirme le paiement.
           </p>
         ) : null}
         {checkout === 'cancel' ? (
@@ -89,7 +89,7 @@ export function ListingDetail({ listingId }: { listingId: string }) {
         <LicenceAction
           listingId={listing.id}
           title={listing.title}
-          checkoutSessionId={checkoutSessionId}
+          checkoutReference={checkoutReference}
         />
         {listing.reviews && listing.reviews.length > 0 ? (
           <section className="mt-8" aria-labelledby="reviews-heading">

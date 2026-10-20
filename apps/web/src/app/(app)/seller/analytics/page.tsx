@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { marketplaceApi } from '@/lib/api';
+import { formatListingPrice } from '@/lib/marketplace/types';
 
 type Analytics = Awaited<ReturnType<typeof marketplaceApi.analytics>>;
 
@@ -16,12 +17,14 @@ export default function SellerAnalyticsPage() {
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'));
   }, []);
 
+  // Listings are priced in the payment currency (XOF by default).
+  const currency = data?.listings[0]?.currency ?? 'XOF';
   const cards = [
     { label: 'Impressions', value: data ? String(data.impressions) : '—' },
     { label: 'Purchases', value: data ? String(data.purchases) : '—' },
     {
       label: 'Net earnings',
-      value: data ? `$${(data.sellerShareCents / 100).toFixed(2)}` : '—',
+      value: data ? formatListingPrice(data.sellerShareCents, currency) : '—',
     },
   ];
 
@@ -46,8 +49,8 @@ export default function SellerAnalyticsPage() {
       </div>
       {data ? (
         <p className="mt-4 text-sm text-content-secondary">
-          Conversion {(data.conversionRate * 100).toFixed(1)}% · GMV $
-          {(data.revenueCents / 100).toFixed(2)}
+          Conversion {(data.conversionRate * 100).toFixed(1)}% · GMV{' '}
+          {formatListingPrice(data.revenueCents, currency)}
         </p>
       ) : null}
     </div>

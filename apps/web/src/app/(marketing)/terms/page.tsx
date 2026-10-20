@@ -104,7 +104,7 @@ export default function TermsPage() {
           <Link href="/pricing" className="text-primary underline">
             Tarifs
           </Link>
-          . Prix, essai, renouvellement, résiliation et remboursements relèvent des{' '}
+          . Prix, paiement, durée, prolongation et remboursements relèvent des{' '}
           <Link href="/subscription-terms" className="text-primary underline">
             conditions d’abonnement
           </Link>{' '}
@@ -160,7 +160,7 @@ export default function TermsPage() {
         <p>
           Nous pouvons faire évoluer ces conditions. Les changements importants vous sont annoncés
           par e-mail ou dans l’application avant leur entrée en vigueur ; si vous les refusez, vous
-          pouvez supprimer votre compte et résilier votre abonnement.
+          pouvez supprimer votre compte.
         </p>
       </LegalSection>
 

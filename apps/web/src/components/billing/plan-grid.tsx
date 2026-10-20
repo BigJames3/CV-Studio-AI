@@ -7,8 +7,6 @@ import { cn } from '@/lib/utils';
 import type { BillingPlan } from '@/lib/api';
 import { formatFeatureName, formatPlanPrice } from '@/lib/billing/plans-catalog';
 
-const TIER_RANK: Record<string, number> = { free: 0, pro: 1, business: 2 };
-
 export { formatFeatureName, formatPlanPrice };
 
 export function PlanGrid({
@@ -17,6 +15,7 @@ export function PlanGrid({
   billingPeriod,
   checkoutPending,
   trialEligible = false,
+  canRenew = false,
   onPeriodChange,
   onCheckout,
 }: {
@@ -26,6 +25,8 @@ export function PlanGrid({
   checkoutPending: 'pro' | 'business' | null;
   /** From GET /subscriptions/me: the trial is only advertised to accounts that can still get it. */
   trialEligible?: boolean;
+  /** Paid plan in force: its card offers to pay one more period (plans are prepaid). */
+  canRenew?: boolean;
   onPeriodChange: (period: 'month' | 'year') => void;
   onCheckout: (plan: 'pro' | 'business', interval: 'month' | 'year') => void;
 }) {
@@ -86,9 +87,9 @@ export function PlanGrid({
               : null;
           const monthlyEquivalent =
             billingPeriod === 'year' && plan.priceAnnual ? plan.priceAnnual / 12 : null;
-          const canUpgrade = !isCurrent && TIER_RANK[plan.id] > (TIER_RANK[currentTier] ?? 0);
+          const isPurchasable = plan.id === 'pro' || plan.id === 'business';
           const pending = checkoutPending === plan.id;
-          const currency = plan.currency || 'EUR';
+          const currency = plan.currency || 'XOF';
 
           return (
             <div
@@ -164,11 +165,25 @@ export function PlanGrid({
               </ul>
 
               <div className="mt-5">
-                {isCurrent ? (
+                {isCurrent && isPurchasable && canRenew ? (
+                  <Button
+                    className="w-full"
+                    variant="secondary"
+                    data-testid={`renew-${plan.id}-${billingPeriod}`}
+                    disabled={checkoutPending !== null}
+                    onClick={() => onCheckout(plan.id as 'pro' | 'business', billingPeriod)}
+                  >
+                    {pending
+                      ? 'Redirection…'
+                      : billingPeriod === 'month'
+                        ? 'Prolonger d’un mois'
+                        : 'Prolonger d’un an'}
+                  </Button>
+                ) : isCurrent ? (
                   <Button className="w-full" variant="secondary" disabled>
                     Plan actuel
                   </Button>
-                ) : canUpgrade && (plan.id === 'pro' || plan.id === 'business') ? (
+                ) : isPurchasable ? (
                   <Button
                     className="w-full"
                     data-testid={`checkout-${plan.id}-${billingPeriod}`}
@@ -189,9 +204,10 @@ export function PlanGrid({
         })}
       </div>
       <p className="mt-6 text-xs text-content-secondary" data-testid="plan-grid-terms">
-        Abonnement sans engagement, renouvelé automatiquement à chaque période jusqu’à résiliation
-        depuis votre espace Facturation. Pendant l’essai gratuit, une carte est demandée et le
-        premier paiement a lieu à la fin de l’essai si vous ne résiliez pas avant. En vous abonnant,
+        Paiement unique pour un mois ou un an, sans renouvellement automatique : le plan reste actif
+        jusqu’à la fin de la période payée, puis le compte repasse en Gratuit s’il n’est pas
+        prolongé. Un rappel est envoyé par e-mail 7 jours avant. Payer de nouveau prolonge la
+        période ; en changeant de plan, le temps non utilisé est crédité sur le nouveau. En payant,
         vous acceptez les{' '}
         <Link href="/subscription-terms" className="text-primary underline">
           conditions d’abonnement

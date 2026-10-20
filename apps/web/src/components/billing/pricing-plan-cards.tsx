@@ -23,7 +23,7 @@ export function PricingPlanCards() {
     <div className="mt-12 grid gap-6 md:grid-cols-3">
       {plans.map((plan) => {
         const isRecommended = plan.recommended || plan.id === 'pro';
-        const currency = plan.currency || 'EUR';
+        const currency = plan.currency || 'XOF';
         const annualSavings =
           plan.priceAnnual && plan.priceMonthly > 0
             ? Math.round((plan.priceMonthly * 12 - plan.priceAnnual) * 100) / 100

@@ -76,12 +76,12 @@ const nextConfig = {
       "form-action 'self'",
       "frame-ancestors 'none'",
       "object-src 'none'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://js.stripe.com",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
       "img-src 'self' data: https: blob:",
-      `connect-src 'self' ${apiOrigin} https://accounts.google.com https://oauth2.googleapis.com https://api.stripe.com https://*.sentry.io https://*.posthog.com https://us.i.posthog.com`,
-      'frame-src https://accounts.google.com https://js.stripe.com https://hooks.stripe.com',
+      `connect-src 'self' ${apiOrigin} https://accounts.google.com https://oauth2.googleapis.com https://*.sentry.io https://*.posthog.com https://us.i.posthog.com`,
+      'frame-src https://accounts.google.com',
     ].join('; ');
 
     return [

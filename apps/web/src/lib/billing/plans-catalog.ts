@@ -5,6 +5,10 @@ export const SUPPORT_BUSINESS_MAILTO =
 
 export type BillingPlan = PublicBillingPlan;
 
+/**
+ * Shown when GET /plans fails. Prices in F CFA: the EUR catalog converted at the fixed parity
+ * (655.957) and rounded up to 100 F, the rule the API applies when charging.
+ */
 export const FALLBACK_PLANS: BillingPlan[] = [
   {
     id: 'free',
@@ -13,11 +17,9 @@ export const FALLBACK_PLANS: BillingPlan[] = [
     position: 0,
     priceMonthly: 0,
     priceAnnual: null,
-    currency: 'EUR',
+    currency: 'XOF',
     trialDays: null,
     recommended: false,
-    stripePriceMonthlyId: null,
-    stripePriceAnnualId: null,
     entitlements: [
       { feature: 'cvLimit', value: '1', included: true },
       { feature: 'downloadPdf', value: 'false', included: false },
@@ -32,13 +34,11 @@ export const FALLBACK_PLANS: BillingPlan[] = [
     name: 'Pro',
     description: '5 CVs, unlimited templates, AI optimization, ATS check',
     position: 1,
-    priceMonthly: 9.99,
-    priceAnnual: 99,
-    currency: 'EUR',
-    trialDays: 14,
+    priceMonthly: 6600,
+    priceAnnual: 65000,
+    currency: 'XOF',
+    trialDays: null,
     recommended: true,
-    stripePriceMonthlyId: null,
-    stripePriceAnnualId: null,
     entitlements: [
       { feature: 'cvLimit', value: '5', included: true },
       { feature: 'downloadPdf', value: 'true', included: true },
@@ -53,13 +53,11 @@ export const FALLBACK_PLANS: BillingPlan[] = [
     name: 'Business',
     description: '20 CVs, everything in Pro',
     position: 2,
-    priceMonthly: 29.99,
-    priceAnnual: 299,
-    currency: 'EUR',
-    trialDays: 14,
+    priceMonthly: 19700,
+    priceAnnual: 196200,
+    currency: 'XOF',
+    trialDays: null,
     recommended: false,
-    stripePriceMonthlyId: null,
-    stripePriceAnnualId: null,
     entitlements: [
       { feature: 'cvLimit', value: '20', included: true },
       { feature: 'downloadPdf', value: 'true', included: true },
@@ -71,13 +69,18 @@ export const FALLBACK_PLANS: BillingPlan[] = [
   },
 ];
 
-export function formatPlanPrice(amount: number, currency = 'EUR'): string {
+export function formatPlanPrice(amount: number, currency = 'XOF'): string {
+  // XOF has no decimals: a yearly price divided by 12 must not show centimes.
+  const maxDigits =
+    new Intl.NumberFormat('fr-FR', { style: 'currency', currency }).resolvedOptions()
+      .maximumFractionDigits ?? 2;
+  const value = maxDigits === 0 ? Math.round(amount) : amount;
   return new Intl.NumberFormat('fr-FR', {
     style: 'currency',
     currency,
-    minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
+    minimumFractionDigits: value % 1 === 0 ? 0 : maxDigits,
+    maximumFractionDigits: maxDigits,
+  }).format(value);
 }
 
 export function formatFeatureName(ent: BillingPlan['entitlements'][number]): string {

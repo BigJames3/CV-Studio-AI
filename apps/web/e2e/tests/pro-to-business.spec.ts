@@ -53,7 +53,7 @@ test.describe('Business checkout', () => {
       .poll(async () => await checkoutBody)
       .toEqual({ plan: 'business', interval: 'month' });
 
-    // The mocked checkout never reached Stripe: the plan must not change on the client's word.
+    // The mocked checkout never reached Paystack: the plan must not change on the client's word.
     const sub = await getSubscription(request, testUser.accessToken);
     expect(sub.tier).toBe('pro');
   });

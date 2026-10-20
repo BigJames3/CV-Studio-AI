@@ -1,9 +1,9 @@
 import { test, expect } from '../fixtures/auth.fixture';
 
 /**
- * Webhook retry / DLQ / Redis NX lock are not browser flows.
+ * Paystack webhook idempotency / Redis NX lock / retry / DLQ are not browser flows.
  * They live in Jest: apps/api/src/modules/payments/payments.service.spec.ts
- * (P0-1 lock, retry then success, DLQ + Sentry).
+ * (processEventWithRetry).
  *
  * This spec documents the contract and fails CI if the unit file disappears.
  */
@@ -16,9 +16,9 @@ test.describe('Webhook P0 contract @webhook', () => {
       '../../../api/src/modules/payments/payments.service.spec.ts'
     );
     const src = await fs.readFile(spec, 'utf8');
-    expect(src).toMatch(/P0-1: Lock Processing/);
-    expect(src).toMatch(/retries on transient error then succeeds/);
-    expect(src).toMatch(/sends to DLQ and alerts on permanent error/);
-    expect(src).toMatch(/prevent double processing/);
+    expect(src).toMatch(/describe\('processEventWithRetry'/);
+    expect(src).toMatch(/skips an event already processed/);
+    expect(src).toMatch(/skips an event another pod is processing/);
+    expect(src).toMatch(/retries, then sends the event to the DLQ and alerts/);
   });
 });

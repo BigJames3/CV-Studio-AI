@@ -33,7 +33,7 @@ pnpm docker:test
 pnpm --filter @cvstudio/api exec prisma migrate deploy
 pnpm --filter @cvstudio/web exec playwright install chromium
 
-# API Jest e2e (auth, CVs, Stripe webhook route)
+# API Jest e2e (auth, CVs, payment webhook route)
 pnpm test:e2e:api
 
 # Playwright (starts API + web unless they are already up)
@@ -59,14 +59,17 @@ pnpm test:e2e
 pnpm --filter @cvstudio/web test:e2e:ui
 ```
 
-## Billing specs (Stripe only)
+## Billing specs (Paystack, prepaid periods)
 
-- Card payment through Stripe, no payment method choice
-- Success / cancel banners from query params
+Plans are prepaid one-time payments (a month or a year) through Paystack's hosted page; nothing renews by itself.
+
+- Payment through Paystack (Mobile Money or card is chosen on Paystack's page), no billing portal, no trial
+- Success / cancel banners from query params; the `reference` Paystack appends is sent to `POST /payments/checkout/confirm`
 - Plan activation polling after `?checkout=success`
-- Checkout body sends only `plan` and `interval`
+- Checkout body sends only `plan` and `interval`; a prepaid plan shows « Valable jusqu’au » and renews through checkout
+- Without Paystack keys checkout is fail-closed (`PAYMENTS_NOT_CONFIGURED`): paid users are seeded with `utils/db.ts` `grantPlan`
 
-Checkout requires auth (JWT). The Stripe webhook is public and verified by signature.
+Checkout requires auth (JWT). The Paystack webhook is public and verified by signature. Paystack's hosted page is not driven by Playwright (it needs a real Paystack account).
 
 ## Debugging
 
@@ -75,8 +78,6 @@ pnpm --filter @cvstudio/web test:e2e:headed
 pnpm --filter @cvstudio/web test:e2e:debug
 pnpm --filter @cvstudio/web test:e2e:report
 ```
-
-Stripe hosted checkout is opt-in: `E2E_STRIPE=1` (see `docs/e2e/EXECUTION_GUIDE.md`).
 
 Tests tagged `@mobile-wip` (mobile nav + editor section tabs/rail) describe UI that is not implemented yet
 (`marketing-nav-trigger`, `editor-section-rail`, … do not exist; `mobile-nav.tsx` is not mounted). They are

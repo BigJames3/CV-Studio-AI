@@ -9,7 +9,7 @@ const CATALOG = [
     position: 0,
     priceMonthly: 0,
     priceAnnual: null,
-    currency: 'EUR',
+    currency: 'XOF',
     trialDays: null,
     recommended: false,
     entitlements: [{ feature: 'cvLimit', value: '1', included: true }],
@@ -19,10 +19,10 @@ const CATALOG = [
     name: 'Pro',
     description: '5 CVs',
     position: 1,
-    priceMonthly: 9.99,
-    priceAnnual: 99,
-    currency: 'EUR',
-    trialDays: 14,
+    priceMonthly: 6600,
+    priceAnnual: 65000,
+    currency: 'XOF',
+    trialDays: null,
     recommended: true,
     entitlements: [{ feature: 'cvLimit', value: '5', included: true }],
   },
@@ -31,10 +31,10 @@ const CATALOG = [
     name: 'Business',
     description: 'Teams',
     position: 2,
-    priceMonthly: 29.99,
-    priceAnnual: 299,
-    currency: 'EUR',
-    trialDays: 14,
+    priceMonthly: 19700,
+    priceAnnual: 196200,
+    currency: 'XOF',
+    trialDays: null,
     recommended: false,
     entitlements: [
       { feature: 'cvLimit', value: '20', included: true },
@@ -74,10 +74,6 @@ export class BillingPage {
 
   async startBusinessCheckout() {
     await this.page.getByTestId('checkout-business-month').click();
-  }
-
-  async waitForCheckoutReturn() {
-    await this.page.waitForURL(/checkout=success|account\/billing|dashboard/, { timeout: 60_000 });
   }
 
   async cancelSubscription() {

@@ -1,12 +1,12 @@
 import { test, expect } from '../fixtures/auth.fixture';
 import { mockPdfExport } from '../utils/wait-helpers';
 import { expectSubscriptionTier } from '../utils/assertions';
-import { stripeEnabled } from '../env';
 import { grantPlan } from '../utils/db';
 
 /**
  * AC 1–8: login → create CV → export PDF → billing.
- * Pro upgrade requires Stripe test keys (`E2E_STRIPE=1`). There is no checkout bypass.
+ * Payments are not configured in E2E (no Paystack account): checkout is refused and Pro is
+ * granted the way a verified payment would. There is no checkout bypass.
  */
 test.describe('Full payment flow (Free → Pro)', () => {
   test('login, create CV, export PDF, upgrade to Pro @payment @ac', async ({
@@ -38,16 +38,9 @@ test.describe('Full payment flow (Free → Pro)', () => {
     await billingPage.expectPlan('free');
     await billingPage.startProCheckout();
 
-    if (!stripeEnabled) {
-      await expect(page.getByTestId('checkout-error')).toBeVisible({ timeout: 15_000 });
-      await billingPage.expectPlan('free');
-    } else {
-      await billingPage.waitForCheckoutReturn();
-      await billingPage.goto();
-      await billingPage.expectPlan('pro');
-      await expect(page.getByTestId('plan-badge').first()).toContainText(/pro/i);
-      await expectSubscriptionTier(request, testUser.accessToken, 'pro');
-    }
+    await expect(page.getByTestId('checkout-error')).toBeVisible({ timeout: 15_000 });
+    await billingPage.expectPlan('free');
+    await expectSubscriptionTier(request, testUser.accessToken, 'free');
 
     await mockPdfExport(page);
     await page.goto('/dashboard');
@@ -55,17 +48,16 @@ test.describe('Full payment flow (Free → Pro)', () => {
     await page.getByRole('link', { name: 'Éditer' }).first().click();
     await editorPage.expectLoaded();
 
-    if (!stripeEnabled) {
-      // Still Free: PDF export is a Pro/Business feature and opens the paywall.
-      await page.getByTestId('export-pdf-open').click();
-      await expect(page.getByTestId('paywall-modal')).toContainText(
-        /réservé aux plans Pro et Business/
-      );
-      // Grant Pro the way a verified payment would, then check export works.
-      await grantPlan(testUser.id, 'pro');
-      await page.reload();
-      await editorPage.expectLoaded();
-    }
+    // Still Free: PDF export is a Pro/Business feature and opens the paywall.
+    await page.getByTestId('export-pdf-open').click();
+    await expect(page.getByTestId('paywall-modal')).toContainText(
+      /réservé aux plans Pro et Business/
+    );
+    // Grant Pro the way a verified payment would, then check export works.
+    await grantPlan(testUser.id, 'pro');
+    await expectSubscriptionTier(request, testUser.accessToken, 'pro');
+    await page.reload();
+    await editorPage.expectLoaded();
     await editorPage.exportPdf();
   });
 

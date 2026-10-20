@@ -232,7 +232,6 @@ export const usersApi = {
       deleted: boolean;
       dataPurged?: boolean;
       billingCanceled?: boolean;
-      stripeCanceled?: boolean;
     }>('/users/me', { method: 'DELETE', body: confirmation }),
   exportMe: () =>
     apiClient<{ exportedAt: string; user: UserProfile; cvs: unknown[] } & Record<string, unknown>>(
@@ -424,10 +423,14 @@ export const subscriptionsApi = {
         cancelAtPeriodEnd: boolean;
         currentPeriodEnd: string;
         currentPeriodStart: string;
-        stripeCustomerId?: string | null;
+        /** 'paystack': prepaid period, nothing renews by itself. Older rows may say 'stripe'. */
+        provider?: string | null;
+        paystackCustomerCode?: string | null;
+        renewalReminderSentAt?: string | null;
+        plan?: { name: string } | null;
       } | null;
       tier: 'free' | 'pro' | 'business';
-      /** Decided by the server: the 14-day trial is offered once per account. */
+      /** Decided by the server (always false since plans are prepaid). */
       trialEligible?: boolean;
       trialEndsAt?: string | null;
       entitlements: {
@@ -445,12 +448,19 @@ export const subscriptionsApi = {
       cvLimit: number;
       cvRemaining: number;
     }>('/subscriptions/me'),
+  /** Paystack payment page for one prepaid period (a month or a year) of a plan. */
   checkout: (params: { plan: 'pro' | 'business'; interval: 'month' | 'year' }) =>
-    apiClient<{ url: string; mode?: string }>('/subscriptions/checkout', {
+    apiClient<{
+      url: string;
+      reference: string;
+      plan: 'pro' | 'business';
+      interval: 'month' | 'year';
+      amount: number;
+      currency: string;
+    }>('/subscriptions/checkout', {
       method: 'POST',
       body: params,
     }),
-  portal: () => apiClient<{ url: string }>('/subscriptions/me/portal', { method: 'POST' }),
   cancel: () =>
     apiClient<{
       status: string;
@@ -498,10 +508,11 @@ export type PaymentHistoryItem = {
 
 export const paymentsApi = {
   history: () => apiClient<{ items: PaymentHistoryItem[] }>('/payments/history'),
-  confirmCheckout: (sessionId: string) =>
+  /** Paystack transaction reference from the return URL (`?reference=`). */
+  confirmCheckout: (reference: string) =>
     apiClient<{ confirmed: boolean }>('/payments/checkout/confirm', {
       method: 'POST',
-      body: { sessionId },
+      body: { reference },
     }),
 };
 
@@ -536,6 +547,13 @@ export const aiApi = {
     }>('/ai/generate-cover-letter', { method: 'POST', body }),
   explainAts: (body: { cvId: string; jobDescription?: string }) =>
     apiClient('/ai/explain-ats-score', { method: 'POST', body }),
+};
+
+/** Seller payout state: once Paystack accepts the payout account, the seller is active. */
+export type SellerPayoutAccountState = {
+  status: string;
+  payoutsEnabled: boolean;
+  payoutAccount: { bankName: string | null; last4: string | null } | null;
 };
 
 export const marketplaceApi = {
@@ -591,20 +609,10 @@ export const marketplaceApi = {
     apiClient<{ listingId: string; templateId: string; designData: unknown }>(
       `/marketplace/templates/${id}/design`
     ),
-  createPaymentIntent: (listingId: string) =>
-    apiClient<{ clientSecret: string | null; paymentIntentId: string }>(
-      `/marketplace/templates/${listingId}/payment-intent`,
-      { method: 'POST', body: {} }
-    ),
   createCheckout: (listingId: string) =>
-    apiClient<{ url: string; sessionId: string }>(`/marketplace/templates/${listingId}/checkout`, {
+    apiClient<{ url: string; reference: string }>(`/marketplace/templates/${listingId}/checkout`, {
       method: 'POST',
       body: {},
-    }),
-  purchase: (listingId: string, paymentIntentId: string) =>
-    apiClient(`/marketplace/templates/${listingId}/purchase`, {
-      method: 'POST',
-      body: { paymentIntentId },
     }),
   sales: () =>
     apiClient<{
@@ -613,6 +621,7 @@ export const marketplaceApi = {
         title: string;
         status: string;
         priceCents: number;
+        currency: string;
         purchases: Array<{ amountCents: number; sellerEarningCents: number }>;
       }>;
       revenueCents: number;
@@ -625,38 +634,34 @@ export const marketplaceApi = {
       conversionRate: number;
       revenueCents: number;
       sellerShareCents: number;
-      listings: unknown[];
+      listings: Array<{ currency: string }>;
     }>('/marketplace/seller/analytics'),
-  startConnectOnboarding: () =>
-    apiClient<{ url: string }>('/marketplace/seller/connect/onboarding', {
-      method: 'POST',
-      body: {},
-    }),
-  refreshConnectAccount: () =>
+  /** Banks and mobile money operators Paystack can pay a seller to, in the payment currency. */
+  payoutBanks: () =>
     apiClient<{
-      status: string;
-      payoutsEnabled: boolean;
-      stripeAccountId: string | null;
-    }>('/marketplace/seller/connect/sync', { method: 'POST', body: {} }),
-  connectLoginLink: () =>
-    apiClient<{ url: string }>('/marketplace/seller/connect/login', {
+      currency: string;
+      items: Array<{ name: string; code: string; type: string | null }>;
+    }>('/marketplace/seller/payout-banks'),
+  setPayoutAccount: (body: { bankCode: string; accountNumber: string }) =>
+    apiClient<SellerPayoutAccountState>('/marketplace/seller/payout-account', {
       method: 'POST',
-      body: {},
+      body,
     }),
   listPayouts: () =>
-    apiClient<{
-      items: Array<{
-        id: string;
-        amountCents: number;
+    apiClient<
+      {
+        items: Array<{
+          id: string;
+          amountCents: number;
+          currency: string;
+          status: string;
+          periodStart: string;
+          periodEnd: string;
+          paidAt: string | null;
+        }>;
+        country: string;
+        displayName: string;
         currency: string;
-        status: string;
-        periodStart: string;
-        periodEnd: string;
-        paidAt: string | null;
-      }>;
-      status: string;
-      payoutsEnabled: boolean;
-      country: string;
-      displayName: string;
-    }>('/marketplace/seller/payouts'),
+      } & SellerPayoutAccountState
+    >('/marketplace/seller/payouts'),
 };

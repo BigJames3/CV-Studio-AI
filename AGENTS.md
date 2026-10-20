@@ -15,8 +15,7 @@ Stack principale :
 - Redis
 - BullMQ
 - Puppeteer
-- Stripe
-- CinetPay
+- Paystack
 - OpenAI-compatible AI services
 - Docker
 - Kubernetes
@@ -252,8 +251,7 @@ apps/api/src/modules/subscriptions/
 
 Responsabilité :
 
-- Stripe
-- CinetPay
+- Paystack
 - subscriptions
 - checkout
 - webhooks

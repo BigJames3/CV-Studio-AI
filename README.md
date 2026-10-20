@@ -35,7 +35,7 @@ Plateforme SaaS de génération de CV alimentée par l'IA.
 - **[Component inventory](docs/design-system/COMPONENT-INVENTORY.md)** — Statut composants `@cvstudio/ui`
 - **[apps/api](apps/api)** — Implémentation NestJS (controllers, services, DTOs, guards)
 - **[apps/web](apps/web)** — Application Next.js 14 (pages, editor dual-pane, hooks, stores)
-- **[apps/mobile](apps/mobile)** — Application Expo (navigation, offline sync, notifications, Stripe)
+- **[apps/mobile](apps/mobile)** — Application Expo (navigation, offline sync, notifications, paiement Paystack)
 - **[packages/ai-service](packages/ai-service)** — Gateway IA (cible d’implémentation)
 - **[packages/ui](packages/ui)** — Design System React (shadcn/Radix, Storybook)
 - **[Prisma schema](apps/api/prisma/schema.prisma)** — Schéma canonique (pointer docs : [`docs/prisma/README.md`](docs/prisma/README.md))

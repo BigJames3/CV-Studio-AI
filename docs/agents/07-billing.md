@@ -6,12 +6,11 @@ Un paiement réussi donne les droits attendus. Un abonnement expiré ou en éche
 
 ## Responsabilités
 
-- Stripe Checkout, webhooks, essais, annulation, factures
-- CinetPay : création, vérif serveur, grant de période
-- `Subscription`, `Payment`, `Invoice`, `StripeWebhookEvent`
+- Paystack : transactions (périodes prépayées, pas de récurrent), webhooks, rappel de renouvellement, annulation, factures
+- `Subscription`, `Payment`, `Invoice`, `PaymentWebhookEvent`
 - `EntitlementsService` et cohérence avec `User.subscriptionTier`
 - Catalogue `plans.service.ts` (`mapPlanToPublicDto`)
-- Stripe Connect, ledger, `seller-payouts.job.ts`
+- Sous-comptes Paystack (split des ventes marketplace), ledger
 - `docs/webhooks/**`
 
 ## Ownership
@@ -22,7 +21,6 @@ Un paiement réussi donne les droits attendus. Un abonnement expiré ou en éche
 | `apps/api/src/modules/subscriptions/**`                                                                   | Écriture                                                                   |
 | `apps/api/src/modules/plans/**`                                                                           | Écriture                                                                   |
 | `apps/api/src/modules/invoices/**`                                                                        | Écriture                                                                   |
-| `apps/api/src/modules/marketplace/jobs/seller-payouts.job.ts`                                             | Écriture                                                                   |
 | `apps/api/src/modules/marketplace/commission.ts` et écritures ledger / payout dans le service marketplace | Écriture sur tâche explicite. Le reste du contrôleur marketplace = Backend |
 | `docs/webhooks/**`, `docs/PAYMENT_GATEWAY_SETUP.md`, `docs/STRIPE-WEBHOOK-FAIL-CLOSED.md`                 | Écriture                                                                   |
 
@@ -58,10 +56,10 @@ Les zones du tableau. Tests du module si l'Architect les inclut ; sinon QA.
 
 ## Security rules
 
-- Montant et prix Stripe : variables d'environnement / table `Plan`, jamais un champ client. `CheckoutDto` n'a pas de montant : le garder ainsi.
-- Stripe : `constructEvent` sur le raw body. Ne pas rendre le webhook permissif si le secret manque (fail-closed déjà en place).
+- Montant et prix Paystack : table `Plan` (conversion XOF) ou `PAYSTACK_PRICE_*`, jamais un champ client. `CheckoutDto` n'a pas de montant : le garder ainsi.
+- Paystack : HMAC-SHA512 `x-paystack-signature` sur le raw body, puis re-vérification de la transaction (montant, devise). Ne pas rendre le webhook permissif si le secret manque (fail-closed déjà en place).
 - CinetPay : ne pas faire confiance au body. La vérif serveur existe ; la course BILL-005 est le trou restant.
-- Idempotence : un événement Stripe déjà stocké ne doit pas ré-appliquer le tier.
+- Idempotence : un événement Paystack déjà stocké ne doit pas ré-appliquer le tier.
 - Ne pas logger PAN, secret webhook, ou clé secrète.
 
 ## Testing rules

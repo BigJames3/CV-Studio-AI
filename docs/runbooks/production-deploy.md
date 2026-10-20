@@ -23,7 +23,7 @@ Platform: OVHcloud Managed Kubernetes (`infrastructure/terraform-ovh`), manifest
 - [ ] `terraform apply` done (`infrastructure/terraform-ovh/README.md`)
 - [ ] **Bootstrap cluster (OVHcloud Kubernetes)** run once (`k8s-bootstrap.yml`), DNS A records set to the printed Load Balancer IP
 - [ ] Environment secrets: `OVH_KUBECONFIG`, `API_ENV_FILE`, `GHCR_PULL_TOKEN`, optional `WEB_ENV_FILE`, `SLACK_WEBHOOK_URL`
-- [ ] Environment variables: `PUBLIC_API_URL`, `PUBLIC_SITE_URL`, `STRIPE_PUBLISHABLE_KEY`, `ACME_EMAIL`
+- [ ] Environment variables: `PUBLIC_API_URL`, `PUBLIC_SITE_URL`, `ACME_EMAIL`
 - [ ] `production` environment restricted to `v*` tags, with required reviewers
 
 ## Pre-deploy

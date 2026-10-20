@@ -13,10 +13,9 @@ export type PublicBillingPlan = {
   position: number;
   priceMonthly: number;
   priceAnnual: number | null;
-  currency: 'EUR';
+  /** ISO 4217 code of what is charged (XOF with Paystack in Côte d'Ivoire). */
+  currency: string;
   trialDays: number | null;
   recommended: boolean;
-  stripePriceMonthlyId: string | null;
-  stripePriceAnnualId: string | null;
   entitlements: BillingCatalogEntitlement[];
 };

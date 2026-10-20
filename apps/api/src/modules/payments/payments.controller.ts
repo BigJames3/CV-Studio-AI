@@ -20,10 +20,10 @@ export class PaymentsController {
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('checkout/confirm')
   @ApiOperation({
-    summary: 'Confirm a completed Stripe Checkout session with Stripe (no webhook wait)',
+    summary: 'Confirm a Paystack payment with Paystack (no webhook wait)',
   })
   confirmCheckout(@CurrentUser() user: AuthUser, @Body() dto: ConfirmCheckoutDto) {
-    return this.payments.confirmCheckoutSession(user.id, dto.sessionId);
+    return this.payments.confirmCheckout(user.id, dto.reference);
   }
 
   @Public()
@@ -32,15 +32,15 @@ export class PaymentsController {
   @ApiExcludeEndpoint()
   webhook(
     @Req() req: { rawBody?: Buffer; body: Buffer | object },
-    @Headers('stripe-signature') signature: string
+    @Headers('x-paystack-signature') signature: string
   ) {
     const raw = req.rawBody ?? (Buffer.isBuffer(req.body) ? req.body : null);
     if (!raw || !signature) {
       throw new BadRequestException({
         code: 'INVALID_WEBHOOK',
-        message: 'Missing raw body or stripe-signature',
+        message: 'Missing raw body or x-paystack-signature',
       });
     }
-    return this.payments.handleStripeWebhook(raw, signature);
+    return this.payments.handlePaystackWebhook(raw, signature);
   }
 }

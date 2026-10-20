@@ -2,27 +2,32 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  HttpException,
-  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { Prisma, SellerStatus, SellerTier, TemplateCategory } from '@prisma/client';
-import Stripe from 'stripe';
+import { randomUUID } from 'crypto';
+import { Prisma, SellerStatus, TemplateCategory } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.module';
 import { appOriginFromEnv } from '../../common/utils/url.utils';
-import { stripeSecretForClient } from '../payments/payment-env';
-import { lockUserScope } from '../../common/utils/user-lock';
+import { paymentCurrency } from '../payments/payment-env';
+import { PaystackService } from '../payments/paystack.service';
+import {
+  PaystackApiError,
+  type PaystackBank,
+  type PaystackMetadata,
+  type PaystackTransaction,
+  metadataString,
+  transactionMetadata,
+} from '../payments/paystack.client';
 import { emitSecurityAlert } from '../../observability/security-alert';
 import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 import {
-  PAYOUT_MIN_CENTS,
-  PRICE_MAX_CENTS,
-  PRICE_MIN_CENTS,
-  destinationApplicationFeeCents,
-  estimateStripeFeeCents,
+  MARKETPLACE_TAKE_RATE,
+  estimateProcessorFeeCents,
+  platformChargeCents,
+  priceLimits,
   splitSale,
 } from './commission';
 
@@ -110,29 +115,34 @@ function sortListings(
 
 function marketplacePaymentMetadata(
   buyerId: string,
-  listing: { id: string; sellerId: string; priceCents: number; currency: string }
-): Stripe.MetadataParam {
+  listing: { id: string; sellerId: string; priceCents: number; currency: string },
+  sellerShareCents: number | null
+): PaystackMetadata {
   return {
     type: 'marketplace',
     listingId: listing.id,
     buyerId,
     sellerId: listing.sellerId,
     // What was charged, so fulfilment checks the payment against it rather than today's price.
-    priceCents: String(listing.priceCents),
-    currency: listing.currency.toLowerCase(),
+    priceCents: listing.priceCents,
+    currency: listing.currency.toUpperCase(),
+    // What Paystack sends the seller's subaccount (split payment); absent when platform-held.
+    sellerShareCents,
   };
 }
 
-/** A pending payout older than this was abandoned (crash, timeout) and is resumed. */
-const PAYOUT_RESUME_AFTER_MS = 10 * 60 * 1000;
+/** Paystack's `subaccount` on a transaction, whatever shape it comes in. */
+function splitSubaccount(tx: Pick<PaystackTransaction, 'subaccount'>): string | undefined {
+  const sub = tx.subaccount as { subaccount_code?: string | null } | null | undefined;
+  return sub?.subaccount_code ?? undefined;
+}
 
-/** Stripe answered and refused: nothing was transferred, retrying the same call cannot help. */
-function isDefinitiveStripeRefusal(err: unknown): boolean {
-  return (
-    err instanceof Stripe.errors.StripeInvalidRequestError ||
-    err instanceof Stripe.errors.StripePermissionError ||
-    err instanceof Stripe.errors.StripeCardError
-  );
+/** `transaction.reference` (dispute) or `transaction_reference` (refund) of a webhook payload. */
+function payloadTransactionReference(data: Record<string, unknown>): string | undefined {
+  const direct = data.transaction_reference;
+  if (typeof direct === 'string' && direct) return direct;
+  const tx = data.transaction as { reference?: unknown } | undefined;
+  return typeof tx?.reference === 'string' && tx.reference ? tx.reference : undefined;
 }
 
 function isUniqueViolation(err: unknown, field?: string): boolean {
@@ -149,14 +159,10 @@ function isUniqueViolation(err: unknown, field?: string): boolean {
 @Injectable()
 export class MarketplaceService {
   private readonly logger = new Logger(MarketplaceService.name);
-  private stripe: Stripe | null = null;
-
-  constructor(private readonly prisma: PrismaService) {
-    const key = stripeSecretForClient();
-    if (key) {
-      this.stripe = new Stripe(key, { apiVersion: '2025-02-24.acacia' });
-    }
-  }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly paystack: PaystackService
+  ) {}
 
   listPublished(query?: { q?: string; category?: string; sort?: string }) {
     const category = parseTemplateCategory(query?.category);
@@ -342,10 +348,12 @@ export class MarketplaceService {
       tags?: string[];
     }
   ) {
-    if (input.priceCents < PRICE_MIN_CENTS || input.priceCents > PRICE_MAX_CENTS) {
+    const currency = paymentCurrency();
+    const limits = priceLimits(currency);
+    if (input.priceCents < limits.min || input.priceCents > limits.max) {
       throw new BadRequestException({
         code: 'INVALID_PRICE',
-        message: `Price must be between ${PRICE_MIN_CENTS} and ${PRICE_MAX_CENTS} cents`,
+        message: `Price must be between ${limits.min / 100} and ${limits.max / 100} ${currency}`,
       });
     }
 
@@ -374,6 +382,7 @@ export class MarketplaceService {
           slug: input.slug,
           description: input.description,
           priceCents: input.priceCents,
+          currency,
           tags: input.tags ?? [],
           status: 'submitted',
           isPublished: false,
@@ -403,70 +412,66 @@ export class MarketplaceService {
     }
   }
 
-  async createPaymentIntent(buyerId: string, listingId: string) {
-    const stripe = this.requireStripe();
-    const listing = await this.getPublishedListing(listingId);
-    await this.assertCanBuy(buyerId, listing);
-    const metadata = marketplacePaymentMetadata(buyerId, listing);
-    const stripeCustomerId = await this.existingStripeCustomerId(buyerId);
-
-    const intent = await stripe.paymentIntents.create({
-      amount: listing.priceCents,
-      currency: listing.currency.toLowerCase(),
-      metadata,
-      automatic_payment_methods: { enabled: true },
-      ...(stripeCustomerId ? { customer: stripeCustomerId } : {}),
-      ...this.destinationChargeParams(listing),
-    });
-
-    return { clientSecret: intent.client_secret, paymentIntentId: intent.id };
-  }
-
+  /**
+   * Paystack payment page for a licence. With a seller subaccount the payment is split at
+   * Paystack: the seller's share goes straight to their payout account.
+   */
   async createListingCheckout(buyerId: string, listingId: string) {
-    const stripe = this.requireStripe();
     const listing = await this.getPublishedListing(listingId);
     await this.assertCanBuy(buyerId, listing);
-    const origin = appOriginFromEnv();
-    const metadata = marketplacePaymentMetadata(buyerId, listing);
-    const destination = this.destinationChargeParams(listing);
-    const stripeCustomerId = await this.existingStripeCustomerId(buyerId);
-
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      client_reference_id: buyerId,
-      // The redirect proves nothing: the page sends session_id back to /payments/checkout/confirm,
-      // which reads the session from Stripe.
-      success_url: `${origin}/marketplace/${listingId}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/marketplace/${listingId}?checkout=cancel`,
-      metadata,
-      ...(stripeCustomerId ? { customer: stripeCustomerId } : {}),
-      payment_intent_data: {
-        metadata,
-        ...destination,
-      },
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: listing.currency.toLowerCase(),
-            unit_amount: listing.priceCents,
-            product_data: {
-              name: listing.title,
-              description: 'Licence d’usage personnelle dans CV Studio — non redistribuable',
-            },
-          },
-        },
-      ],
+    const currency = paymentCurrency();
+    if (listing.currency.toUpperCase() !== currency) {
+      throw new ConflictException({
+        code: 'LISTING_CURRENCY_UNSUPPORTED',
+        message: `This listing is priced in ${listing.currency}; payments are taken in ${currency}.`,
+      });
+    }
+    const buyer = await this.prisma.user.findUnique({
+      where: { id: buyerId },
+      select: { email: true },
     });
+    if (!buyer) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found' });
 
-    if (!session.url) {
-      throw new BadRequestException({
-        code: 'CHECKOUT_FAILED',
-        message: 'Stripe did not return a checkout URL',
+    const paystack = this.paystack.require();
+    const origin = appOriginFromEnv();
+    const split = this.splitParams(listing);
+    const reference = `mkt_${randomUUID().replace(/-/g, '')}`;
+    let session: { authorization_url: string };
+    try {
+      session = await paystack.initializeTransaction({
+        email: buyer.email,
+        amount: listing.priceCents,
+        currency,
+        reference,
+        // The redirect proves nothing: the page sends the reference to /payments/checkout/confirm,
+        // which reads the transaction from Paystack.
+        callback_url: `${origin}/marketplace/${listingId}?checkout=success`,
+        metadata: {
+          ...marketplacePaymentMetadata(buyerId, listing, split?.sellerShareCents ?? null),
+          cancel_action: `${origin}/marketplace/${listingId}?checkout=cancel`,
+        },
+        ...(split
+          ? {
+              subaccount: split.subaccount,
+              transaction_charge: split.transactionCharge,
+              // The platform pays Paystack's fee out of its charge: the seller gets exactly
+              // the share recorded in the ledger.
+              bearer: 'account' as const,
+            }
+          : {}),
+      });
+    } catch (err) {
+      this.logger.error(
+        `Paystack checkout failed for listing ${listingId}`,
+        err instanceof Error ? err.stack : String(err)
+      );
+      throw new ServiceUnavailableException({
+        code: 'PAYMENT_PROVIDER_UNAVAILABLE',
+        message: 'Checkout is temporarily unavailable. Please try again later.',
       });
     }
 
-    return { url: session.url, sessionId: session.id };
+    return { url: session.authorization_url, reference };
   }
 
   /** Licence state of the caller for a listing (drives the buy / use buttons). */
@@ -496,161 +501,126 @@ export class MarketplaceService {
   }
 
   /**
-   * checkout.session.completed / async_payment_succeeded, and the success-page confirmation.
-   * Returns null when the session is not paid yet (asynchronous payment methods).
+   * charge.success and the success-page confirmation, for a transaction read from Paystack
+   * (never from the client). Idempotent: the same payment returns the existing licence; a
+   * second payment for a licence the buyer already holds is reported for refund and grants
+   * nothing; a payment that does not match what was asked grants nothing.
    */
-  async fulfillCheckoutSession(session: Stripe.Checkout.Session) {
-    const listingId = session.metadata?.listingId;
-    const buyerId = session.metadata?.buyerId ?? session.client_reference_id ?? undefined;
-    const paymentIntentId =
-      typeof session.payment_intent === 'string'
-        ? session.payment_intent
-        : session.payment_intent?.id;
-
-    if (!listingId || !buyerId || !paymentIntentId) {
-      throw new Error(
-        `marketplace checkout.session.completed missing listing, buyer, or payment (session=${session.id})`
-      );
+  async fulfillTransaction(tx: PaystackTransaction) {
+    const metadata = transactionMetadata(tx);
+    const listingId = metadataString(metadata, 'listingId');
+    const buyerId = metadataString(metadata, 'buyerId');
+    const reference = tx.reference;
+    if (metadata.type !== 'marketplace' || !listingId || !buyerId || !reference) {
+      throw new Error(`Marketplace payment ${reference} has incomplete metadata`);
     }
-    if (session.payment_status !== 'paid') {
-      this.logger.log(
-        `Marketplace checkout ${session.id} not paid yet (${session.payment_status})`
-      );
-      return null;
+    if (tx.status !== 'success') {
+      this.logger.log(`Marketplace payment ${reference} not paid yet (${tx.status})`);
+      return { outcome: 'not_paid' as const, purchase: null };
     }
 
-    return this.fulfillPayment(buyerId, listingId, paymentIntentId);
-  }
-
-  /** Client-side confirmation of a PaymentIntent (Elements flow). */
-  async purchase(buyerId: string, listingId: string, paymentIntentId: string) {
-    const result = await this.fulfillPayment(buyerId, listingId, paymentIntentId);
-    if (result.outcome === 'duplicate_payment') {
-      throw new ConflictException({
-        code: 'ALREADY_PURCHASED',
-        message: 'You already own this licence; this payment will be refunded by support',
-      });
-    }
-    return result.purchase;
-  }
-
-  /**
-   * Grants the licence for a payment read from Stripe, never from the client. Idempotent:
-   * the same payment returns the existing licence; a second payment for a licence the buyer
-   * already holds is reported for refund and grants nothing.
-   */
-  private async fulfillPayment(buyerId: string, listingId: string, paymentIntentId: string) {
-    const stripe = this.requireStripe();
     // A listing suspended or withdrawn after the payment is still delivered: the buyer paid.
     const listing = await this.prisma.marketplaceTemplate.findUnique({ where: { id: listingId } });
     if (!listing) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Listing not found' });
     }
 
-    let intent: Stripe.PaymentIntent;
-    try {
-      intent = await stripe.paymentIntents.retrieve(paymentIntentId);
-    } catch {
-      throw new BadRequestException({
-        code: 'INVALID_PAYMENT',
-        message: 'Payment intent not found',
-      });
-    }
-
-    if (intent.status !== 'succeeded') {
-      throw new HttpException(
-        { code: 'PAYMENT_REQUIRED', message: 'Payment not completed' },
-        HttpStatus.PAYMENT_REQUIRED
+    const expectedCents = Number(metadata.priceCents ?? listing.priceCents);
+    const expectedCurrency = (
+      metadataString(metadata, 'currency') ?? listing.currency
+    ).toUpperCase();
+    if (tx.amount !== expectedCents || tx.currency.toUpperCase() !== expectedCurrency) {
+      this.logger.error(
+        `Marketplace payment ${reference}: paid ${tx.amount} ${tx.currency}, expected ${expectedCents} ${expectedCurrency}`
       );
-    }
-    if (
-      intent.metadata?.type !== 'marketplace' ||
-      intent.metadata?.listingId !== listingId ||
-      intent.metadata?.buyerId !== buyerId
-    ) {
-      throw new BadRequestException({
-        code: 'PAYMENT_MISMATCH',
-        message: 'Payment does not match this listing or buyer',
+      emitSecurityAlert({
+        id: 'MKT-04',
+        severity: 'P1',
+        message: 'Marketplace payment does not match the checkout: nothing granted',
+        extra: { reference, listingId, amount: tx.amount, currency: tx.currency },
       });
-    }
-    const expectedCents = Number(intent.metadata?.priceCents ?? listing.priceCents);
-    const expectedCurrency = (intent.metadata?.currency ?? listing.currency).toLowerCase();
-    if (intent.amount_received !== expectedCents || intent.amount !== expectedCents) {
-      throw new BadRequestException({
-        code: 'AMOUNT_MISMATCH',
-        message: 'Payment amount does not match listing price',
-      });
-    }
-    if (intent.currency.toLowerCase() !== expectedCurrency) {
-      throw new BadRequestException({
-        code: 'CURRENCY_MISMATCH',
-        message: 'Payment currency does not match listing currency',
-      });
+      return { outcome: 'rejected' as const, purchase: null };
     }
 
     const existing = await this.prisma.marketplacePurchase.findUnique({
-      where: { stripePaymentIntentId: paymentIntentId },
+      where: { paystackReference: reference },
     });
     if (existing) return { outcome: 'already_fulfilled' as const, purchase: existing };
 
     const amountCents = expectedCents;
-    const stripeFeeCents = estimateStripeFeeCents(amountCents);
-    const { platformFeeCents, sellerEarningCents } = splitSale(amountCents, stripeFeeCents);
-    const destinationSettled = Boolean(intent.transfer_data?.destination);
+    const processorFeeCents =
+      typeof tx.fees === 'number' && tx.fees >= 0
+        ? tx.fees
+        : estimateProcessorFeeCents(amountCents);
+    const sellerShare = Number(metadata.sellerShareCents);
+    const splitSettled =
+      Boolean(splitSubaccount(tx)) && Number.isFinite(sellerShare) && sellerShare > 0;
+    // A split payment already sent the seller the share fixed at checkout; otherwise the
+    // platform holds the seller's earning.
+    const sellerEarningCents = splitSettled
+      ? sellerShare
+      : splitSale(amountCents, processorFeeCents).sellerEarningCents;
+    const platformFeeCents = amountCents - processorFeeCents - sellerEarningCents;
 
     try {
-      const purchase = await this.prisma.$transaction(async (tx) => {
-        const purchase = await tx.marketplacePurchase.create({
+      const purchase = await this.prisma.$transaction(async (prisma) => {
+        const purchase = await prisma.marketplacePurchase.create({
           data: {
             listingId,
             buyerId,
             amountCents,
-            currency: listing.currency,
-            stripePaymentIntentId: paymentIntentId,
-            stripeFeeCents,
+            currency: expectedCurrency,
+            paystackReference: reference,
+            stripeFeeCents: processorFeeCents,
             platformFeeCents,
             sellerEarningCents,
           },
         });
-        await tx.marketplaceLedgerEntry.createMany({
+        await prisma.marketplaceLedgerEntry.createMany({
           data: [
             {
               purchaseId: purchase.id,
               sellerId: listing.sellerId,
               entryType: 'charge_gross',
               amountCents,
+              currency: expectedCurrency,
             },
             {
               purchaseId: purchase.id,
               sellerId: listing.sellerId,
+              // Processor fee (the enum value predates Paystack).
               entryType: 'stripe_fee',
-              amountCents: -stripeFeeCents,
+              amountCents: -processorFeeCents,
+              currency: expectedCurrency,
             },
             {
               purchaseId: purchase.id,
               sellerId: listing.sellerId,
               entryType: 'platform_commission',
               amountCents: platformFeeCents,
+              currency: expectedCurrency,
             },
             {
               purchaseId: purchase.id,
               sellerId: listing.sellerId,
               entryType: 'seller_earning',
               amountCents: sellerEarningCents,
+              currency: expectedCurrency,
             },
-            ...(destinationSettled
+            ...(splitSettled
               ? [
                   {
                     purchaseId: purchase.id,
                     sellerId: listing.sellerId,
                     entryType: 'payout' as const,
                     amountCents: sellerEarningCents,
+                    currency: expectedCurrency,
                   },
                 ]
               : []),
           ],
         });
-        await tx.marketplaceTemplate.update({
+        await prisma.marketplaceTemplate.update({
           where: { id: listingId },
           data: { downloadCount: { increment: 1 } },
         });
@@ -660,48 +630,55 @@ export class MarketplaceService {
     } catch (err) {
       if (!isUniqueViolation(err)) throw err;
       // Same payment applied concurrently (webhook and confirmation at once): already done.
-      const sameIntent = await this.prisma.marketplacePurchase.findUnique({
-        where: { stripePaymentIntentId: paymentIntentId },
+      const samePayment = await this.prisma.marketplacePurchase.findUnique({
+        where: { paystackReference: reference },
       });
-      if (sameIntent) return { outcome: 'already_fulfilled' as const, purchase: sameIntent };
+      if (samePayment) return { outcome: 'already_fulfilled' as const, purchase: samePayment };
       // Two payments for one licence (two checkouts opened in parallel): the second one grants
       // nothing and must be refunded. Never silent.
       this.logger.error(
-        `Duplicate marketplace payment ${paymentIntentId} for listing ${listingId}: refund it`
+        `Duplicate marketplace payment ${reference} for listing ${listingId}: refund it`
       );
       emitSecurityAlert({
         id: 'MKT-01',
         severity: 'P1',
         message: 'Duplicate marketplace payment to refund',
-        extra: { paymentIntentId, listingId },
+        extra: { reference, listingId },
       });
       return { outcome: 'duplicate_payment' as const, purchase: null };
     }
   }
 
   /**
-   * charge.refunded. A full refund confirmed by Stripe revokes the licence (getDesign and new
-   * CVs check refundedAt) and records the seller's share as a refund_clawback, so it is not
-   * paid out (or is recovered from later payouts). Nothing is deleted. A partial refund
-   * revokes nothing until a policy exists: it is reported. Idempotent on replays.
+   * refund.processed. A full refund confirmed by Paystack revokes the licence (getDesign and
+   * new CVs check refundedAt) and records the seller's share as a refund_clawback, so it is not
+   * paid out (or is recovered later). Nothing is deleted. A partial refund revokes nothing
+   * until a policy exists: it is reported. Idempotent on replays.
    */
-  async onChargeRefunded(charge: Stripe.Charge) {
-    const paymentIntentId =
-      typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id;
-    if (!paymentIntentId) return { outcome: 'not_marketplace' as const };
+  async onRefundProcessed(data: Record<string, unknown>) {
+    const reference = payloadTransactionReference(data);
+    if (!reference) return { outcome: 'not_marketplace' as const };
     const purchase = await this.prisma.marketplacePurchase.findUnique({
-      where: { stripePaymentIntentId: paymentIntentId },
-      select: { id: true, listingId: true, refundedAt: true, sellerEarningCents: true },
+      where: { paystackReference: reference },
+      select: {
+        id: true,
+        listingId: true,
+        refundedAt: true,
+        amountCents: true,
+        currency: true,
+        sellerEarningCents: true,
+      },
     });
     if (!purchase) return { outcome: 'not_marketplace' as const };
 
-    const fullyRefunded = charge.refunded || charge.amount_refunded >= charge.amount;
+    const refunded = Number(data.amount);
+    const fullyRefunded = Number.isFinite(refunded) && refunded >= purchase.amountCents;
     if (!fullyRefunded) {
       emitSecurityAlert({
         id: 'MKT-02',
         severity: 'P2',
         message: 'Partial marketplace refund: licence kept, decide manually',
-        extra: { purchaseId: purchase.id, amountRefunded: charge.amount_refunded },
+        extra: { purchaseId: purchase.id, amountRefunded: data.amount },
       });
       return { outcome: 'partial_refund_reported' as const };
     }
@@ -723,6 +700,7 @@ export class MarketplaceService {
           sellerId: listing?.sellerId ?? null,
           entryType: 'refund_clawback',
           amountCents: -purchase.sellerEarningCents,
+          currency: purchase.currency,
         },
       });
     });
@@ -733,22 +711,19 @@ export class MarketplaceService {
    * charge.dispute.*: a dispute is not a refund. The licence stays active; the dispute is
    * reported so someone answers it. What a lost dispute changes is a policy decision.
    */
-  async onChargeDispute(dispute: Stripe.Dispute, eventType: string) {
-    const paymentIntentId =
-      typeof dispute.payment_intent === 'string'
-        ? dispute.payment_intent
-        : dispute.payment_intent?.id;
-    if (!paymentIntentId) return;
+  async onChargeDispute(data: Record<string, unknown>, eventType: string) {
+    const reference = payloadTransactionReference(data);
+    if (!reference) return;
     const purchase = await this.prisma.marketplacePurchase.findUnique({
-      where: { stripePaymentIntentId: paymentIntentId },
+      where: { paystackReference: reference },
       select: { id: true },
     });
     if (!purchase) return;
     emitSecurityAlert({
       id: 'MKT-03',
-      severity: eventType === 'charge.dispute.created' ? 'P1' : 'P2',
-      message: `Marketplace payment dispute (${eventType}, ${dispute.status})`,
-      extra: { purchaseId: purchase.id, disputeId: dispute.id, status: dispute.status },
+      severity: eventType === 'charge.dispute.create' ? 'P1' : 'P2',
+      message: `Marketplace payment dispute (${eventType}, ${String(data.status ?? 'unknown')})`,
+      extra: { purchaseId: purchase.id, disputeId: data.id, status: data.status },
     });
   }
 
@@ -886,14 +861,37 @@ export class MarketplaceService {
     };
   }
 
+  /** Banks and mobile money operators a seller can be paid to, in the payment currency. */
+  async listPayoutBanks() {
+    const currency = paymentCurrency();
+    let banks: PaystackBank[];
+    try {
+      banks = await this.paystack.require().listBanks(currency);
+    } catch (err) {
+      if (err instanceof ServiceUnavailableException) throw err;
+      throw new ServiceUnavailableException({
+        code: 'PAYMENT_PROVIDER_UNAVAILABLE',
+        message: 'The list of payout accounts is unavailable. Please try again later.',
+      });
+    }
+    return {
+      currency,
+      items: banks
+        .filter((bank) => bank.active !== false)
+        .map((bank) => ({ name: bank.name, code: bank.code, type: bank.type ?? null })),
+    };
+  }
+
   /**
-   * Stripe Node 17 has no Accounts v2 client. Express + Account Links matches ADR-019
-   * until the SDK is upgraded to `/v2/core/accounts` (dashboard express, platform
-   * fee collection, platform negative-balance liability, recipient transfers).
+   * Registers (or replaces) the seller's payout account as a Paystack subaccount. Paystack
+   * checks the account; once it accepts it, the seller is active and every sale is split.
    */
-  async startConnectOnboarding(userId: string) {
-    const stripe = this.requireStripe();
-    const profile = await this.prisma.sellerProfile.findUnique({ where: { userId } });
+  async setupPayoutAccount(userId: string, input: { bankCode: string; accountNumber: string }) {
+    const paystack = this.paystack.require();
+    const profile = await this.prisma.sellerProfile.findUnique({
+      where: { userId },
+      include: { user: { select: { email: true } } },
+    });
     if (!profile) {
       throw new ForbiddenException({
         code: 'NOT_SELLER',
@@ -903,84 +901,67 @@ export class MarketplaceService {
     if (profile.status === SellerStatus.rejected || profile.status === SellerStatus.suspended) {
       throw new ForbiddenException({
         code: 'SELLER_BLOCKED',
-        message: `Cannot onboard while status is ${profile.status}`,
+        message: `Cannot set up payouts while status is ${profile.status}`,
       });
     }
 
-    let accountId = profile.stripeAccountId;
-    if (!accountId) {
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { email: true },
-      });
-      const account = await stripe.accounts.create({
-        type: 'express',
-        country: profile.country.toUpperCase(),
-        email: user?.email,
-        capabilities: { transfers: { requested: true } },
-        metadata: { userId, sellerProfileId: profile.id },
-      });
-      accountId = account.id;
-      await this.prisma.sellerProfile.update({
-        where: { id: profile.id },
-        data: { stripeAccountId: accountId },
+    const { items } = await this.listPayoutBanks();
+    const bank = items.find((b) => b.code === input.bankCode);
+    if (!bank) {
+      throw new BadRequestException({
+        code: 'PAYOUT_BANK_UNKNOWN',
+        message: 'Unknown bank or mobile money operator',
       });
     }
 
-    const origin = appOriginFromEnv();
-    const link = await stripe.accountLinks.create({
-      account: accountId,
-      refresh_url: `${origin}/seller/payouts?onboarding=refresh`,
-      return_url: `${origin}/seller/payouts?onboarding=return`,
-      type: 'account_onboarding',
+    let subaccountCode: string;
+    try {
+      const subaccount = profile.paystackSubaccountCode
+        ? await paystack.updateSubaccount(profile.paystackSubaccountCode, {
+            business_name: profile.displayName,
+            settlement_bank: input.bankCode,
+            account_number: input.accountNumber,
+          })
+        : await paystack.createSubaccount({
+            business_name: profile.displayName,
+            settlement_bank: input.bankCode,
+            account_number: input.accountNumber,
+            // Only a fallback: every checkout sends its own transaction_charge.
+            percentage_charge: MARKETPLACE_TAKE_RATE * 100,
+            primary_contact_email: profile.user.email,
+            metadata: JSON.stringify({ userId, sellerProfileId: profile.id }),
+          });
+      const code = subaccount.subaccount_code ?? profile.paystackSubaccountCode;
+      if (!code) throw new PaystackApiError('Paystack returned no subaccount code', 502);
+      subaccountCode = code;
+    } catch (err) {
+      if (err instanceof PaystackApiError && err.isDefinitive) {
+        throw new BadRequestException({
+          code: 'PAYOUT_ACCOUNT_REJECTED',
+          message: `Paystack refused this account: ${err.message}`,
+        });
+      }
+      this.logger.error(
+        `Payout account setup failed for seller ${userId}`,
+        err instanceof Error ? err.stack : String(err)
+      );
+      throw new ServiceUnavailableException({
+        code: 'PAYMENT_PROVIDER_UNAVAILABLE',
+        message: 'Payout setup is temporarily unavailable. Please try again later.',
+      });
+    }
+
+    const updated = await this.prisma.sellerProfile.update({
+      where: { id: profile.id },
+      data: {
+        paystackSubaccountCode: subaccountCode,
+        payoutBankName: bank.name.slice(0, 120),
+        payoutAccountLast4: input.accountNumber.slice(-4),
+        payoutsEnabled: true,
+        status: SellerStatus.active,
+      },
     });
-    if (!link.url) {
-      throw new BadRequestException({
-        code: 'CONNECT_LINK_FAILED',
-        message: 'Stripe did not return an onboarding URL',
-      });
-    }
-    return { url: link.url };
-  }
-
-  async refreshConnectAccount(userId: string) {
-    const stripe = this.requireStripe();
-    const profile = await this.sellerMe(userId);
-    if (!profile.stripeAccountId) {
-      throw new BadRequestException({
-        code: 'CONNECT_NOT_STARTED',
-        message: 'Start payouts onboarding first',
-      });
-    }
-    const account = await stripe.accounts.retrieve(profile.stripeAccountId);
-    return this.applyConnectCapabilities(profile, account);
-  }
-
-  async syncConnectedAccountFromWebhook(account: Stripe.Account) {
-    const profile = await this.prisma.sellerProfile.findUnique({
-      where: { stripeAccountId: account.id },
-    });
-    if (!profile) return null;
-    return this.applyConnectCapabilities(profile, account);
-  }
-
-  async createConnectLoginLink(userId: string) {
-    const stripe = this.requireStripe();
-    const profile = await this.sellerMe(userId);
-    if (!profile.stripeAccountId || !profile.payoutsEnabled) {
-      throw new BadRequestException({
-        code: 'CONNECT_NOT_READY',
-        message: 'Complete payouts verification first',
-      });
-    }
-    const link = await stripe.accounts.createLoginLink(profile.stripeAccountId);
-    if (!link.url) {
-      throw new BadRequestException({
-        code: 'CONNECT_LINK_FAILED',
-        message: 'Stripe did not return a dashboard URL',
-      });
-    }
-    return { url: link.url };
+    return this.payoutAccountView(updated);
   }
 
   async listPayouts(userId: string) {
@@ -992,193 +973,27 @@ export class MarketplaceService {
     });
     return {
       items,
-      status: profile.status,
-      payoutsEnabled: profile.payoutsEnabled,
       country: profile.country,
       displayName: profile.displayName,
+      currency: paymentCurrency(),
+      ...this.payoutAccountView(profile),
     };
   }
 
-  /**
-   * Pays platform-held seller earnings to connected accounts (min $25, hold window), in two
-   * phases so no crash, retry or second pod can send a payout twice:
-   * 1. under a per-seller advisory lock, record a `pending` payout for the available balance
-   *    (refused while another one is pending);
-   * 2. send the transfer with the payout id as idempotency key and transfer_group;
-   * 3. mark it paid and write its ledger row.
-   * A payout left pending (crash, timeout, database down after Stripe answered) is resumed on
-   * a later run: Stripe is first asked for a transfer in its group, and only if there is none
-   * is it sent, with the same key. Destination charges already wrote their `payout` row at
-   * purchase and are not paid again.
-   */
-  async processWeeklyPayouts(now = new Date()) {
-    const stripe = this.requireStripe();
-    const sellers = await this.prisma.sellerProfile.findMany({
-      where: {
-        status: SellerStatus.active,
-        payoutsEnabled: true,
-        stripeAccountId: { not: null },
-      },
-      include: { user: { select: { email: true } } },
-    });
-
-    const paid: Array<{
-      sellerId: string;
-      email: string;
-      amountCents: number;
-      transferId: string;
-    }> = [];
-
-    for (const seller of sellers) {
-      if (!seller.stripeAccountId) continue;
-      try {
-        const done = await this.payoutSeller(stripe, seller, seller.stripeAccountId, now);
-        if (done) paid.push({ sellerId: seller.userId, email: seller.user.email, ...done });
-      } catch (err) {
-        this.logger.error(
-          `Weekly payout failed for seller ${seller.userId}`,
-          err instanceof Error ? err.stack : String(err)
-        );
-      }
-    }
-
-    return { paidCount: paid.length, payouts: paid };
-  }
-
-  private async payoutSeller(
-    stripe: Stripe,
-    seller: { id: string; userId: string; tier: SellerTier },
-    destination: string,
-    now: Date
-  ): Promise<{ amountCents: number; transferId: string } | null> {
-    const holdDays = seller.tier === SellerTier.new ? 14 : 7;
-    const cutoff = new Date(now.getTime() - holdDays * 24 * 60 * 60 * 1000);
-
-    // Phase 1: one pending payout per seller, decided under a lock shared by every pod.
-    const reserved = await this.prisma.$transaction(async (tx) => {
-      await lockUserScope(tx, seller.userId, 'marketplace:payout');
-      const pending = await tx.sellerPayout.findFirst({
-        where: { sellerProfileId: seller.id, status: { in: ['pending', 'in_transit'] } },
-        orderBy: { createdAt: 'asc' },
-      });
-      if (pending) return { payout: pending, resumed: true };
-
-      const available = await this.availableForPayout(tx, seller.userId, cutoff);
-      if (available < PAYOUT_MIN_CENTS) return null;
-      const payout = await tx.sellerPayout.create({
-        data: {
-          sellerProfileId: seller.id,
-          amountCents: available,
-          currency: 'USD',
-          status: 'pending',
-          periodStart: cutoff,
-          periodEnd: now,
-        },
-      });
-      return { payout, resumed: false };
-    });
-    if (!reserved) return null;
-    const { payout, resumed } = reserved;
-    // A young pending payout is another pod's, still in flight.
-    if (resumed && now.getTime() - payout.createdAt.getTime() < PAYOUT_RESUME_AFTER_MS) {
-      return null;
-    }
-
-    // Phase 2: the transfer, at most once per payout.
-    const transferGroup = `payout_${payout.id}`;
-    let transfer: Stripe.Transfer | undefined;
-    try {
-      if (resumed) {
-        const found = await stripe.transfers.list({ transfer_group: transferGroup, limit: 1 });
-        transfer = found.data[0];
-      }
-      transfer ??= await stripe.transfers.create(
-        {
-          amount: payout.amountCents,
-          currency: 'usd',
-          destination,
-          transfer_group: transferGroup,
-          metadata: {
-            type: 'marketplace_payout',
-            payoutId: payout.id,
-            sellerId: seller.userId,
-            sellerProfileId: seller.id,
-          },
-        },
-        { idempotencyKey: `seller-payout:${payout.id}` }
-      );
-    } catch (err) {
-      if (isDefinitiveStripeRefusal(err)) {
-        // Stripe refused it: no money moved, the balance stays available for the next run.
-        await this.prisma.sellerPayout.updateMany({
-          where: { id: payout.id, status: 'pending' },
-          data: { status: 'failed' },
-        });
-        this.logger.error(
-          `Payout ${payout.id} refused by Stripe for seller ${seller.userId}`,
-          err instanceof Error ? err.stack : String(err)
-        );
-        return null;
-      }
-      // Unknown outcome (network, timeout, 5xx, key in use): stays pending, resumed later.
-      this.logger.warn(`Payout ${payout.id} outcome unknown, left pending: ${String(err)}`);
-      return null;
-    }
-
-    // Phase 3: record it. If this fails the payout stays pending and is resumed (and found).
-    const finalized = await this.prisma.$transaction(async (tx) => {
-      const marked = await tx.sellerPayout.updateMany({
-        where: { id: payout.id, status: { in: ['pending', 'in_transit'] } },
-        data: { status: 'paid', stripeTransferId: transfer.id, paidAt: now },
-      });
-      if (marked.count === 0) return false;
-      await tx.marketplaceLedgerEntry.create({
-        data: {
-          payoutId: payout.id,
-          sellerId: seller.userId,
-          entryType: 'payout',
-          amountCents: payout.amountCents,
-          currency: 'USD',
-        },
-      });
-      return true;
-    });
-    return finalized ? { amountCents: payout.amountCents, transferId: transfer.id } : null;
-  }
-
-  /**
-   * Earnings past the hold window, minus what was already paid (weekly payouts and
-   * destination charges) and minus refunds of platform-held sales.
-   */
-  private async availableForPayout(
-    tx: Prisma.TransactionClient,
-    sellerId: string,
-    cutoff: Date
-  ): Promise<number> {
-    const [earned, clawedBack, alreadyPaid] = await Promise.all([
-      tx.marketplaceLedgerEntry.aggregate({
-        where: { sellerId, entryType: 'seller_earning', createdAt: { lt: cutoff } },
-        _sum: { amountCents: true },
-      }),
-      // Destination charges are refunded with the transfer reversed: not clawed back here.
-      tx.marketplaceLedgerEntry.aggregate({
-        where: {
-          sellerId,
-          entryType: 'refund_clawback',
-          purchase: { ledger: { none: { entryType: 'payout' } } },
-        },
-        _sum: { amountCents: true },
-      }),
-      tx.marketplaceLedgerEntry.aggregate({
-        where: { sellerId, entryType: 'payout' },
-        _sum: { amountCents: true },
-      }),
-    ]);
-    return (
-      (earned._sum.amountCents ?? 0) +
-      (clawedBack._sum.amountCents ?? 0) -
-      (alreadyPaid._sum.amountCents ?? 0)
-    );
+  private payoutAccountView(profile: {
+    paystackSubaccountCode: string | null;
+    payoutBankName: string | null;
+    payoutAccountLast4: string | null;
+    payoutsEnabled: boolean;
+    status: SellerStatus;
+  }) {
+    return {
+      status: profile.status,
+      payoutsEnabled: profile.payoutsEnabled,
+      payoutAccount: profile.paystackSubaccountCode
+        ? { bankName: profile.payoutBankName, last4: profile.payoutAccountLast4 }
+        : null,
+    };
   }
 
   private async requireActiveSeller(userId: string) {
@@ -1202,7 +1017,7 @@ export class MarketplaceService {
     const listing = await this.prisma.marketplaceTemplate.findUnique({
       where: { id: listingId },
       include: {
-        sellerProfile: { select: { stripeAccountId: true, payoutsEnabled: true } },
+        sellerProfile: { select: { paystackSubaccountCode: true, payoutsEnabled: true } },
       },
     });
     if (!listing || !listing.isPublished) {
@@ -1211,55 +1026,21 @@ export class MarketplaceService {
     return listing;
   }
 
-  private async applyConnectCapabilities(
-    profile: { id: string; status: SellerStatus },
-    account: Stripe.Account
-  ) {
-    const ready = Boolean(account.payouts_enabled) && Boolean(account.details_submitted);
-    const blocked =
-      profile.status === SellerStatus.rejected || profile.status === SellerStatus.suspended;
-    const status = blocked
-      ? profile.status
-      : ready
-        ? SellerStatus.active
-        : SellerStatus.pending_kyc;
-
-    return this.prisma.sellerProfile.update({
-      where: { id: profile.id },
-      data: { payoutsEnabled: ready, status },
-    });
-  }
-
-  private destinationChargeParams(listing: {
+  /** Paystack split for a listing whose seller has a payout account; null when platform-held. */
+  private splitParams(listing: {
     priceCents: number;
-    sellerProfile?: { stripeAccountId: string | null; payoutsEnabled: boolean } | null;
-  }): Pick<Stripe.PaymentIntentCreateParams, 'transfer_data' | 'application_fee_amount'> {
-    const accountId = listing.sellerProfile?.stripeAccountId;
-    if (!accountId || !listing.sellerProfile?.payoutsEnabled) {
-      return {};
-    }
-    const stripeFeeCents = estimateStripeFeeCents(listing.priceCents);
+    sellerProfile?: { paystackSubaccountCode: string | null; payoutsEnabled: boolean } | null;
+  }): { subaccount: string; transactionCharge: number; sellerShareCents: number } | null {
+    const subaccount = listing.sellerProfile?.paystackSubaccountCode;
+    if (!subaccount || !listing.sellerProfile?.payoutsEnabled) return null;
+    const transactionCharge = platformChargeCents(
+      listing.priceCents,
+      estimateProcessorFeeCents(listing.priceCents)
+    );
     return {
-      transfer_data: { destination: accountId },
-      application_fee_amount: destinationApplicationFeeCents(listing.priceCents, stripeFeeCents),
+      subaccount,
+      transactionCharge,
+      sellerShareCents: listing.priceCents - transactionCharge,
     };
-  }
-
-  private async existingStripeCustomerId(userId: string): Promise<string | undefined> {
-    const sub = await this.prisma.subscription.findUnique({
-      where: { userId },
-      select: { stripeCustomerId: true },
-    });
-    return sub?.stripeCustomerId ?? undefined;
-  }
-
-  private requireStripe(): Stripe {
-    if (!this.stripe) {
-      throw new ServiceUnavailableException({
-        code: 'STRIPE_NOT_CONFIGURED',
-        message: 'Stripe is not configured. Marketplace purchases are unavailable.',
-      });
-    }
-    return this.stripe;
   }
 }

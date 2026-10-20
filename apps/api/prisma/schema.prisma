@@ -567,9 +567,15 @@ model Subscription {
   currentPeriodEnd     DateTime           @map("current_period_end") @db.Timestamptz(6)
   cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
   canceledAt           DateTime?          @map("canceled_at") @db.Timestamptz(6)
+  /// Stripe (removed): kept read-only for history, dropped by a later release (expand/contract).
   stripeSubscriptionId   String?            @map("stripe_subscription_id") @db.VarChar(255)
+  /// Stripe (removed): kept read-only for history, dropped by a later release (expand/contract).
   stripeCustomerId       String?            @unique @map("stripe_customer_id") @db.VarChar(255)
-  provider               String?            @db.VarChar(32) // 'stripe'
+  provider               String?            @db.VarChar(32) // 'paystack' ('stripe' on legacy rows)
+  /// Paystack customer (CUS_…) of the last payment.
+  paystackCustomerCode   String?            @map("paystack_customer_code") @db.VarChar(255)
+  /// Prepaid plans do not renew: when the "your plan ends soon" e-mail went out for this period.
+  renewalReminderSentAt  DateTime?          @map("renewal_reminder_sent_at") @db.Timestamptz(6)
   /// Unused since CinetPay was removed; dropped by the next release (expand/contract).
   cinetpayTransactionId  String?            @unique @map("cinetpay_transaction_id") @db.VarChar(255)
   lastPaymentError       String?            @map("last_payment_error") @db.VarChar(512)
@@ -610,15 +616,16 @@ model Payment {
   @@map("payments")
 }
 
-/// Durable Stripe webhook idempotency + DLQ (fail-closed billing).
+/// Durable payment webhook idempotency + DLQ (fail-closed billing). The enum and table keep
+/// their Stripe-era names: renaming them would rewrite a table for no behaviour change.
 enum StripeWebhookStatus {
   processing
   processed
   dlq
 }
 
-model StripeWebhookEvent {
-  id          String              @id @db.VarChar(255) // Stripe event.id
+model PaymentWebhookEvent {
+  id          String              @id @db.VarChar(255) // "<event>:<data id or reference>" (Paystack has no event id)
   type        String              @db.VarChar(128)
   status      StripeWebhookStatus @default(processing)
   attempts    Int                 @default(0)
@@ -728,7 +735,12 @@ model SellerProfile {
   portfolioUrl       String?      @map("portfolio_url") @db.VarChar(2048)
   status             SellerStatus @default(pending_kyc)
   tier               SellerTier   @default(new)
+  /// Stripe Connect (removed): kept read-only for history, dropped by a later release.
   stripeAccountId    String?      @unique @map("stripe_account_id") @db.VarChar(255)
+  /// Paystack subaccount (ACCT_…) that receives the seller's share of each sale.
+  paystackSubaccountCode String?  @unique @map("paystack_subaccount_code") @db.VarChar(255)
+  payoutBankName     String?      @map("payout_bank_name") @db.VarChar(120)
+  payoutAccountLast4 String?      @map("payout_account_last4") @db.VarChar(4)
   payoutsEnabled     Boolean      @default(false) @map("payouts_enabled")
   tosAcceptedAt      DateTime?    @map("tos_accepted_at") @db.Timestamptz(6)
   ipStrikes          Int          @default(0) @map("ip_strikes")
@@ -803,7 +815,11 @@ model MarketplacePurchase {
   buyerId               String    @map("buyer_id") @db.Uuid
   amountCents           Int       @map("amount_cents")
   currency              String    @default("USD") @db.VarChar(3)
+  /// Stripe (removed): kept read-only for history.
   stripePaymentIntentId String?   @unique @map("stripe_payment_intent_id") @db.VarChar(255)
+  /// Paystack transaction reference that paid for the licence.
+  paystackReference     String?   @unique @map("paystack_reference") @db.VarChar(255)
+  /// Estimated payment processor fee (column named for Stripe, used for Paystack).
   stripeFeeCents        Int       @default(0) @map("stripe_fee_cents")
   platformFeeCents      Int       @default(0) @map("platform_fee_cents")
   sellerEarningCents    Int       @default(0) @map("seller_earning_cents")

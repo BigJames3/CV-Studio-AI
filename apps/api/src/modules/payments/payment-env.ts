@@ -10,55 +10,44 @@ export function isNonPlaceholderSecret(value?: string | null): value is string {
   return true;
 }
 
-export function isStripeLiveSecret(value?: string | null): boolean {
-  const v = (value ?? '').trim();
-  return v.startsWith('sk_live_') || v.startsWith('rk_live_');
+export function isPaystackLiveSecret(value?: string | null): boolean {
+  return (value ?? '').trim().startsWith('sk_live_');
 }
 
-export function isStripeLiveAllowed() {
-  const raw = process.env.STRIPE_ALLOW_LIVE?.trim().toLowerCase();
+export function isPaystackLiveAllowed() {
+  const raw = process.env.PAYSTACK_ALLOW_LIVE?.trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'on';
 }
 
-/** Secret usable by the Stripe SDK (not placeholder, and not live unless allowed). */
-export function stripeSecretForClient(): string | null {
-  const key = process.env.STRIPE_SECRET_KEY;
+/** Secret usable against the Paystack API (not placeholder, and not live unless allowed). */
+export function paystackSecretForClient(): string | null {
+  const key = process.env.PAYSTACK_SECRET_KEY;
   if (!isNonPlaceholderSecret(key)) return null;
-  if (isStripeLiveSecret(key) && !isStripeLiveAllowed()) return null;
-  return key;
+  if (isPaystackLiveSecret(key) && !isPaystackLiveAllowed()) return null;
+  return key.trim();
 }
 
-/**
- * Signing secrets of the webhook endpoints that post to POST /payments/webhook.
- * Stripe signs "your account" events and "connected accounts" (Connect, e.g. account.updated)
- * events from two separate endpoints, each with its own secret.
- */
-export function stripeWebhookSecrets(): string[] {
-  return [process.env.STRIPE_WEBHOOK_SECRET, process.env.STRIPE_CONNECT_WEBHOOK_SECRET].filter(
-    isNonPlaceholderSecret
-  );
-}
-
-export function isStripeConfiguredFromEnv() {
-  return isNonPlaceholderSecret(process.env.STRIPE_SECRET_KEY);
+export function isPaystackConfiguredFromEnv() {
+  return isNonPlaceholderSecret(process.env.PAYSTACK_SECRET_KEY);
 }
 
 /** Fail-closed unless explicitly disabled (`0` / `false` / `off`). */
-export function isStripeFailClosed() {
-  const raw = process.env.STRIPE_FAIL_CLOSED?.trim().toLowerCase();
+export function isPaymentFailClosed() {
+  const raw = process.env.PAYMENT_FAIL_CLOSED?.trim().toLowerCase();
   if (raw === 'false' || raw === '0' || raw === 'off') return false;
   return true;
 }
 
-/** Payment providers configured in this environment (exposed by the health check). */
-export function availablePaymentMethods() {
-  return { stripe: Boolean(stripeSecretForClient()) };
+/**
+ * Currency every payment is charged in (ISO 4217, upper case). Paystack settles a Côte d'Ivoire
+ * account in XOF; another currency needs the matching capability on the Paystack account.
+ */
+export function paymentCurrency(): string {
+  const raw = process.env.PAYMENT_CURRENCY?.trim().toUpperCase();
+  return raw && /^[A-Z]{3}$/.test(raw) ? raw : 'XOF';
 }
 
-/** Stripe expandable field → id (`cus_…` / `sub_…`). */
-export function expandableStripeId(
-  value: string | { id: string } | null | undefined
-): string | undefined {
-  if (!value) return undefined;
-  return typeof value === 'string' ? value : value.id;
+/** Payment providers configured in this environment (exposed by the health check). */
+export function availablePaymentMethods() {
+  return { paystack: Boolean(paystackSecretForClient()) };
 }

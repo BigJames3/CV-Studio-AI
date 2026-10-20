@@ -263,7 +263,7 @@ export class UsersService {
       securityLog,
       notIncluded: [
         'Secrets: password hash, two-factor secret and backup codes, OAuth tokens',
-        'Data held by processors (Stripe, PostHog, Sentry, the AI provider, the e-mail relay): ask them or contact us',
+        'Data held by processors (Paystack, PostHog, Sentry, the AI provider, the e-mail relay): ask them or contact us',
         'Server logs and backups',
       ],
     };
@@ -316,11 +316,10 @@ export class UsersService {
 
     await this.sessions.revokeAllForUser(userId);
 
-    let stripeCanceled = false;
+    // Prepaid plans never bill again by themselves: ending access is all there is to cancel.
     let billingCanceled = false;
     try {
-      const billing = await this.subscriptions.cancelImmediately(userId);
-      stripeCanceled = billing.stripeCanceled;
+      await this.subscriptions.cancelImmediately(userId);
       billingCanceled = true;
     } catch (error) {
       this.logger.error(
@@ -374,14 +373,13 @@ export class UsersService {
       userId,
       action: 'gdpr.erase',
       entityId: userId,
-      meta: { stripeCanceled, reason: 'GDPR Article 17' },
+      meta: { billingCanceled, reason: 'GDPR Article 17' },
     });
 
     return {
       deleted: true,
       dataPurged: true,
       billingCanceled,
-      stripeCanceled,
     };
   }
 

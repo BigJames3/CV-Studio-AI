@@ -1,8 +1,9 @@
 import {
   availablePaymentMethods,
-  expandableStripeId,
-  isStripeConfiguredFromEnv,
-  isStripeFailClosed,
+  isPaymentFailClosed,
+  isPaystackConfiguredFromEnv,
+  paymentCurrency,
+  paystackSecretForClient,
 } from './payment-env';
 
 describe('payment-env', () => {
@@ -12,40 +13,42 @@ describe('payment-env', () => {
     process.env = { ...prev };
   });
 
-  it('treats placeholder Stripe keys as unconfigured', () => {
-    process.env.STRIPE_SECRET_KEY = 'sk_test_xxx';
-    expect(isStripeConfiguredFromEnv()).toBe(false);
-    process.env.STRIPE_SECRET_KEY = 'sk_test_placeholder';
-    expect(isStripeConfiguredFromEnv()).toBe(false);
+  it('treats placeholder Paystack keys as unconfigured', () => {
+    process.env.PAYSTACK_SECRET_KEY = 'sk_test_xxx';
+    expect(isPaystackConfiguredFromEnv()).toBe(false);
+    process.env.PAYSTACK_SECRET_KEY = 'sk_test_placeholder';
+    expect(isPaystackConfiguredFromEnv()).toBe(false);
+    expect(paystackSecretForClient()).toBeNull();
   });
 
-  it('enables Stripe fail-closed by default (opt out with 0/false/off)', () => {
-    delete process.env.STRIPE_FAIL_CLOSED;
-    process.env.NODE_ENV = 'development';
-    expect(isStripeFailClosed()).toBe(true);
-    process.env.NODE_ENV = 'production';
-    expect(isStripeFailClosed()).toBe(true);
-    process.env.STRIPE_FAIL_CLOSED = '1';
-    expect(isStripeFailClosed()).toBe(true);
-    process.env.STRIPE_FAIL_CLOSED = '0';
-    expect(isStripeFailClosed()).toBe(false);
+  it('enables fail-closed by default (opt out with 0/false/off)', () => {
+    delete process.env.PAYMENT_FAIL_CLOSED;
+    expect(isPaymentFailClosed()).toBe(true);
+    process.env.PAYMENT_FAIL_CLOSED = '1';
+    expect(isPaymentFailClosed()).toBe(true);
+    process.env.PAYMENT_FAIL_CLOSED = '0';
+    expect(isPaymentFailClosed()).toBe(false);
   });
 
   it('exposes configured providers without leaking secrets', () => {
-    process.env.STRIPE_SECRET_KEY = 'sk_test_real';
-    expect(availablePaymentMethods()).toEqual({ stripe: true });
+    process.env.PAYSTACK_SECRET_KEY = 'sk_test_real';
+    expect(availablePaymentMethods()).toEqual({ paystack: true });
   });
 
-  it('does not advertise Stripe when a live key is blocked', () => {
-    process.env.STRIPE_SECRET_KEY = 'sk_live_real';
-    delete process.env.STRIPE_ALLOW_LIVE;
-    expect(availablePaymentMethods().stripe).toBe(false);
+  it('blocks a live key unless PAYSTACK_ALLOW_LIVE is set', () => {
+    process.env.PAYSTACK_SECRET_KEY = 'sk_live_real';
+    delete process.env.PAYSTACK_ALLOW_LIVE;
+    expect(availablePaymentMethods().paystack).toBe(false);
+    process.env.PAYSTACK_ALLOW_LIVE = '1';
+    expect(paystackSecretForClient()).toBe('sk_live_real');
   });
 
-  it('extracts ids from Stripe expandable fields', () => {
-    expect(expandableStripeId('cus_1')).toBe('cus_1');
-    expect(expandableStripeId({ id: 'cus_2' })).toBe('cus_2');
-    expect(expandableStripeId(null)).toBeUndefined();
-    expect(expandableStripeId(undefined)).toBeUndefined();
+  it('charges in XOF unless PAYMENT_CURRENCY names another ISO code', () => {
+    delete process.env.PAYMENT_CURRENCY;
+    expect(paymentCurrency()).toBe('XOF');
+    process.env.PAYMENT_CURRENCY = 'ghs';
+    expect(paymentCurrency()).toBe('GHS');
+    process.env.PAYMENT_CURRENCY = 'euros';
+    expect(paymentCurrency()).toBe('XOF');
   });
 });

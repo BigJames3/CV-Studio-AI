@@ -1,14 +1,14 @@
 /**
- * CLI: check the Stripe configuration (keys, prices, webhooks, customer portal).
- * Usage: pnpm stripe:check   (or pnpm --filter @cvstudio/api stripe:check)
+ * CLI: check the Paystack configuration (key, prices, API access, webhook reminder).
+ * Usage: pnpm paystack:check   (or pnpm --filter @cvstudio/api paystack:check)
  *
- * Read-only: it never creates or changes anything in Stripe. Exit code 1 on any error.
+ * Read-only: it never creates or changes anything in Paystack. Exit code 1 on any error.
  */
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { parseEnv } from 'util';
-import Stripe from 'stripe';
-import { checkStripeConfig, type CheckLevel } from '../modules/payments/stripe-config-check';
+import { checkPaystackConfig, type CheckLevel } from '../modules/payments/paystack-config-check';
+import { PaystackClient } from '../modules/payments/paystack.client';
 import { isNonPlaceholderSecret } from '../modules/payments/payment-env';
 
 /** Same files and precedence as the API (ConfigModule): process env, then .env.local, then .env. */
@@ -26,12 +26,10 @@ const ICON: Record<CheckLevel, string> = { ok: '✔', warn: '!', error: '✖' };
 
 async function main() {
   loadEnvFiles();
-  const key = process.env.STRIPE_SECRET_KEY;
-  const stripe = isNonPlaceholderSecret(key)
-    ? new Stripe(key, { apiVersion: '2025-02-24.acacia' })
-    : null;
+  const key = process.env.PAYSTACK_SECRET_KEY;
+  const paystack = isNonPlaceholderSecret(key) ? new PaystackClient(key) : null;
 
-  const results = await checkStripeConfig(process.env, stripe);
+  const results = await checkPaystackConfig(process.env, paystack);
   for (const { level, message } of results) {
     console.log(`${ICON[level]} ${message}`);
   }

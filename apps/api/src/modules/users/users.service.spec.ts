@@ -45,9 +45,7 @@ describe('UsersService.deleteMe / exportMe', () => {
     };
     const sessions = { revokeAllForUser: jest.fn().mockResolvedValue(undefined) };
     const subscriptions = {
-      cancelImmediately: jest
-        .fn()
-        .mockResolvedValue({ hadSubscription: true, stripeCanceled: true }),
+      cancelImmediately: jest.fn().mockResolvedValue({ hadSubscription: true }),
     };
     const audit = { log: jest.fn().mockResolvedValue(undefined) };
     const service = new UsersService(
@@ -59,7 +57,7 @@ describe('UsersService.deleteMe / exportMe', () => {
     return { service, prisma, sessions, subscriptions, audit, tx };
   }
 
-  it('cancels Stripe, purges PII, and does not claim a fake scheduled purge', async () => {
+  it('ends paid access, purges PII, and does not claim a fake scheduled purge', async () => {
     const { service, prisma, sessions, subscriptions, audit, tx } = createService();
     prisma.user.findFirst.mockResolvedValue({ id: userId, email: 'a@b.c', passwordHash });
 
@@ -90,7 +88,6 @@ describe('UsersService.deleteMe / exportMe', () => {
       deleted: true,
       dataPurged: true,
       billingCanceled: true,
-      stripeCanceled: true,
     });
     expect(result).not.toHaveProperty('purgeScheduled');
   });

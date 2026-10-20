@@ -60,16 +60,9 @@ export class SubscriptionsController {
   }
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @Post('me/portal')
-  @ApiOperation({ summary: 'Open the Stripe Customer Portal (update card, invoices)' })
-  billingPortal(@CurrentUser() user: AuthUser) {
-    return this.subscriptions.billingPortal(user.id);
-  }
-
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('checkout')
   @ApiOperation({
-    summary: 'Create a Stripe checkout session, or change plan in place for a Stripe subscriber',
+    summary: 'Open a Paystack payment page for one prepaid period (month or year) of a plan',
   })
   checkout(@CurrentUser() user: AuthUser, @Body() dto: CheckoutDto) {
     return this.subscriptions.checkout(user.id, dto);

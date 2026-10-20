@@ -8,24 +8,23 @@ import {
   Optional,
   forwardRef,
 } from '@nestjs/common';
-import Stripe from 'stripe';
-import { Prisma } from '@prisma/client';
+import { createHash } from 'crypto';
 import { PrismaService } from '../../database/prisma.module';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
-import { MailService } from '../../mail/mail.service';
-import { StripeWebhookStoreService } from './stripe-webhook-store.service';
-import { StripeAlertService } from './stripe-alert.service';
+import { PaymentWebhookStoreService } from './payment-webhook-store.service';
+import { PaymentAlertService } from './payment-alert.service';
+import { PaystackService } from './paystack.service';
 import {
-  expandableStripeId,
-  isNonPlaceholderSecret,
-  stripeSecretForClient,
-  stripeWebhookSecrets,
-} from './payment-env';
+  PaystackApiError,
+  type PaystackTransaction,
+  isValidPaystackSignature,
+  metadataString,
+  transactionMetadata,
+  transactionPaidAt,
+} from './paystack.client';
+import { isBillingInterval, isPaidPlan } from './pricing';
 import { emitSecurityAlert } from '../../observability';
 import { MarketplaceService } from '../marketplace/marketplace.service';
-import { stripeDate, subscriptionPeriod } from './stripe-period';
-
-export { subscriptionPeriod } from './stripe-period';
 
 const MAX_RETRIES = 3;
 
@@ -33,27 +32,41 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** A Paystack webhook body: `{ event: 'charge.success', data: { … } }`. */
+export type PaystackEvent = { event: string; data: Record<string, unknown> };
+
+export type FulfillmentOutcome =
+  'applied' | 'already_applied' | 'not_paid' | 'rejected' | 'ignored' | 'duplicate_payment';
+
+/**
+ * Paystack events carry no id. The key is the event name plus the id of what it is about
+ * (transaction, refund, dispute), or a hash of the body when it names nothing.
+ */
+export function paystackEventKey(event: PaystackEvent): string {
+  const data = event.data ?? {};
+  const subject = data.id ?? data.reference;
+  if (subject !== undefined && subject !== null && String(subject) !== '') {
+    return `${event.event}:${String(subject)}`.slice(0, 255);
+  }
+  const digest = createHash('sha256').update(JSON.stringify(event)).digest('hex');
+  return `${event.event}:sha256:${digest}`.slice(0, 255);
+}
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
-  private stripe: Stripe | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => SubscriptionsService))
     private readonly subscriptions: SubscriptionsService,
-    private readonly mail: MailService,
-    private readonly webhookStore: StripeWebhookStoreService,
-    private readonly alerts: StripeAlertService,
+    private readonly webhookStore: PaymentWebhookStoreService,
+    private readonly alerts: PaymentAlertService,
+    private readonly paystack: PaystackService,
     @Optional()
     @Inject(forwardRef(() => MarketplaceService))
     private readonly marketplace?: MarketplaceService
-  ) {
-    const key = stripeSecretForClient();
-    if (key) {
-      this.stripe = new Stripe(key, { apiVersion: '2025-02-24.acacia' });
-    }
-  }
+  ) {}
 
   async history(userId: string) {
     const sub = await this.prisma.subscription.findUnique({ where: { userId } });
@@ -67,103 +80,76 @@ export class PaymentsService {
   }
 
   /**
-   * The billing page calls this when Stripe redirects back from Checkout. The session is read
-   * from Stripe (the redirect alone proves nothing) and fulfilled exactly like
-   * checkout.session.completed, so the plan is active even when the webhook is late or was not
-   * delivered. Idempotent with the webhook.
+   * The billing page (or the marketplace page, or the mobile app) calls this when Paystack
+   * redirects back. The redirect alone proves nothing: the transaction is read from Paystack
+   * and fulfilled exactly like the charge.success webhook, so access does not wait for the
+   * webhook. Idempotent with it.
    */
-  async confirmCheckoutSession(userId: string, sessionId: string): Promise<{ confirmed: boolean }> {
-    if (!this.stripe) {
-      throw new BadRequestException({
-        code: 'STRIPE_NOT_CONFIGURED',
-        message: 'Stripe is not configured (fail-closed).',
-      });
-    }
-
+  async confirmCheckout(userId: string, reference: string): Promise<{ confirmed: boolean }> {
     const notFound = new NotFoundException({
-      code: 'CHECKOUT_SESSION_NOT_FOUND',
-      message: 'Checkout session not found',
+      code: 'CHECKOUT_NOT_FOUND',
+      message: 'Payment not found',
     });
-    let session: Stripe.Checkout.Session;
+
+    let tx: PaystackTransaction;
     try {
-      session = await this.stripe.checkout.sessions.retrieve(sessionId, { expand: ['invoice'] });
+      tx = await this.paystack.require().verifyTransaction(reference);
     } catch (error) {
-      if ((error as { code?: string } | null)?.code === 'resource_missing') throw notFound;
-      this.logger.warn(`Checkout confirm failed for ${sessionId}: ${(error as Error).message}`);
+      if (error instanceof PaystackApiError && error.status === 404) throw notFound;
+      if (error instanceof ServiceUnavailableException) throw error;
+      this.logger.warn(`Checkout confirm failed for ${reference}: ${(error as Error).message}`);
       throw new ServiceUnavailableException({
-        code: 'STRIPE_UNAVAILABLE',
-        message: 'Stripe is unavailable, the payment will be confirmed by webhook.',
+        code: 'PAYMENT_PROVIDER_UNAVAILABLE',
+        message: 'Paystack is unavailable, the payment will be confirmed by webhook.',
       });
     }
 
-    if (session.mode === 'payment' && session.metadata?.type === 'marketplace') {
-      const buyer = session.metadata?.buyerId ?? session.client_reference_id;
-      if (buyer !== userId || !this.marketplace) throw notFound;
-      if (session.status !== 'complete') return { confirmed: false };
-      // Same path as the webhook: the payment is re-read from Stripe and applied once.
-      const result = await this.marketplace.fulfillCheckoutSession(session);
-      return {
-        confirmed: result?.outcome === 'fulfilled' || result?.outcome === 'already_fulfilled',
-      };
-    }
+    const metadata = transactionMetadata(tx);
+    const owner =
+      metadata.type === 'marketplace'
+        ? metadataString(metadata, 'buyerId')
+        : metadataString(metadata, 'userId');
+    if (owner !== userId || tx.reference !== reference) throw notFound;
+    if (tx.status !== 'success') return { confirmed: false };
 
-    const owner = session.client_reference_id ?? session.metadata?.userId;
-    if (owner !== userId || session.mode !== 'subscription') throw notFound;
-    if (session.status !== 'complete') return { confirmed: false };
-
-    try {
-      await this.onCheckoutCompleted(session);
-      const invoice = session.invoice;
-      if (invoice && typeof invoice !== 'string' && invoice.status === 'paid') {
-        await this.onInvoicePaid(invoice);
-      }
-    } catch (error) {
-      // The webhook created the same row at the same moment: it is confirmed either way.
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) {
-        throw error;
-      }
-    }
-    return { confirmed: true };
+    const outcome = await this.fulfillTransaction(tx);
+    return { confirmed: outcome === 'applied' || outcome === 'already_applied' };
   }
 
-  async handleStripeWebhook(rawBody: Buffer, signature: string) {
-    if (!this.stripe || !isNonPlaceholderSecret(process.env.STRIPE_WEBHOOK_SECRET)) {
+  async handlePaystackWebhook(rawBody: Buffer, signature: string) {
+    const secret = this.paystack.secretKey;
+    if (!secret) {
       this.alerts.captureException(
-        new Error('Stripe webhook received but Stripe is not configured'),
-        {
-          level: 'fatal',
-          extra: { failClosed: true },
-        }
+        new Error('Paystack webhook received but Paystack is not configured'),
+        { level: 'fatal', extra: { failClosed: true } }
       );
       throw new ServiceUnavailableException({
-        code: 'STRIPE_NOT_CONFIGURED',
-        message: 'Stripe webhooks are not configured (fail-closed)',
+        code: 'PAYMENTS_NOT_CONFIGURED',
+        message: 'Payment webhooks are not configured (fail-closed)',
       });
     }
 
-    // One endpoint for account events, an optional second one for Connect events: accept either.
-    let event: Stripe.Event | undefined;
-    let err: unknown;
-    for (const secret of stripeWebhookSecrets()) {
-      try {
-        event = this.stripe.webhooks.constructEvent(rawBody, signature, secret);
-        break;
-      } catch (e) {
-        err = e;
-      }
-    }
-    if (!event) {
-      this.logger.error(`Webhook signature verification failed: ${(err as Error).message}`);
+    if (!isValidPaystackSignature(rawBody, signature, secret)) {
+      this.logger.error('Paystack webhook signature verification failed');
       emitSecurityAlert({
         id: 'SEC-05',
         severity: 'P2',
-        message: 'Stripe webhook signature verification failed',
-        extra: { error: (err as Error).message },
+        message: 'Paystack webhook signature verification failed',
       });
       throw new BadRequestException({
         code: 'INVALID_WEBHOOK',
-        message: 'Invalid Stripe signature',
+        message: 'Invalid Paystack signature',
       });
+    }
+
+    let event: PaystackEvent;
+    try {
+      event = JSON.parse(rawBody.toString('utf8')) as PaystackEvent;
+    } catch {
+      throw new BadRequestException({ code: 'INVALID_WEBHOOK', message: 'Invalid JSON body' });
+    }
+    if (!event || typeof event.event !== 'string' || typeof event.data !== 'object') {
+      throw new BadRequestException({ code: 'INVALID_WEBHOOK', message: 'Invalid event' });
     }
 
     await this.processEventWithRetry(event);
@@ -172,10 +158,10 @@ export class PaymentsService {
 
   /**
    * Idempotent webhook processing with a Redis NX lock (multi-pod), then
-   * DB unique event.id, exponential backoff (3 attempts), then DLQ + Sentry.
+   * DB unique event key, exponential backoff (3 attempts), then DLQ + Sentry.
    */
-  async processEventWithRetry(event: Stripe.Event): Promise<void> {
-    const idempotencyKey = event.id;
+  async processEventWithRetry(event: PaystackEvent): Promise<void> {
+    const idempotencyKey = paystackEventKey(event);
 
     if (await this.webhookStore.isProcessed(idempotencyKey)) {
       this.logger.log(`Webhook ${idempotencyKey} already processed`);
@@ -194,11 +180,7 @@ export class PaymentsService {
         return;
       }
 
-      const claimed = await this.webhookStore.markProcessing(
-        idempotencyKey,
-        event.type,
-        event.data
-      );
+      const claimed = await this.webhookStore.markProcessing(idempotencyKey, event.event, event);
       if (!claimed) {
         this.logger.log(`Webhook ${idempotencyKey} not claimed (processed or DLQ)`);
         return;
@@ -230,17 +212,17 @@ export class PaymentsService {
       );
 
       await this.webhookStore.pushDlq({
-        eventId: event.id,
-        eventType: event.type,
-        data: event.data,
+        eventId: idempotencyKey,
+        eventType: event.event,
+        data: event,
         error: lastError?.message,
         timestamp: new Date(),
         attempts: MAX_RETRIES,
       });
 
       this.alerts.captureException(lastError, {
-        eventId: event.id,
-        eventType: event.type,
+        eventId: idempotencyKey,
+        eventType: event.event,
         retries: MAX_RETRIES,
         level: 'fatal',
       });
@@ -257,16 +239,12 @@ export class PaymentsService {
     const row = rows.find((r) => r.id === eventId);
     if (!row) return { ok: false, error: 'not_found' };
 
-    const payload = row.payload as { object?: unknown } | null;
-    const fakeEvent = {
-      id: row.id,
-      type: row.type,
-      data: payload ?? { object: {} },
-    } as Stripe.Event;
+    const stored = row.payload as Partial<PaystackEvent> | null;
+    const event: PaystackEvent = { event: row.type, data: stored?.data ?? {} };
 
     try {
       await this.webhookStore.reclaimFromDlq(eventId);
-      await this.dispatchEvent(fakeEvent);
+      await this.dispatchEvent(event);
       await this.webhookStore.markProcessed(eventId);
       return { ok: true };
     } catch (err) {
@@ -301,405 +279,90 @@ export class PaymentsService {
     return { retried: rows.length, succeeded, failed };
   }
 
-  private async dispatchEvent(event: Stripe.Event): Promise<void> {
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        await this.onCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
-        break;
-      }
-      case 'checkout.session.async_payment_succeeded': {
-        // Delayed payment methods: the licence is granted once the money is actually in.
-        const session = event.data.object as Stripe.Checkout.Session;
-        if (session.metadata?.type === 'marketplace') await this.onCheckoutCompleted(session);
-        break;
-      }
-      case 'customer.subscription.updated':
-      case 'customer.subscription.deleted': {
-        await this.onSubscriptionChanged(event.data.object as Stripe.Subscription);
-        break;
-      }
-      case 'invoice.paid':
-      case 'invoice.payment_succeeded': {
-        await this.onInvoicePaid(event.data.object as Stripe.Invoice);
-        break;
-      }
-      case 'invoice.payment_failed': {
-        await this.onInvoiceFailed(event.data.object as Stripe.Invoice);
-        break;
-      }
-      case 'charge.refunded': {
-        // Marketplace licences only; subscription refunds change nothing here.
-        await this.marketplace?.onChargeRefunded(event.data.object as Stripe.Charge);
-        break;
-      }
-      case 'charge.dispute.created':
-      case 'charge.dispute.closed': {
-        await this.marketplace?.onChargeDispute(event.data.object as Stripe.Dispute, event.type);
-        break;
-      }
-      case 'account.updated': {
-        if (!this.marketplace) {
-          this.logger.warn(
-            `account.updated ignored — marketplace not wired (account=${(event.data.object as Stripe.Account).id})`
-          );
-          break;
+  private async dispatchEvent(event: PaystackEvent): Promise<void> {
+    switch (event.event) {
+      case 'charge.success': {
+        const reference = event.data.reference;
+        if (typeof reference !== 'string' || !reference) {
+          throw new Error('charge.success without reference');
         }
-        await this.marketplace.syncConnectedAccountFromWebhook(event.data.object as Stripe.Account);
+        // The payload is only a hint: the transaction is read from Paystack.
+        const tx = await this.paystack.require().verifyTransaction(reference);
+        const outcome = await this.fulfillTransaction(tx);
+        this.logger.log(`charge.success ${reference}: ${outcome}`);
+        break;
+      }
+      case 'refund.processed': {
+        // Marketplace licences only; a plan refund is handled by support.
+        await this.marketplace?.onRefundProcessed(event.data);
+        break;
+      }
+      case 'charge.dispute.create':
+      case 'charge.dispute.remind':
+      case 'charge.dispute.resolve': {
+        await this.marketplace?.onChargeDispute(event.data, event.event);
         break;
       }
       default:
-        this.logger.debug(`Unhandled Stripe event: ${event.type}`);
+        this.logger.debug(`Unhandled Paystack event: ${event.event}`);
     }
   }
 
-  private async onCheckoutCompleted(session: Stripe.Checkout.Session) {
-    if (session.metadata?.type === 'marketplace') {
+  /** Grants what a verified, successful transaction paid for. */
+  async fulfillTransaction(tx: PaystackTransaction): Promise<FulfillmentOutcome> {
+    if (tx.status !== 'success') return 'not_paid';
+    const metadata = transactionMetadata(tx);
+
+    if (metadata.type === 'marketplace') {
       if (!this.marketplace) {
-        throw new Error(`Marketplace fulfillment not wired (session=${session.id})`);
+        throw new Error(`Marketplace fulfillment not wired (reference=${tx.reference})`);
       }
-      const result = await this.marketplace.fulfillCheckoutSession(session);
-      this.logger.log(
-        `Marketplace checkout ${session.id}: ${result?.outcome ?? 'awaiting_payment'}`
-      );
-      return;
+      const result = await this.marketplace.fulfillTransaction(tx);
+      return result.outcome === 'fulfilled'
+        ? 'applied'
+        : result.outcome === 'already_fulfilled'
+          ? 'already_applied'
+          : result.outcome;
     }
 
-    const userId = session.client_reference_id ?? session.metadata?.userId;
-    if (!userId || !session.subscription) {
-      throw new Error(
-        `checkout.session.completed missing userId or subscription (session=${session.id})`
-      );
+    if (metadata.type !== 'subscription') {
+      // Not created by this app (payment page, another integration on the same account).
+      this.logger.warn(`Ignoring Paystack transaction ${tx.reference}: no known type`);
+      return 'ignored';
     }
 
-    const stripeSubId =
-      typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
-    const stripeSub = await this.subscriptions.enforceSingleTrial(
-      userId,
-      await this.stripe!.subscriptions.retrieve(stripeSubId)
-    );
-    const plan = resolvePaidPlan(session, stripeSub);
-    const stripeCustomerId =
-      expandableStripeId(session.customer) ?? expandableStripeId(stripeSub.customer);
+    const userId = metadataString(metadata, 'userId');
+    const plan = metadata.plan;
+    const interval = metadata.interval;
+    const expectedAmount = Number(metadata.amount);
+    const expectedCurrency = metadataString(metadata, 'currency')?.toUpperCase();
+    if (!userId || !isPaidPlan(plan) || !isBillingInterval(interval)) {
+      throw new Error(`Subscription payment ${tx.reference} has incomplete metadata`);
+    }
+    if (tx.amount !== expectedAmount || tx.currency.toUpperCase() !== expectedCurrency) {
+      this.logger.error(
+        `Subscription payment ${tx.reference}: paid ${tx.amount} ${tx.currency}, expected ${expectedAmount} ${expectedCurrency}`
+      );
+      emitSecurityAlert({
+        id: 'PAY-01',
+        severity: 'P1',
+        message: 'Subscription payment amount does not match the checkout: nothing granted',
+        extra: { reference: tx.reference, amount: tx.amount, currency: tx.currency },
+      });
+      return 'rejected';
+    }
 
-    await this.cancelSupersededSubscription(userId, stripeSub.id);
-
-    const period = subscriptionPeriod(stripeSub);
-    await this.subscriptions.applyPaidEntitlement({
+    const result = await this.subscriptions.applyPrepaidPayment({
       userId,
       plan,
-      provider: 'stripe',
-      status: stripeSub.status,
-      periodStart: period.start,
-      periodEnd: period.end,
-      stripeSubscriptionId: stripeSub.id,
-      stripeCustomerId,
-      cancelAtPeriodEnd: Boolean(stripeSub.cancel_at_period_end),
-      canceledAt: stripeDate(stripeSub.canceled_at),
+      interval,
+      reference: tx.reference,
+      amount: tx.amount,
+      currency: tx.currency,
+      paidAt: transactionPaidAt(tx),
+      customerCode: tx.customer?.customer_code ?? null,
+      channel: tx.channel ?? null,
     });
-
-    this.logger.log(
-      `Subscription synced for user ${userId} via checkout ${session.id} plan=${plan}`
-    );
+    return result.outcome;
   }
-
-  /**
-   * Stripe does not guarantee event order: an older `customer.subscription.updated` can arrive
-   * after a newer one, or after `deleted`. The subscription is therefore synced as Stripe has
-   * it now; the payload only serves when the subscription no longer exists.
-   */
-  private async latestSubscription(stripeSub: Stripe.Subscription): Promise<Stripe.Subscription> {
-    try {
-      return await this.stripe!.subscriptions.retrieve(stripeSub.id);
-    } catch (error) {
-      if ((error as { code?: string } | null)?.code === 'resource_missing') return stripeSub;
-      throw error;
-    }
-  }
-
-  private async onSubscriptionChanged(eventSub: Stripe.Subscription, fresh = false) {
-    let stripeSub = fresh ? eventSub : await this.latestSubscription(eventSub);
-    let userId = stripeSub.metadata?.userId;
-    if (!userId) {
-      const local = await this.prisma.subscription.findFirst({
-        where: { stripeSubscriptionId: stripeSub.id },
-      });
-      if (!local) {
-        throw new Error(`Subscription not found for Stripe ID: ${stripeSub.id}`);
-      }
-      userId = local.userId;
-    }
-
-    const local = await this.prisma.subscription.findUnique({ where: { userId } });
-    if (local?.stripeSubscriptionId && local.stripeSubscriptionId !== stripeSub.id) {
-      // Events for a replaced subscription (e.g. its cancellation) must not overwrite the
-      // user's current one. A new subscription is synced by checkout.session.completed.
-      this.logger.warn(
-        `Ignoring ${stripeSub.status} event for Stripe subscription ${stripeSub.id}: ` +
-          `user ${userId} is on ${local.stripeSubscriptionId}`
-      );
-      return;
-    }
-
-    const isFullyCanceled = stripeSub.status === 'canceled' || stripeSub.status === 'unpaid';
-    if (!isFullyCanceled) {
-      stripeSub = await this.subscriptions.enforceSingleTrial(userId, stripeSub);
-    }
-    const cancelAtPeriodEnd = Boolean(stripeSub.cancel_at_period_end) && !isFullyCanceled;
-
-    let planName: string;
-    if (isFullyCanceled) {
-      planName = 'free';
-    } else {
-      const resolved = tryResolvePaidPlanFromSubscription(stripeSub);
-      if (resolved) {
-        planName = resolved;
-      } else {
-        const user = await this.prisma.user.findFirst({
-          where: { id: userId, deletedAt: null },
-          select: { subscriptionTier: true },
-        });
-        if (!user || !isPaidPlan(user.subscriptionTier)) {
-          throw new Error(
-            `Unknown plan for subscription ${stripeSub.id}. ` +
-              `Please ensure STRIPE_PRICE_PRO_* and STRIPE_PRICE_BUSINESS_* are configured correctly.`
-          );
-        }
-        planName = user.subscriptionTier;
-      }
-    }
-
-    const period = subscriptionPeriod(stripeSub);
-    await this.subscriptions.applyPaidEntitlement({
-      userId,
-      plan: planName,
-      provider: 'stripe',
-      status: isFullyCanceled ? 'canceled' : stripeSub.status,
-      periodStart: period.start,
-      periodEnd: period.end,
-      stripeSubscriptionId: stripeSub.id,
-      stripeCustomerId: expandableStripeId(stripeSub.customer),
-      cancelAtPeriodEnd,
-      canceledAt: stripeDate(stripeSub.canceled_at),
-    });
-
-    this.logger.log(
-      `Subscription ${stripeSub.id} status=${stripeSub.status} cancelAtPeriodEnd=${cancelAtPeriodEnd} for user ${userId}`
-    );
-  }
-
-  /**
-   * If the user already had another live Stripe subscription (two Checkout tabs completed),
-   * cancel it with a prorated credit so the customer is never billed twice.
-   * Runs before the new subscription is recorded, so a retry still sees the previous id.
-   */
-  private async cancelSupersededSubscription(userId: string, newStripeSubId: string) {
-    const local = await this.prisma.subscription.findUnique({ where: { userId } });
-    const previousId = local?.stripeSubscriptionId;
-    if (!previousId || previousId === newStripeSubId) return;
-
-    let previous: Stripe.Subscription;
-    try {
-      previous = await this.stripe!.subscriptions.retrieve(previousId);
-    } catch (error) {
-      if ((error as { code?: string } | null)?.code === 'resource_missing') return;
-      throw error;
-    }
-    if (previous.status === 'canceled' || previous.status === 'incomplete_expired') return;
-
-    await this.stripe!.subscriptions.cancel(previousId, { prorate: true });
-    this.logger.warn(
-      `Canceled superseded Stripe subscription ${previousId} for user ${userId} ` +
-        `(replaced by ${newStripeSubId})`
-    );
-  }
-
-  /**
-   * Local subscription billed by an invoice. Stripe often sends invoice.* before
-   * checkout.session.completed: when the row is missing, sync the subscription from Stripe first
-   * (it carries userId in its metadata) instead of failing into the DLQ.
-   */
-  private async findInvoiceSubscription(invoice: Stripe.Invoice, eventType: string) {
-    const stripeSubId = invoiceSubscriptionId(invoice);
-    if (!stripeSubId) {
-      throw new Error(`${eventType} missing subscription (invoice=${invoice.id})`);
-    }
-
-    const find = () =>
-      this.prisma.subscription.findFirst({
-        where: { stripeSubscriptionId: stripeSubId },
-        include: { user: true },
-      });
-
-    let sub = await find();
-    if (!sub && this.stripe) {
-      const stripeSub = await this.stripe.subscriptions.retrieve(stripeSubId);
-      if (stripeSub.metadata?.userId) {
-        await this.onSubscriptionChanged(stripeSub, true);
-        sub = await find();
-      }
-    }
-    if (!sub) {
-      throw new Error(`Subscription not found for Stripe ID: ${stripeSubId}`);
-    }
-    return sub;
-  }
-
-  private async onInvoicePaid(invoice: Stripe.Invoice) {
-    const sub = await this.findInvoiceSubscription(invoice, 'invoice.paid');
-
-    try {
-      await this.prisma.payment.create({
-        data: {
-          subscriptionId: sub.id,
-          amount: (invoice.amount_paid ?? 0) / 100,
-          currency: (invoice.currency ?? 'eur').toUpperCase(),
-          status: 'completed',
-          paymentMethod: 'stripe',
-          stripePaymentIntentId:
-            typeof invoice.payment_intent === 'string'
-              ? invoice.payment_intent
-              : invoice.payment_intent?.id,
-          transactionId: invoice.id,
-        },
-      });
-    } catch (err) {
-      // Idempotent: unique transactionId on replay
-      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) {
-        throw err;
-      }
-    }
-
-    const invoiceNumber = invoice.number ?? `INV-${invoice.id}`;
-    await this.prisma.invoice.upsert({
-      where: { invoiceNumber },
-      create: {
-        subscriptionId: sub.id,
-        invoiceNumber,
-        amount: (invoice.amount_paid ?? 0) / 100,
-        currency: (invoice.currency ?? 'eur').toUpperCase(),
-        status: 'paid',
-        pdfUrl: invoice.invoice_pdf ?? undefined,
-        dueDate: new Date((invoice.created ?? Date.now() / 1000) * 1000),
-        paidAt: new Date(),
-      },
-      update: {
-        status: 'paid',
-        pdfUrl: invoice.invoice_pdf ?? undefined,
-        paidAt: new Date(),
-      },
-    });
-
-    this.logger.log(`Payment recorded for subscription ${sub.id} invoice=${invoice.id}`);
-  }
-
-  private async onInvoiceFailed(invoice: Stripe.Invoice) {
-    const sub = await this.findInvoiceSubscription(invoice, 'invoice.payment_failed');
-
-    // This event can be older than a later successful payment: take the status from Stripe
-    // rather than forcing past_due.
-    const stripeSub = await this.stripe!.subscriptions.retrieve(invoiceSubscriptionId(invoice)!);
-    await this.onSubscriptionChanged(stripeSub, true);
-
-    try {
-      await this.prisma.payment.create({
-        data: {
-          subscriptionId: sub.id,
-          amount: (invoice.amount_due ?? invoice.total ?? 0) / 100,
-          currency: (invoice.currency ?? 'eur').toUpperCase(),
-          status: 'failed',
-          paymentMethod: 'stripe',
-          transactionId: `${invoice.id}:failed`,
-          failedReason: invoice.last_finalization_error?.message ?? 'payment_failed',
-        },
-      });
-    } catch (err) {
-      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) {
-        throw err;
-      }
-    }
-
-    const retryDate = invoice.next_payment_attempt
-      ? new Date(invoice.next_payment_attempt * 1000)
-      : null;
-
-    await this.mail.sendPaymentFailed(sub.user.email, {
-      amount: (invoice.amount_due ?? invoice.total ?? 0) / 100,
-      currency: (invoice.currency ?? 'eur').toUpperCase(),
-      retryDate,
-    });
-
-    this.alerts.captureException(new Error(`Payment failed for subscription ${sub.id}`), {
-      eventType: 'invoice.payment_failed',
-      level: 'error',
-      extra: { subscriptionId: sub.id, invoiceId: invoice.id, userId: sub.userId },
-    });
-
-    this.logger.warn(`Payment failed for subscription ${sub.id}`);
-  }
-}
-
-export type PaidPlan = 'pro' | 'business';
-
-export function isPaidPlan(value: unknown): value is PaidPlan {
-  return value === 'pro' || value === 'business';
-}
-
-export function mapStripePriceToPlan(priceId: string | undefined | null): PaidPlan | null {
-  if (!priceId) return null;
-  const mapping: Record<string, PaidPlan> = {};
-  const add = (envKey: string, plan: PaidPlan) => {
-    const id = process.env[envKey];
-    if (isNonPlaceholderSecret(id)) mapping[id] = plan;
-  };
-  add('STRIPE_PRICE_PRO_MONTHLY', 'pro');
-  add('STRIPE_PRICE_PRO_YEARLY', 'pro');
-  add('STRIPE_PRICE_PRO_ANNUAL', 'pro');
-  add('STRIPE_PRICE_BUSINESS_MONTHLY', 'business');
-  add('STRIPE_PRICE_BUSINESS_YEARLY', 'business');
-  add('STRIPE_PRICE_BUSINESS_ANNUAL', 'business');
-  return mapping[priceId] ?? null;
-}
-
-export function tryResolvePaidPlanFromSubscription(
-  stripeSub: Stripe.Subscription
-): PaidPlan | null {
-  // The billed price is the truth: metadata can be stale after an in-place plan change.
-  const price = stripeSub.items?.data?.[0]?.price;
-  const priceId = typeof price === 'string' ? price : price?.id;
-  const fromPrice = mapStripePriceToPlan(priceId);
-  if (fromPrice) return fromPrice;
-  const fromMeta = stripeSub.metadata?.plan;
-  return isPaidPlan(fromMeta) ? fromMeta : null;
-}
-
-export function resolvePaidPlan(
-  session: Pick<Stripe.Checkout.Session, 'id' | 'metadata'>,
-  stripeSub: Stripe.Subscription
-): PaidPlan {
-  const fromMeta = session.metadata?.plan ?? stripeSub.metadata?.plan;
-  if (isPaidPlan(fromMeta)) return fromMeta;
-
-  const price = stripeSub.items?.data?.[0]?.price;
-  const priceId = typeof price === 'string' ? price : price?.id;
-  const fromPrice = mapStripePriceToPlan(priceId);
-  if (fromPrice) return fromPrice;
-
-  throw new Error(
-    `Unknown plan for price ${priceId ?? 'missing'} (session ${session.id}). ` +
-      `Please ensure STRIPE_PRICE_PRO_* and STRIPE_PRICE_BUSINESS_* are configured correctly.`
-  );
-}
-
-/* Since 2025-03-31.basil an invoice points to its subscription through `parent`. Read both. */
-
-export function invoiceSubscriptionId(invoice: Stripe.Invoice): string | undefined {
-  const legacy = invoice.subscription;
-  if (legacy) return typeof legacy === 'string' ? legacy : legacy.id;
-  const parent = (
-    invoice as {
-      parent?: { subscription_details?: { subscription?: string | { id: string } | null } | null };
-    }
-  ).parent?.subscription_details?.subscription;
-  if (!parent) return undefined;
-  return typeof parent === 'string' ? parent : parent.id;
 }

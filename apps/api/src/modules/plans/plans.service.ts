@@ -4,12 +4,12 @@ import type { BillingCatalogEntitlement, PublicBillingPlan } from '@cvstudio/sha
 import { getCvLimit } from '@cvstudio/shared-utils';
 import { PrismaService } from '../../database/prisma.module';
 import { RedisService } from '../../redis/redis.module';
-import { isNonPlaceholderSecret } from '../payments/payment-env';
+import { paymentCurrency } from '../payments/payment-env';
+import { planChargeAmount } from '../payments/pricing';
 import { TEMPLATE_SEEDS } from '../templates/template-seeds';
 
 export const PLAN_CACHE_KEY = 'plans:all';
 export const PLAN_CACHE_TTL_SECONDS = 3600;
-export const TRIAL_PERIOD_DAYS = 14;
 /** Free users get every non-premium official template: derived, so the catalog cannot drift. */
 export const FREE_TEMPLATE_COUNT = TEMPLATE_SEEDS.filter((t) => !t.isPremium).length;
 
@@ -86,9 +86,22 @@ function toNumber(value: Prisma.Decimal | number | string): number {
   return Number(value);
 }
 
-function envPriceId(plan: PlanSlug, interval: 'MONTHLY' | 'YEARLY'): string | null {
-  const raw = process.env[`STRIPE_PRICE_${plan.toUpperCase()}_${interval}`];
-  return isNonPlaceholderSecret(raw) ? raw : null;
+/**
+ * Catalog rows are in EUR; customers pay in the payment currency (XOF by default). Prices are
+ * shown in what is actually charged, falling back to EUR when no charge price is configured.
+ */
+function displayPrices(plan: PlanSlug, monthly: number, yearly: number) {
+  if (plan === 'free') return { currency: paymentCurrency(), monthly: 0, yearly: 0 };
+  const currency = paymentCurrency();
+  const catalog = { monthly, yearly };
+  const chargedMonthly = planChargeAmount(plan, 'month', catalog, currency);
+  const chargedYearly = planChargeAmount(plan, 'year', catalog, currency);
+  if (!chargedMonthly) return { currency: 'EUR', monthly, yearly };
+  return {
+    currency,
+    monthly: chargedMonthly / 100,
+    yearly: chargedYearly ? chargedYearly / 100 : 0,
+  };
 }
 
 function slugFromName(name: string): PlanSlug {
@@ -102,8 +115,9 @@ export const UNSHIPPED_FEATURES = ['collaborate', 'customDomain', 'apiAccess'] a
 
 export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
   const id = slugFromName(plan.name);
-  const priceMonthly = toNumber(plan.priceMonthly);
-  const priceYearly = toNumber(plan.priceYearly);
+  const prices = displayPrices(id, toNumber(plan.priceMonthly), toNumber(plan.priceYearly));
+  const priceMonthly = prices.monthly;
+  const priceYearly = prices.yearly;
   const cvLimit = getCvLimit(id);
   const paid = priceMonthly > 0;
 
@@ -142,17 +156,16 @@ export function mapPlanToPublicDto(plan: PlanRow): PublicPlanDto {
     position: POSITION[plan.name] ?? 99,
     priceMonthly,
     priceAnnual: paid && priceYearly > 0 ? priceYearly : null,
-    currency: 'EUR',
-    trialDays: paid ? TRIAL_PERIOD_DAYS : null,
+    currency: prices.currency,
+    // Prepaid plans: nothing bills after a trial, so none is offered.
+    trialDays: null,
     recommended: id === 'pro',
-    stripePriceMonthlyId: paid ? envPriceId(id, 'MONTHLY') : null,
-    stripePriceAnnualId: paid ? envPriceId(id, 'YEARLY') : null,
     entitlements,
   };
 }
 
 /**
- * Single source of truth for billing plans (pricing, entitlements, Stripe price ids).
+ * Single source of truth for billing plans (pricing, entitlements).
  */
 @Injectable()
 export class PlansService {

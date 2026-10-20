@@ -36,7 +36,7 @@ spec:
               env:
                 - name: NODE_ENV
                   value: production
-                - name: STRIPE_FAIL_CLOSED
+                - name: PAYMENT_FAIL_CLOSED
                   value: '1'
                 - name: WEBHOOK_DLQ_RETRY_LIMIT
                   value: '50'

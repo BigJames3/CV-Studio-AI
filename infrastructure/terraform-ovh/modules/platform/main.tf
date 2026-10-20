@@ -28,7 +28,7 @@ resource "ovh_cloud_project_network_private_subnet" "this" {
   no_gateway   = false
 }
 
-# Outbound internet for the nodes (Stripe, OpenAI, SMTP, image pulls from GHCR).
+# Outbound internet for the nodes (Paystack, OpenAI, SMTP, image pulls from GHCR).
 resource "ovh_cloud_project_gateway" "this" {
   service_name = var.service_name
   name         = local.name

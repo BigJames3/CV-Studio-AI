@@ -1,4 +1,5 @@
 import { test, expect, loginAs } from '../fixtures/auth.fixture';
+import { grantPlan } from '../utils/db';
 
 test.describe('Billing checkout (Paystack, prepaid periods)', () => {
   test('pays through Paystack, with no payment method choice on our side @payment', async ({
@@ -147,6 +148,8 @@ test.describe('Billing checkout (Paystack, prepaid periods)', () => {
     testUser,
     billingPage,
   }) => {
+    // The plan shown comes from the user's tier; the period details from the mocked subscription.
+    await grantPlan(testUser.id, 'pro');
     await loginAs(page, testUser);
     const periodEnd = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
     await page.route('**/api/v1/subscriptions/me', async (route) => {

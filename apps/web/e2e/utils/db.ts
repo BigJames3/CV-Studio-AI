@@ -4,9 +4,9 @@ import path from 'path';
 /**
  * Direct access to the E2E database for test setup only.
  *
- * Checkout is fail-closed without Stripe (no dev bypass, see
+ * Checkout is fail-closed without Paystack (no dev bypass, see
  * docs/PAYMENT_GATEWAY_SETUP.md), so tests that need a paid user seed the
- * subscription the way a verified payment would (applyPaidEntitlement).
+ * prepaid period the way a verified payment would (applyPaidEntitlement).
  * Reuses the Prisma client generated for apps/api: no extra dependency.
  */
 type PrismaLike = {
@@ -28,7 +28,12 @@ function prisma(): PrismaLike {
   return new PrismaClient();
 }
 
-export async function grantPlan(userId: string, tier: 'pro' | 'business') {
+/** `provider: 'stripe'` seeds a legacy row from before Paystack (auto-renewing, cancellable). */
+export async function grantPlan(
+  userId: string,
+  tier: 'pro' | 'business',
+  provider: 'paystack' | 'stripe' = 'paystack'
+) {
   const db = prisma();
   try {
     const planName = tier === 'business' ? 'Business' : 'Pro';
@@ -41,7 +46,7 @@ export async function grantPlan(userId: string, tier: 'pro' | 'business') {
     const data = {
       planId: plan.id,
       status: 'active',
-      provider: 'stripe',
+      provider,
       currentPeriodStart: start,
       currentPeriodEnd: end,
       lastPaymentError: null,

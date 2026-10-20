@@ -87,6 +87,17 @@ export class MailService implements OnModuleInit {
     });
   }
 
+  async sendRenewalReminder(to: string, opts: { plan: string; endsAt: Date }) {
+    const date = opts.endsAt.toISOString().slice(0, 10);
+    const billingUrl = `${this.appUrl}/account/billing`;
+    await this.send({
+      to,
+      subject: `Your ${opts.plan} plan ends on ${date} — CV Studio AI`,
+      text: `Your ${opts.plan} plan ends on ${date} and does not renew automatically. Renew it here: ${billingUrl}`,
+      html: `<p>Your <strong>${opts.plan}</strong> plan ends on <strong>${date}</strong> and does not renew automatically.</p><p><a href="${billingUrl}">Renew my plan</a></p>`,
+    });
+  }
+
   async sendPaymentFailed(
     to: string,
     opts: { amount: number; currency: string; retryDate: Date | null }

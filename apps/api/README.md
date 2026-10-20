@@ -42,4 +42,4 @@ See [`docs/API-CV-STUDIO-AI.md`](../../docs/API-CV-STUDIO-AI.md)
 - Envelope responses via `TransformInterceptor`
 - JWT guard global; use `@Public()` for open routes
 - Entitlements via `@RequireEntitlement()` + `EntitlementsGuard`
-- OAuth / Stripe / BullMQ / LLM wired as stubs — replace with production integrations
+- OAuth / Paystack / BullMQ / LLM wired as stubs — replace with production integrations

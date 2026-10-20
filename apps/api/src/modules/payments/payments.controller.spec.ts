@@ -14,8 +14,8 @@ const user: AuthUser = {
 describe('PaymentsController', () => {
   const payments = {
     history: jest.fn(),
-    handleStripeWebhook: jest.fn(),
-    confirmCheckoutSession: jest.fn(),
+    handlePaystackWebhook: jest.fn(),
+    confirmCheckout: jest.fn(),
   };
 
   let controller: PaymentsController;
@@ -35,15 +35,15 @@ describe('PaymentsController', () => {
     expect(payments.history).toHaveBeenCalledWith('user-1');
   });
 
-  it('POST /payments/checkout/confirm confirms the session for the signed-in user', async () => {
-    payments.confirmCheckoutSession.mockResolvedValue({ confirmed: true });
-    await expect(controller.confirmCheckout(user, { sessionId: 'cs_test_1' })).resolves.toEqual({
+  it('POST /payments/checkout/confirm confirms the payment for the signed-in user', async () => {
+    payments.confirmCheckout.mockResolvedValue({ confirmed: true });
+    await expect(controller.confirmCheckout(user, { reference: 'sub_ref_1' })).resolves.toEqual({
       confirmed: true,
     });
-    expect(payments.confirmCheckoutSession).toHaveBeenCalledWith('user-1', 'cs_test_1');
+    expect(payments.confirmCheckout).toHaveBeenCalledWith('user-1', 'sub_ref_1');
   });
 
-  it('exposes only history, checkout confirmation and the Stripe webhook (CinetPay removed)', () => {
+  it('exposes only history, checkout confirmation and the Paystack webhook', () => {
     const routes = Object.getOwnPropertyNames(PaymentsController.prototype)
       .filter((name) => name !== 'constructor')
       .map((name) =>
@@ -55,28 +55,28 @@ describe('PaymentsController', () => {
     expect(routes.sort()).toEqual(['checkout/confirm', 'history', 'webhook']);
   });
 
-  describe('POST /payments/webhook (Stripe)', () => {
-    it('passes the raw body and signature to the Stripe handler', async () => {
-      payments.handleStripeWebhook.mockResolvedValue({ received: true });
-      const raw = Buffer.from('{"id":"evt_test"}');
+  describe('POST /payments/webhook (Paystack)', () => {
+    it('passes the raw body and signature to the Paystack handler', async () => {
+      payments.handlePaystackWebhook.mockResolvedValue({ received: true });
+      const raw = Buffer.from('{"event":"charge.success"}');
 
-      const result = await controller.webhook({ rawBody: raw, body: raw }, 'whsec_test');
+      const result = await controller.webhook({ rawBody: raw, body: raw }, 'a1b2c3');
 
       expect(result).toEqual({ received: true });
-      expect(payments.handleStripeWebhook).toHaveBeenCalledWith(raw, 'whsec_test');
+      expect(payments.handlePaystackWebhook).toHaveBeenCalledWith(raw, 'a1b2c3');
     });
 
     it('rejects a request without signature', () => {
       const raw = Buffer.from('{}');
       expect(() => controller.webhook({ rawBody: raw, body: raw }, '')).toThrow();
-      expect(payments.handleStripeWebhook).not.toHaveBeenCalled();
+      expect(payments.handlePaystackWebhook).not.toHaveBeenCalled();
     });
 
-    it('remains @Public (Stripe servers have no JWT)', () => {
+    it('remains @Public (Paystack servers have no JWT)', () => {
       expect(Reflect.getMetadata(IS_PUBLIC_KEY, PaymentsController.prototype.webhook)).toBe(true);
     });
 
-    it('skips throttle so Stripe retries are not 429', () => {
+    it('skips throttle so Paystack retries are not 429', () => {
       expect(
         Reflect.getMetadata('THROTTLER:SKIPdefault', PaymentsController.prototype.webhook)
       ).toBe(true);

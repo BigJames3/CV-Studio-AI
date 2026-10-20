@@ -84,7 +84,7 @@ export default function RegisterPage() {
           </ul>
         </div>
         <p className="text-xs text-[#A8C5BE]">
-          Plan Gratuit · Pro 9,99 €/mois ·{' '}
+          Plan Gratuit · Pro 6 600 F CFA/mois ·{' '}
           <Link href="/pricing" className="underline hover:text-white">
             Voir les tarifs
           </Link>

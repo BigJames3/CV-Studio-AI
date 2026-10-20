@@ -3,7 +3,7 @@
  * owner fills them in. Until then every legal page shows a visible "draft" notice listing
  * what is missing (see LegalPage), instead of a silent placeholder.
  */
-export const LEGAL_LAST_UPDATED = '8 octobre 2026';
+export const LEGAL_LAST_UPDATED = '20 octobre 2026';
 
 type Missing<T> = T | null;
 

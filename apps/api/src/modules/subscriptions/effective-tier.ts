@@ -1,6 +1,6 @@
 import { normalizeTier, type SubscriptionTierName } from '@cvstudio/shared-utils';
 
-/** Tolerance after `currentPeriodEnd` for late Stripe renewal webhooks. */
+/** Grace after `currentPeriodEnd`: time to renew a prepaid plan, or for a late payment webhook. */
 export const EXPIRY_GRACE_MS = 72 * 60 * 60 * 1000;
 
 /** How long a `past_due` subscription keeps paid access after the failed renewal. */
@@ -20,7 +20,7 @@ export type TierSource = {
  * Tier the user is actually entitled to right now.
  *
  * `users.subscription_tier` is only written by checkout webhooks, so on its own it never
- * expires (a missed Stripe webhook leaves it stale).
+ * expires (a missed payment webhook leaves it stale).
  * The subscription status and period end are the authority for paid tiers.
  */
 export function resolveEffectiveTier(source: TierSource, now = new Date()): SubscriptionTierName {
@@ -41,7 +41,7 @@ export function resolveEffectiveTier(source: TierSource, now = new Date()): Subs
       return now.getTime() > end + EXPIRY_GRACE_MS ? 'free' : stored;
     case 'past_due': {
       // The failed renewal happened at the old period end, or at the new period start once
-      // Stripe has rolled the period forward — whichever is already in the past.
+      // the provider has rolled the period forward — whichever is already in the past.
       const failedAt = end <= now.getTime() ? end : sub.currentPeriodStart.getTime();
       return now.getTime() > failedAt + PAST_DUE_GRACE_MS ? 'free' : stored;
     }

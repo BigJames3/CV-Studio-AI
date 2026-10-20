@@ -2,88 +2,59 @@ import {
   Injectable,
   Logger,
   BadRequestException,
-  ConflictException,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import Stripe from 'stripe';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.module';
 import { EntitlementsService } from './entitlements.service';
 import { CheckoutDto, CreateSubscriptionDto } from './dto/subscription.dto';
 import {
-  expandableStripeId,
-  isNonPlaceholderSecret,
-  isStripeLiveAllowed,
-  isStripeLiveSecret,
-  stripeSecretForClient,
+  isPaystackLiveAllowed,
+  isPaystackLiveSecret,
+  paymentCurrency,
 } from '../payments/payment-env';
-import { TRIAL_PERIOD_DAYS } from '../plans/plans.service';
+import { PaystackService } from '../payments/paystack.service';
+import {
+  type BillingInterval,
+  type PaidPlan,
+  isPaidPlan,
+  planChargeAmount,
+  prepaidPeriod,
+} from '../payments/pricing';
+import { CATALOG_FALLBACK_ROWS } from '../plans/plans.service';
 import { appOriginFromEnv, safeReturnUrl } from '../../common/utils/url.utils';
 import { lockUserScope } from '../../common/utils/user-lock';
-import { stripeDate, subscriptionPeriod } from '../payments/stripe-period';
 
-type PaidPlan = 'pro' | 'business';
-type BillingInterval = 'month' | 'year';
+/** Applying a payment holds the user's billing lock: two payments never compute one period. */
+const PAYMENT_LOCK_TX_OPTIONS = { maxWait: 15_000, timeout: 30_000 } as const;
 
-/** Stripe statuses that still bill (or will bill) the customer. */
-const LIVE_STRIPE_STATUSES = new Set<Stripe.Subscription.Status>([
-  'active',
-  'trialing',
-  'past_due',
-  'unpaid',
-  'incomplete',
-]);
-
-const PLAN_RANK: Record<PaidPlan, number> = { pro: 1, business: 2 };
-
-/**
- * Checkout holds the user's billing lock while it calls Stripe (customer, trial history, open
- * sessions, new session): allow for a few API round trips.
- */
-const CHECKOUT_LOCK_TX_OPTIONS = { maxWait: 15_000, timeout: 30_000 } as const;
-
-/**
- * Database client for work done under the checkout lock. Everything there runs on the lock's own
- * transaction: requests waiting for the lock each hold a pooled connection, so a holder that
- * asked the pool for another one could starve it.
- */
 type Db = Prisma.TransactionClient;
 
-/**
- * Stripe replaces {CHECKOUT_SESSION_ID} when it redirects back, so the billing page can ask the
- * API to confirm that session with Stripe (POST /payments/checkout/confirm).
- */
-function withCheckoutSessionId(url: string): string {
-  return `${url}${url.includes('?') ? '&' : '?'}session_id={CHECKOUT_SESSION_ID}`;
-}
-
-/** An upgrade costs more right away: higher tier, or same tier from monthly to yearly. */
-function isUpgrade(
-  from: { plan: PaidPlan; interval: BillingInterval },
-  to: { plan: PaidPlan; interval: BillingInterval }
-): boolean {
-  if (PLAN_RANK[to.plan] !== PLAN_RANK[from.plan]) {
-    return PLAN_RANK[to.plan] > PLAN_RANK[from.plan];
-  }
-  return from.interval === 'month' && to.interval === 'year';
-}
+/** A verified Paystack payment for a plan (see PaymentsService). */
+export type PrepaidPayment = {
+  userId: string;
+  plan: PaidPlan;
+  interval: BillingInterval;
+  reference: string;
+  /** Subunit (× 100). */
+  amount: number;
+  currency: string;
+  paidAt: Date;
+  customerCode?: string | null;
+  channel?: string | null;
+};
 
 @Injectable()
 export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
-  private stripe: Stripe | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly entitlements: EntitlementsService
-  ) {
-    const key = stripeSecretForClient();
-    if (key) {
-      this.stripe = new Stripe(key, { apiVersion: '2025-02-24.acacia' });
-    }
-  }
+    private readonly entitlements: EntitlementsService,
+    private readonly paystack: PaystackService
+  ) {}
 
   async me(userId: string) {
     const sub = await this.prisma.subscription.findUnique({
@@ -93,13 +64,13 @@ export class SubscriptionsService {
     const snap = await this.entitlements.snapshot(userId);
     const trial = await this.prisma.user.findFirst({
       where: { id: userId },
-      select: { trialUsed: true, trialEndsAt: true },
+      select: { trialEndsAt: true },
     });
     return {
       subscription: sub,
       tier: snap.tier,
-      // The trial is decided here, never by the client: Checkout re-checks it under a lock.
-      trialEligible: trial ? !trial.trialUsed : false,
+      // Plans are prepaid (no card on file to bill after a trial): no trial is offered.
+      trialEligible: false,
       trialEndsAt: trial?.trialEndsAt ?? null,
       entitlements: snap.entitlements,
       cvCount: snap.cvCount,
@@ -109,8 +80,8 @@ export class SubscriptionsService {
   }
 
   /**
-   * Internal only (Stripe fail-open). Paid entitlements
-   * must be granted via applyPaidEntitlement after a verified webhook.
+   * Internal only. Paid entitlements are granted via applyPrepaidPayment after a payment
+   * verified with Paystack.
    */
   async create(userId: string, dto: CreateSubscriptionDto) {
     const plan = await this.prisma.plan.findUnique({ where: { name: this.planName(dto.plan) } });
@@ -133,26 +104,13 @@ export class SubscriptionsService {
     });
   }
 
+  /**
+   * Prepaid plans never bill again by themselves, so there is nothing to stop at Paystack:
+   * this only records that the user does not intend to renew (access runs to the period end).
+   */
   async cancel(userId: string) {
     const sub = await this.prisma.subscription.findUnique({ where: { userId } });
     if (!sub) throw new NotFoundException({ code: 'NOT_FOUND', message: 'No subscription' });
-
-    if (this.stripe && sub.stripeSubscriptionId) {
-      const updated = await this.stripe.subscriptions.update(sub.stripeSubscriptionId, {
-        cancel_at_period_end: true,
-      });
-      // Access continues until the Stripe period end: store Stripe's answer, not a local guess.
-      const period = subscriptionPeriod(updated);
-      return this.prisma.subscription.update({
-        where: { userId },
-        data: {
-          cancelAtPeriodEnd: Boolean(updated.cancel_at_period_end),
-          canceledAt: stripeDate(updated.canceled_at) ?? new Date(),
-          currentPeriodStart: period.start,
-          currentPeriodEnd: period.end,
-        },
-      });
-    }
 
     return this.prisma.subscription.update({
       where: { userId },
@@ -163,63 +121,9 @@ export class SubscriptionsService {
     });
   }
 
-  /**
-   * Stripe Customer Portal session: update the card, pay an unpaid invoice, download invoices.
-   * The portal must be activated once in the Stripe Dashboard (Settings → Billing → Customer portal).
-   */
-  async billingPortal(userId: string): Promise<{ url: string }> {
-    if (!this.stripe) {
-      throw new BadRequestException({
-        code: 'STRIPE_NOT_CONFIGURED',
-        message: 'Stripe is not configured (fail-closed). Billing portal unavailable.',
-      });
-    }
-
+  /** Immediate end of paid access for account erasure (GDPR). Nothing bills again at Paystack. */
+  async cancelImmediately(userId: string): Promise<{ hadSubscription: boolean }> {
     const sub = await this.prisma.subscription.findUnique({ where: { userId } });
-    if (!sub?.stripeCustomerId) {
-      throw new NotFoundException({
-        code: 'NO_BILLING_ACCOUNT',
-        message: 'No card payment has been made on this account yet.',
-      });
-    }
-
-    try {
-      const session = await this.stripe.billingPortal.sessions.create({
-        customer: sub.stripeCustomerId,
-        return_url: `${appOriginFromEnv()}/account/billing`,
-      });
-      return { url: session.url };
-    } catch (error) {
-      this.logger.error(
-        `Could not open the Stripe billing portal for ${sub.stripeCustomerId}`,
-        error instanceof Error ? error.stack : error
-      );
-      throw new ServiceUnavailableException({
-        code: 'BILLING_PORTAL_UNAVAILABLE',
-        message: 'The billing portal is unavailable. Please try again later.',
-      });
-    }
-  }
-
-  /** Immediate Stripe cancel for account erasure (GDPR). Does not throw if Stripe is down. */
-  async cancelImmediately(userId: string): Promise<{
-    hadSubscription: boolean;
-    stripeCanceled: boolean;
-  }> {
-    const sub = await this.prisma.subscription.findUnique({ where: { userId } });
-    let stripeCanceled = false;
-
-    if (sub?.stripeSubscriptionId && this.stripe) {
-      try {
-        await this.stripe.subscriptions.cancel(sub.stripeSubscriptionId);
-        stripeCanceled = true;
-      } catch (error) {
-        this.logger.error(
-          `Immediate Stripe cancel failed for user ${userId}`,
-          error instanceof Error ? error.stack : error
-        );
-      }
-    }
 
     if (sub) {
       await this.prisma.subscription.update({
@@ -240,20 +144,24 @@ export class SubscriptionsService {
       },
     });
 
-    return { hadSubscription: Boolean(sub), stripeCanceled };
+    return { hadSubscription: Boolean(sub) };
   }
 
+  /**
+   * Opens a Paystack payment page for one prepaid period (a month or a year) of a plan.
+   * Paying again before the end extends the period; paying for another plan switches to it
+   * now and credits the unused time (see prepaidPeriod).
+   */
   async checkout(userId: string, dto: CheckoutDto) {
     const user = await this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
     });
     if (!user) throw new NotFoundException({ code: 'NOT_FOUND', message: 'User not found' });
 
-    if (
-      !(await this.prisma.plan.findUnique({
-        where: { name: this.planName(dto.plan) },
-      }))
-    ) {
+    const planRow = await this.prisma.plan.findUnique({
+      where: { name: this.planName(dto.plan) },
+    });
+    if (!planRow) {
       throw new NotFoundException({ code: 'PLAN_NOT_FOUND', message: 'Plan not found' });
     }
 
@@ -269,128 +177,199 @@ export class SubscriptionsService {
       appUrl
     );
 
-    if (isStripeLiveSecret(process.env.STRIPE_SECRET_KEY) && !isStripeLiveAllowed()) {
+    if (isPaystackLiveSecret(process.env.PAYSTACK_SECRET_KEY) && !isPaystackLiveAllowed()) {
       throw new BadRequestException({
-        code: 'STRIPE_LIVE_KEY_BLOCKED',
+        code: 'PAYSTACK_LIVE_KEY_BLOCKED',
         message:
-          'Live Stripe keys are blocked. Use sk_test_ keys, or set STRIPE_ALLOW_LIVE=1 for production go-live.',
+          'Live Paystack keys are blocked. Use sk_test_ keys, or set PAYSTACK_ALLOW_LIVE=1 for production go-live.',
+      });
+    }
+    const paystack = this.paystack.require();
+
+    const currency = paymentCurrency();
+    const amount = planChargeAmount(dto.plan, dto.interval, {
+      monthly: Number(planRow.priceMonthly),
+      yearly: Number(planRow.priceYearly),
+    });
+    if (!amount) {
+      this.logger.error(
+        `No ${currency} price for ${dto.plan}/${dto.interval}: set PAYSTACK_PRICE_${dto.plan.toUpperCase()}_*`
+      );
+      throw new ServiceUnavailableException({
+        code: 'PRICE_NOT_CONFIGURED',
+        message: 'Prices are not configured. Contact support.',
       });
     }
 
-    if (!this.stripe) {
-      throw new BadRequestException({
-        code: 'STRIPE_NOT_CONFIGURED',
-        message: 'Stripe is not configured (fail-closed). Checkout unavailable.',
-      });
-    }
-
-    const priceId = this.requirePriceId(dto.plan, dto.interval);
-
-    // One checkout at a time per user, across every API instance: concurrent clicks or tabs
-    // cannot each open a session (and each get the trial).
-    return this.prisma.$transaction(async (tx) => {
-      await lockUserScope(tx, userId, 'billing:checkout');
-      return this.checkoutLocked(tx, userId, user.email, dto, priceId, successUrl, cancelUrl);
-    }, CHECKOUT_LOCK_TX_OPTIONS);
-  }
-
-  private async checkoutLocked(
-    db: Db,
-    userId: string,
-    email: string,
-    dto: CheckoutDto,
-    priceId: string,
-    successUrl: string,
-    cancelUrl: string
-  ) {
-    const stripe = this.stripe!;
-    const existingSub = await db.subscription.findUnique({ where: { userId } });
-
-    // One Stripe subscription per user: a subscriber changes plan in place instead of
-    // opening a second Checkout (which would bill both subscriptions).
-    const liveSub = await this.findLiveStripeSubscription(existingSub?.stripeSubscriptionId);
-    if (liveSub) {
-      return this.changeStripePlan(db, userId, liveSub, dto, priceId, successUrl);
-    }
-
-    const stripeCustomerId = await this.ensureStripeCustomerId(db, userId, email, existingSub);
-    const grantTrial = await this.isTrialEligible(db, userId, stripeCustomerId);
-    await this.expireOpenCheckoutSessions(stripeCustomerId, userId);
-
-    const sessionParams: Stripe.Checkout.SessionCreateParams = {
-      mode: 'subscription',
-      success_url: withCheckoutSessionId(successUrl),
-      cancel_url: cancelUrl,
-      client_reference_id: userId,
-      customer: stripeCustomerId,
-      metadata: { userId, plan: dto.plan, interval: dto.interval },
-      line_items: [{ price: priceId, quantity: 1 }],
-      payment_method_collection: 'always',
-      subscription_data: {
+    const reference = `sub_${randomUUID().replace(/-/g, '')}`;
+    let session: { authorization_url: string };
+    try {
+      session = await paystack.initializeTransaction({
+        email: user.email,
+        amount,
+        currency,
+        reference,
+        callback_url: successUrl,
         metadata: {
+          type: 'subscription',
           userId,
           plan: dto.plan,
-          ...(grantTrial ? { trial_days: String(TRIAL_PERIOD_DAYS) } : {}),
+          interval: dto.interval,
+          // What was asked, so the payment is checked against it rather than today's price.
+          amount,
+          currency,
+          // Paystack's checkout shows a cancel link to this URL.
+          cancel_action: cancelUrl,
         },
-        ...(grantTrial
-          ? {
-              trial_period_days: TRIAL_PERIOD_DAYS,
-              trial_settings: { end_behavior: { missing_payment_method: 'cancel' as const } },
-            }
-          : {}),
-      },
-    };
-
-    // A fresh key per checkout: it makes the SDK's network retries safe without ever replaying
-    // an older session for a later, different request.
-    const session = await stripe.checkout.sessions.create(sessionParams, {
-      idempotencyKey: `checkout-session:${userId}:${randomUUID()}`,
-    });
-    if (!session.url) {
-      throw new BadRequestException({
-        code: 'CHECKOUT_FAILED',
-        message: 'Stripe did not return a checkout URL',
+      });
+    } catch (error) {
+      this.logger.error(
+        `Paystack checkout failed for user ${userId}`,
+        error instanceof Error ? error.stack : error
+      );
+      throw new ServiceUnavailableException({
+        code: 'PAYMENT_PROVIDER_UNAVAILABLE',
+        message: 'Checkout is temporarily unavailable. Please try again later.',
       });
     }
 
     return {
-      url: session.url,
+      url: session.authorization_url,
+      reference,
       plan: dto.plan,
       interval: dto.interval,
       userId,
-      sessionId: session.id,
+      amount,
+      currency,
     };
+  }
+
+  /**
+   * Grants the period a verified payment bought. Idempotent on the Paystack reference (the
+   * webhook and the success page can both deliver it), and serialized per user so two payments
+   * never extend from the same end date.
+   */
+  async applyPrepaidPayment(
+    payment: PrepaidPayment
+  ): Promise<{ outcome: 'applied' | 'already_applied'; periodEnd: Date | null }> {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        await lockUserScope(tx, payment.userId, 'billing:payment');
+
+        const recorded = await tx.payment.findUnique({
+          where: { transactionId: payment.reference },
+          select: { id: true },
+        });
+        if (recorded) return { outcome: 'already_applied' as const, periodEnd: null };
+
+        const user = await tx.user.findFirst({
+          where: { id: payment.userId },
+          select: { id: true },
+        });
+        if (!user) throw new Error(`Payment ${payment.reference} for unknown user`);
+
+        const existing = await tx.subscription.findUnique({
+          where: { userId: payment.userId },
+          include: { plan: { select: { name: true } } },
+        });
+        const currentPlan = existing?.plan.name.toLowerCase();
+        const current =
+          existing && existing.status === 'active' && isPaidPlan(currentPlan)
+            ? {
+                plan: currentPlan,
+                start: existing.currentPeriodStart,
+                end: existing.currentPeriodEnd,
+              }
+            : null;
+        const monthly = await this.monthlyPrices(tx);
+        const period = prepaidPeriod({
+          now: payment.paidAt,
+          plan: payment.plan,
+          interval: payment.interval,
+          current,
+          monthlyPrice: (plan) => monthly[plan],
+        });
+
+        const subscription = await this.applyPaidEntitlement(
+          {
+            userId: payment.userId,
+            plan: payment.plan,
+            provider: 'paystack',
+            status: 'active',
+            periodStart: period.start,
+            periodEnd: period.end,
+            paystackCustomerCode: payment.customerCode ?? undefined,
+          },
+          tx
+        );
+
+        const amount = payment.amount / 100;
+        await tx.payment.create({
+          data: {
+            subscriptionId: subscription.id,
+            amount,
+            currency: payment.currency.toUpperCase(),
+            status: 'completed',
+            paymentMethod: 'paystack',
+            transactionId: payment.reference,
+            metadata: {
+              plan: payment.plan,
+              interval: payment.interval,
+              channel: payment.channel ?? null,
+              periodEnd: period.end.toISOString(),
+            },
+          },
+        });
+        await tx.invoice.create({
+          data: {
+            subscriptionId: subscription.id,
+            invoiceNumber: `PSK-${payment.reference}`.slice(0, 64),
+            amount,
+            currency: payment.currency.toUpperCase(),
+            status: 'paid',
+            dueDate: payment.paidAt,
+            paidAt: payment.paidAt,
+          },
+        });
+
+        this.logger.log(
+          `Prepaid ${payment.plan}/${payment.interval} applied for user ${payment.userId} ` +
+            `until ${period.end.toISOString()} (ref ${payment.reference})`
+        );
+        return { outcome: 'applied' as const, periodEnd: period.end };
+      }, PAYMENT_LOCK_TX_OPTIONS);
+    } catch (error) {
+      // Applied concurrently by another delivery of the same payment.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        return { outcome: 'already_applied', periodEnd: null };
+      }
+      throw error;
+    }
   }
 
   async applyPaidEntitlement(
     params: {
       userId: string;
       plan: string;
-      provider: 'stripe';
+      provider: 'paystack';
       status?: string;
       periodEnd: Date;
       periodStart: Date;
-      stripeSubscriptionId?: string;
-      stripeCustomerId?: string;
+      paystackCustomerCode?: string;
       cancelAtPeriodEnd?: boolean;
-      /** Stripe's `canceled_at`; only when Stripe has none is the sync time used. */
       canceledAt?: Date | null;
     },
-    db: Db = this.prisma
+    db: Db | PrismaService = this.prisma
   ) {
-    // Stripe status → local status (access rules: see resolveEffectiveTier). `unpaid` (retries
-    // exhausted), `incomplete` (first payment not done) and `paused` grant no access; anything
-    // unknown fails closed instead of defaulting to `active`.
+    // Local statuses only (access rules: see resolveEffectiveTier); anything unknown fails
+    // closed instead of defaulting to `active`.
     const statusMap: Record<string, 'active' | 'canceled' | 'past_due' | 'trialing' | 'suspended'> =
       {
         active: 'active',
         trialing: 'trialing',
         past_due: 'past_due',
         canceled: 'canceled',
-        unpaid: 'suspended',
-        incomplete: 'suspended',
-        paused: 'suspended',
-        incomplete_expired: 'canceled',
+        suspended: 'suspended',
       };
 
     const mappedStatus = statusMap[params.status ?? 'active'] ?? 'suspended';
@@ -409,54 +388,37 @@ export class SubscriptionsService {
             : null;
 
     if (!tier) {
-      throw new Error(
-        `Unknown plan for ${params.provider} sync: ${params.plan}. ` +
-          `Please ensure STRIPE_PRICE_PRO_* and STRIPE_PRICE_BUSINESS_* are configured correctly.`
-      );
+      throw new Error(`Unknown plan for ${params.provider} sync: ${params.plan}.`);
     }
 
     const planName = tier === 'free' ? 'Free' : this.planName(tier);
     const plan = await db.plan.findUnique({ where: { name: planName } });
     if (!plan) {
       throw new Error(
-        `Unknown plan for ${params.provider} sync: ${planName}. Seed the plans table before processing webhooks.`
+        `Unknown plan for ${params.provider} sync: ${planName}. Seed the plans table before processing payments.`
       );
     }
 
-    const providerIds = {
-      ...(params.stripeSubscriptionId !== undefined
-        ? { stripeSubscriptionId: params.stripeSubscriptionId }
-        : {}),
-      ...(params.stripeCustomerId !== undefined
-        ? { stripeCustomerId: params.stripeCustomerId }
+    const fields = {
+      planId: plan.id,
+      status: mappedStatus,
+      provider: params.provider,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: params.periodEnd,
+      lastPaymentError: null,
+      cancelAtPeriodEnd,
+      canceledAt,
+      // A new period gets its own "ends soon" e-mail.
+      renewalReminderSentAt: null,
+      ...(params.paystackCustomerCode !== undefined
+        ? { paystackCustomerCode: params.paystackCustomerCode }
         : {}),
     };
 
     const subscription = await db.subscription.upsert({
       where: { userId: params.userId },
-      create: {
-        userId: params.userId,
-        planId: plan.id,
-        status: mappedStatus,
-        provider: params.provider,
-        currentPeriodStart: periodStart,
-        currentPeriodEnd: params.periodEnd,
-        lastPaymentError: null,
-        cancelAtPeriodEnd,
-        canceledAt,
-        ...providerIds,
-      } as never,
-      update: {
-        planId: plan.id,
-        status: mappedStatus,
-        provider: params.provider,
-        currentPeriodStart: periodStart,
-        currentPeriodEnd: params.periodEnd,
-        lastPaymentError: null,
-        cancelAtPeriodEnd,
-        canceledAt,
-        ...providerIds,
-      } as never,
+      create: { userId: params.userId, ...fields },
+      update: fields,
     });
 
     await db.user.update({
@@ -472,385 +434,19 @@ export class SubscriptionsService {
     return subscription;
   }
 
-  /** @deprecated Prefer applyPaidEntitlement — kept for Stripe call-site compatibility. */
-  async applyStripeSubscription(params: {
-    userId: string;
-    planName: string;
-    stripeSubscriptionId: string;
-    stripeCustomerId?: string;
-    status: string;
-    currentPeriodStart: Date;
-    currentPeriodEnd: Date;
-    cancelAtPeriodEnd?: boolean;
-  }) {
-    return this.applyPaidEntitlement({
-      userId: params.userId,
-      plan: params.planName,
-      provider: 'stripe',
-      status: params.status,
-      periodStart: params.currentPeriodStart,
-      periodEnd: params.currentPeriodEnd,
-      stripeSubscriptionId: params.stripeSubscriptionId,
-      stripeCustomerId: params.stripeCustomerId,
-      cancelAtPeriodEnd: params.cancelAtPeriodEnd,
+  /** Monthly catalog prices (EUR), used to credit unused time when the plan changes. */
+  private async monthlyPrices(db: Db): Promise<Record<PaidPlan, number>> {
+    const rows = await db.plan.findMany({
+      where: { name: { in: ['Pro', 'Business'] } },
+      select: { name: true, priceMonthly: true },
     });
-  }
-
-  /** The user's Stripe subscription if it still bills; `null` if there is none or it ended. */
-  private async findLiveStripeSubscription(
-    stripeSubscriptionId?: string | null
-  ): Promise<Stripe.Subscription | null> {
-    if (!stripeSubscriptionId || !this.stripe) return null;
-    let sub: Stripe.Subscription | undefined;
-    try {
-      sub = await this.stripe.subscriptions.retrieve(stripeSubscriptionId);
-    } catch (error) {
-      if ((error as { code?: string } | null)?.code === 'resource_missing') return null;
-      this.logger.error(
-        `Could not load Stripe subscription ${stripeSubscriptionId}`,
-        error instanceof Error ? error.stack : error
+    const price = (name: string) =>
+      Number(
+        rows.find((r) => r.name === name)?.priceMonthly ??
+          CATALOG_FALLBACK_ROWS.find((r) => r.name === name)?.priceMonthly ??
+          0
       );
-      // Fail closed: without knowing the current subscription we could bill twice.
-      throw new ServiceUnavailableException({
-        code: 'STRIPE_UNAVAILABLE',
-        message: 'Could not verify your current subscription. Please try again later.',
-      });
-    }
-    return sub && LIVE_STRIPE_STATUSES.has(sub.status) ? sub : null;
-  }
-
-  /**
-   * Switch an existing Stripe subscription to another price. Upgrades are invoiced now and
-   * only applied once paid (`pending_if_incomplete`); downgrades credit the difference on the
-   * next invoice. Re-selecting the current plan resumes a scheduled cancellation.
-   */
-  private async changeStripePlan(
-    db: Db,
-    userId: string,
-    current: Stripe.Subscription,
-    dto: CheckoutDto,
-    priceId: string,
-    successUrl: string
-  ) {
-    if (current.status !== 'active' && current.status !== 'trialing') {
-      throw new ConflictException({
-        code: 'SUBSCRIPTION_PAYMENT_ISSUE',
-        message:
-          'Your current subscription has an unpaid invoice. Update your payment method before changing plan.',
-      });
-    }
-
-    const stripe = this.stripe!;
-    const item = current.items?.data?.[0];
-    if (!item) {
-      throw new ServiceUnavailableException({
-        code: 'STRIPE_SUBSCRIPTION_INVALID',
-        message: 'Your current subscription could not be updated. Contact support.',
-      });
-    }
-    const result = {
-      plan: dto.plan,
-      interval: dto.interval,
-      userId,
-      subscriptionId: current.id,
-    };
-
-    if (item.price?.id === priceId) {
-      if (!current.cancel_at_period_end) {
-        throw new ConflictException({
-          code: 'ALREADY_SUBSCRIBED',
-          message: 'You are already subscribed to this plan.',
-        });
-      }
-      const resumed = await stripe.subscriptions.update(current.id, {
-        cancel_at_period_end: false,
-      });
-      await this.syncStripeSubscription(db, userId, dto.plan, resumed);
-      return { ...result, url: successUrl, mode: 'resumed' };
-    }
-
-    const from = this.planFromPriceId(item.price?.id);
-    const upgrade = !from || isUpgrade(from, { plan: dto.plan, interval: dto.interval });
-    const trialing = current.status === 'trialing';
-    // A trialing subscription keeps its current trial end: a plan change never starts a new trial.
-    const updated = await stripe.subscriptions.update(
-      current.id,
-      {
-        items: [{ id: item.id, price: priceId }],
-        proration_behavior: trialing ? 'none' : upgrade ? 'always_invoice' : 'create_prorations',
-        ...(upgrade && !trialing ? { payment_behavior: 'pending_if_incomplete' as const } : {}),
-        expand: ['latest_invoice'],
-      },
-      { idempotencyKey: `subscription-change:${current.id}:${randomUUID()}` }
-    );
-
-    if (updated.pending_update) {
-      // Payment needs the customer (3-D Secure, declined card): Stripe keeps the old plan
-      // until the invoice is paid, then sends customer.subscription.updated.
-      const invoice =
-        updated.latest_invoice && typeof updated.latest_invoice === 'object'
-          ? updated.latest_invoice
-          : null;
-      return {
-        ...result,
-        url: invoice?.hosted_invoice_url ?? successUrl,
-        mode: 'payment_required',
-      };
-    }
-
-    // Changing plan means staying: keep metadata in line and drop a scheduled cancellation.
-    const final = await stripe.subscriptions.update(current.id, {
-      metadata: { ...updated.metadata, plan: dto.plan },
-      ...(updated.cancel_at_period_end ? { cancel_at_period_end: false } : {}),
-    });
-    await this.syncStripeSubscription(db, userId, dto.plan, final);
-    return { ...result, url: successUrl, mode: 'updated' };
-  }
-
-  private async syncStripeSubscription(
-    db: Db,
-    userId: string,
-    plan: PaidPlan,
-    sub: Stripe.Subscription
-  ) {
-    const period = subscriptionPeriod(sub);
-    await this.applyPaidEntitlement(
-      {
-        userId,
-        plan,
-        provider: 'stripe',
-        status: sub.status,
-        periodStart: period.start,
-        periodEnd: period.end,
-        stripeSubscriptionId: sub.id,
-        stripeCustomerId: expandableStripeId(sub.customer),
-        cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end),
-        canceledAt: stripeDate(sub.canceled_at),
-      },
-      db
-    );
-  }
-
-  /**
-   * Whether this Checkout may carry the 14-day trial. `users.trial_used` is the record; for
-   * accounts that predate it, Stripe's own history of this customer is checked too. Runs under
-   * the user's checkout lock, so two requests cannot both see the trial as available.
-   */
-  private async isTrialEligible(
-    db: Db,
-    userId: string,
-    stripeCustomerId: string
-  ): Promise<boolean> {
-    const user = await db.user.findFirst({
-      where: { id: userId },
-      select: { trialUsed: true },
-    });
-    if (!user || user.trialUsed) return false;
-
-    const past = await this.stripe!.subscriptions.list({
-      customer: stripeCustomerId,
-      status: 'all',
-      limit: 100,
-    });
-    const earlierTrial = past.data.find((sub) => sub.trial_start);
-    if (earlierTrial) {
-      await this.recordTrial(userId, earlierTrial, db);
-      return false;
-    }
-    return true;
-  }
-
-  /** Marks the account's one trial as used by `sub`. `false` if it was already used. */
-  private async recordTrial(
-    userId: string,
-    sub: Stripe.Subscription,
-    db: Db = this.prisma
-  ): Promise<boolean> {
-    const { count } = await db.user.updateMany({
-      where: { id: userId, trialUsed: false },
-      data: {
-        trialUsed: true,
-        trialStartedAt: stripeDate(sub.trial_start),
-        trialEndsAt: stripeDate(sub.trial_end),
-        trialStripeSubscriptionId: sub.id,
-      },
-    });
-    return count === 1;
-  }
-
-  /**
-   * Called for every subscription Stripe reports for this user, before it is synced. Records the
-   * trial the subscription consumes; a trial the account is no longer entitled to (an older
-   * Checkout session, legacy data) is ended at once, so Stripe bills the subscription now.
-   */
-  async enforceSingleTrial(userId: string, sub: Stripe.Subscription): Promise<Stripe.Subscription> {
-    if (!sub.trial_start) return sub;
-    if (await this.recordTrial(userId, sub)) return sub;
-    if (sub.status !== 'trialing') return sub;
-
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId },
-      select: { trialStripeSubscriptionId: true },
-    });
-    if (user?.trialStripeSubscriptionId === sub.id) return sub;
-
-    if (!this.stripe) {
-      throw new Error(`Stripe is not configured: cannot end second trial on ${sub.id}`);
-    }
-    this.logger.warn(
-      `Ending trial of Stripe subscription ${sub.id}: user ${userId} already used the trial`
-    );
-    return this.stripe.subscriptions.update(
-      sub.id,
-      { trial_end: 'now', proration_behavior: 'none' },
-      { idempotencyKey: `trial-end:${sub.id}` }
-    );
-  }
-
-  private planFromPriceId(
-    priceId?: string | null
-  ): { plan: PaidPlan; interval: BillingInterval } | null {
-    if (!priceId) return null;
-    for (const plan of ['pro', 'business'] as const) {
-      for (const interval of ['month', 'year'] as const) {
-        if (this.resolvePriceId(plan, interval) === priceId) return { plan, interval };
-      }
-    }
-    return null;
-  }
-
-  /** Two open Checkout tabs could each create a subscription: keep only the newest one. */
-  private async expireOpenCheckoutSessions(customerId: string, userId: string): Promise<void> {
-    try {
-      const open = await this.stripe!.checkout.sessions.list({
-        customer: customerId,
-        status: 'open',
-        limit: 100,
-      });
-      await Promise.all(
-        open.data
-          .filter((session) => session.mode === 'subscription')
-          .map((session) => this.stripe!.checkout.sessions.expire(session.id))
-      );
-    } catch (error) {
-      this.logger.error(
-        `Could not expire open Checkout sessions for user ${userId}`,
-        error instanceof Error ? error.stack : error
-      );
-      // A session left open could still start a second subscription (and trial): fail closed.
-      throw new ServiceUnavailableException({
-        code: 'STRIPE_UNAVAILABLE',
-        message: 'Checkout is temporarily unavailable. Please try again later.',
-      });
-    }
-  }
-
-  private requirePriceId(plan: string, interval: string): string {
-    const priceId = this.resolvePriceId(plan, interval);
-    if (!priceId) {
-      this.logger.error(
-        `Missing STRIPE_PRICE_${plan.toUpperCase()}_* for interval=${interval}. Failing checkout.`
-      );
-      throw new ServiceUnavailableException({
-        code: 'STRIPE_PRICE_NOT_CONFIGURED',
-        message: 'Stripe prices not configured. Contact support.',
-      });
-    }
-    return priceId;
-  }
-
-  private resolvePriceId(plan: string, interval: string): string | undefined {
-    const suffixes = interval === 'year' ? ['YEARLY', 'ANNUAL'] : ['MONTHLY'];
-    for (const suffix of suffixes) {
-      const raw = process.env[`STRIPE_PRICE_${plan.toUpperCase()}_${suffix}`];
-      if (isNonPlaceholderSecret(raw)) return raw;
-    }
-    return undefined;
-  }
-
-  /**
-   * Reuse the persisted Stripe customer, recover it from an existing Stripe subscription or
-   * from a customer tagged with this userId, or create one. Never pass customer_email (that
-   * mints duplicates).
-   */
-  private async ensureStripeCustomerId(
-    db: Db,
-    userId: string,
-    email: string,
-    existing: { stripeCustomerId?: string | null; stripeSubscriptionId?: string | null } | null
-  ): Promise<string> {
-    const stripe = this.stripe!;
-    if (existing?.stripeCustomerId) {
-      return existing.stripeCustomerId;
-    }
-
-    if (existing?.stripeSubscriptionId) {
-      try {
-        const stripeSub = await stripe.subscriptions.retrieve(existing.stripeSubscriptionId);
-        const fromSub = expandableStripeId(stripeSub.customer);
-        if (fromSub) {
-          await this.persistStripeCustomerId(db, userId, fromSub, existing);
-          return fromSub;
-        }
-      } catch (error) {
-        this.logger.warn(
-          `Could not recover Stripe customer from subscription ${existing.stripeSubscriptionId}`,
-          error instanceof Error ? error.stack : error
-        );
-      }
-    }
-
-    // Only a customer tagged with this userId is ours. A matching email alone proves nothing
-    // (customer created by hand, by another app, or for a previous owner of the address).
-    const listed = await stripe.customers.list({ email, limit: 100 });
-    const owned = listed.data.find((c) => c.metadata?.userId === userId);
-    if (owned) {
-      await this.persistStripeCustomerId(db, userId, owned.id, existing);
-      return owned.id;
-    }
-
-    // One customer per user, even if the call is retried after a network error.
-    const customer = await stripe.customers.create(
-      { email, metadata: { userId } },
-      { idempotencyKey: `customer-create:${userId}` }
-    );
-    await this.persistStripeCustomerId(db, userId, customer.id, existing);
-    return customer.id;
-  }
-
-  private async persistStripeCustomerId(
-    db: Db,
-    userId: string,
-    stripeCustomerId: string,
-    existing: { stripeCustomerId?: string | null } | null
-  ): Promise<void> {
-    if (existing) {
-      await db.subscription.update({
-        where: { userId },
-        data: { stripeCustomerId },
-      });
-      return;
-    }
-
-    const freePlan = await db.plan.findUnique({ where: { name: 'Free' } });
-    if (!freePlan) {
-      throw new NotFoundException({ code: 'PLAN_NOT_FOUND', message: 'Plan not found' });
-    }
-
-    const now = new Date();
-    const end = new Date(now);
-    end.setFullYear(end.getFullYear() + 100);
-
-    await db.subscription.create({
-      data: {
-        userId,
-        planId: freePlan.id,
-        status: 'active',
-        currentPeriodStart: now,
-        currentPeriodEnd: end,
-        stripeCustomerId,
-      },
-    });
+    return { pro: price('Pro'), business: price('Business') };
   }
 
   private planName(plan: string) {

@@ -114,7 +114,7 @@ export default function CookiePolicyPage() {
         <p>
           Cette liste reprend les cookies et stockages du navigateur que le code de CV Studio AI
           utilise. Elle ne couvre pas les cookies déposés par des services tiers sur leurs propres
-          pages (par exemple la page de paiement Stripe).
+          pages (par exemple la page de paiement Paystack).
         </p>
       }
     >
@@ -144,8 +144,8 @@ export default function CookiePolicyPage() {
             la politique de Google.
           </li>
           <li>
-            Paiement : la saisie de la carte a lieu sur les pages de Stripe, qui appliquent leur
-            propre politique cookies.
+            Paiement : la saisie de la carte ou du numéro Mobile Money a lieu sur les pages de
+            Paystack, qui appliquent leur propre politique cookies.
           </li>
           <li>
             Sentry (détection des erreurs) ne dépose pas de cookie ; il reçoit des informations

@@ -155,7 +155,7 @@ export async function checkout(
     data: { plan, interval },
   });
   expect(res.ok(), `checkout failed: ${res.status()} ${await res.text()}`).toBeTruthy();
-  return unwrap<{ url: string; mode?: string; sessionId?: string }>(res);
+  return unwrap<{ url: string; reference: string; amount: number; currency: string }>(res);
 }
 
 export async function cancelSubscription(request: APIRequestContext, token: string) {

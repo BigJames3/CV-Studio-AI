@@ -2,18 +2,7 @@ name: E2E Tests
 
 on:
   workflow_call:
-    inputs:
-      stripe:
-        description: 'Run Stripe hosted-checkout tests (needs secrets)'
-        type: boolean
-        required: false
-        default: false
   workflow_dispatch:
-    inputs:
-      stripe:
-        description: 'Run Stripe hosted-checkout tests (needs secrets)'
-        type: boolean
-        default: false
 
 concurrency:
   group: e2e-${{ github.workflow }}-${{ github.ref }}
@@ -64,13 +53,10 @@ jobs:
       E2E_API_URL: http://localhost:3001/api/v1
       PLAYWRIGHT_BASE_URL: http://localhost:3000
       AUTH_RATE_LIMIT_DISABLED: 'true'
-      STRIPE_FAIL_CLOSED: '1'
-      STRIPE_SECRET_KEY: ${{ inputs.stripe && secrets.E2E_STRIPE_SECRET_KEY || 'sk_test_xxx' }}
-      STRIPE_WEBHOOK_SECRET: ${{ inputs.stripe && secrets.E2E_STRIPE_WEBHOOK_SECRET || 'whsec_xxx' }}
-      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ inputs.stripe && secrets.E2E_STRIPE_PUBLISHABLE_KEY || 'pk_test_xxx' }}
-      STRIPE_PRICE_PRO_MONTHLY: ${{ inputs.stripe && secrets.E2E_STRIPE_PRICE_PRO_MONTHLY || '' }}
-      STRIPE_PRICE_BUSINESS_MONTHLY: ${{ inputs.stripe && secrets.E2E_STRIPE_PRICE_BUSINESS_MONTHLY || '' }}
-      E2E_STRIPE: ${{ inputs.stripe && '1' || '' }}
+      # Placeholder key: Paystack stays unconfigured, so checkout fails closed (503), as the specs expect.
+      PAYMENT_FAIL_CLOSED: '1'
+      PAYMENT_CURRENCY: XOF
+      PAYSTACK_SECRET_KEY: sk_test_xxx
       SMTP_HOST: localhost
       SMTP_PORT: '1025'
       MAIL_FROM: CV Studio AI <noreply@cvstudio.local>
@@ -118,8 +104,9 @@ jobs:
             echo "APP_URL=${APP_URL}"
             echo "AUTH_RATE_LIMIT_DISABLED=true"
             echo "THROTTLE_DISABLED=true"
-            echo "STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}"
-            echo "STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}"
+            echo "PAYMENT_FAIL_CLOSED=${PAYMENT_FAIL_CLOSED}"
+            echo "PAYMENT_CURRENCY=${PAYMENT_CURRENCY}"
+            echo "PAYSTACK_SECRET_KEY=${PAYSTACK_SECRET_KEY}"
             echo "SMTP_HOST=${SMTP_HOST}"
             echo "SMTP_PORT=${SMTP_PORT}"
             echo "MAIL_FROM=${MAIL_FROM}"
@@ -127,7 +114,6 @@ jobs:
           {
             echo "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}"
             echo "NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}"
-            echo "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}"
             echo "PLAYWRIGHT_BASE_URL=${PLAYWRIGHT_BASE_URL}"
             echo "E2E_API_URL=${E2E_API_URL}"
           } > apps/web/.env.local

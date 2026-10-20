@@ -64,13 +64,13 @@ The schema is `apps/api/prisma/schema.prisma` (the single source of truth; `docs
 
 ## API architecture (apps/api)
 
-- `src/main.ts`: global prefix `/api`, URI versioning (default `v1`, so routes are `/api/v1/...`), strict `ValidationPipe` (`whitelist` + `forbidNonWhitelisted`), 1.5 MB body limit, `rawBody: true` (needed for the Stripe webhook signature check), Swagger gated by `shouldEnableSwagger()`, and `assertAuthSecrets()` fails boot on weak or missing secrets.
+- `src/main.ts`: global prefix `/api`, URI versioning (default `v1`, so routes are `/api/v1/...`), strict `ValidationPipe` (`whitelist` + `forbidNonWhitelisted`), 1.5 MB body limit, `rawBody: true` (needed for the Paystack webhook signature check), Swagger gated by `shouldEnableSwagger()`, and `assertAuthSecrets()` fails boot on weak or missing secrets.
 - **Response envelope**: `TransformInterceptor` wraps every response as `{ success, data, meta: { timestamp, version, requestId } }` unless the handler already returns an object with `success`, a `StreamableFile` or a `Buffer`. `GlobalExceptionFilter` shapes errors.
 - **Auth is global**: `JwtAuthGuard` and `ThrottlerGuard` are registered as `APP_GUARD` in `app.module.ts`. Public endpoints must opt out with `@Public()` from `src/common/decorators`.
 - Feature modules live in `src/modules/*` (auth, users, cvs, templates, subscriptions, plans, payments, invoices, ai, analytics, marketplace, health). Cross-cutting code (guards, filters, interceptors, middleware, feature gating) is in `src/common`. Infrastructure lives in `src/database` (Prisma), `src/redis`, `src/cache`, `src/mail`, `src/queue` and `src/observability` (Sentry, PostHog).
 - **Two entrypoints from one codebase**: `main.ts` is the HTTP API. `worker.ts` (`WORKER_KIND=pdf node dist/worker.js`) is a PDF worker that keeps a warm Chromium pool (`PdfBrowserPool` in `modules/cvs/export`). In local dev, PDF jobs are processed inline by the API. `ScheduleModule` (cron) is disabled when `WORKER_KIND` is set or `NODE_ENV=test`.
 - Env loading: `.env.test` (only when `NODE_ENV=test`), then `.env.local`, then `.env`. Copy `apps/api/.env.example` and `apps/web/.env.example` to start.
-- Payments: Stripe only (CinetPay was removed). Webhook handling is fail-closed (see `docs/STRIPE-WEBHOOK-FAIL-CLOSED.md`, `docs/PAYMENT_GATEWAY_SETUP.md`). Maintenance scripts: `webhook:retry-dlq`, and `pnpm stripe:check` (read-only check of keys, prices, webhooks and customer portal).
+- Payments: Paystack only (Stripe and CinetPay were removed; `stripe_*` columns are kept as history). No recurring billing: Pro/Business are prepaid one-time periods with a renewal reminder e-mail; marketplace sales are split to seller subaccounts. Webhook handling is fail-closed (see `docs/STRIPE-WEBHOOK-FAIL-CLOSED.md`, `docs/PAYMENT_GATEWAY_SETUP.md`). Maintenance scripts: `webhook:retry-dlq`, and `pnpm paystack:check` (read-only check of the key, API access and prices).
 
 ## Web architecture (apps/web)
 

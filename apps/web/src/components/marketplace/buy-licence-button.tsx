@@ -48,6 +48,8 @@ export function BuyLicenceButton({ listingId }: { listingId: string }) {
         setError('Vous possédez déjà ce modèle.');
       } else if (err instanceof ApiError && err.code === 'OWN_LISTING') {
         setError('Vous ne pouvez pas acheter votre propre modèle.');
+      } else if (err instanceof ApiError && err.code === 'LISTING_CURRENCY_UNSUPPORTED') {
+        setError('Ce modèle n’est pas encore disponible à l’achat dans votre devise.');
       } else {
         setError(err instanceof Error ? err.message : 'Paiement indisponible pour le moment.');
       }

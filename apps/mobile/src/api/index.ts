@@ -48,14 +48,40 @@ export const templatesApi = {
   list: () => apiClient<{ items: TemplateDto[] }>('/templates'),
 };
 
+export type PlanTier = 'free' | 'pro' | 'business';
+export type BillingInterval = 'month' | 'year';
+
+export type BillingPlanDto = {
+  id: PlanTier;
+  name: string;
+  priceMonthly: number;
+  priceAnnual: number | null;
+  currency: string;
+};
+
 export const billingApi = {
-  me: () => apiClient<{ plan: string; status: string }>('/subscriptions/me'),
-  paymentSheet: () =>
+  me: () =>
     apiClient<{
-      paymentIntentClientSecret: string;
-      ephemeralKey: string;
-      customerId: string;
-    }>('/payments/payment-sheet', { method: 'POST' }),
+      tier: PlanTier;
+      subscription: {
+        status: string;
+        provider?: string | null;
+        currentPeriodEnd: string;
+      } | null;
+    }>('/subscriptions/me'),
+  plans: () => apiClient<BillingPlanDto[]>('/plans', { auth: false }),
+  /** Paystack payment page for one prepaid period. Paystack then returns to the web app. */
+  checkout: (plan: 'pro' | 'business', interval: BillingInterval) =>
+    apiClient<{ url: string; reference: string }>('/subscriptions/checkout', {
+      method: 'POST',
+      body: { plan, interval },
+    }),
+  /** Verifies the payment with Paystack and applies it (idempotent, the webhook does it too). */
+  confirmCheckout: (reference: string) =>
+    apiClient<{ confirmed: boolean }>('/payments/checkout/confirm', {
+      method: 'POST',
+      body: { reference },
+    }),
 };
 
 export const devicesApi = {

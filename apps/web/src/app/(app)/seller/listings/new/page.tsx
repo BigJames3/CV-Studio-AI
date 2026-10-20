@@ -3,17 +3,32 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { marketplaceApi } from '@/lib/api';
+import { formatListingPrice } from '@/lib/marketplace/types';
+
+/** Listing price bounds per currency, in major units (the API enforces the same ones). */
+const PRICE_BOUNDS: Record<string, { min: number; max: number; step: number; initial: number }> = {
+  XOF: { min: 500, max: 50_000, step: 100, initial: 5_000 },
+  EUR: { min: 4.99, max: 49.99, step: 0.5, initial: 12.99 },
+  USD: { min: 4.99, max: 49.99, step: 0.5, initial: 12.99 },
+};
 
 export default function NewListingPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [templates, setTemplates] = useState<Array<{ id: string; name: string }>>([]);
+  // New listings are priced in the payment currency, which the payouts endpoint reports.
+  const [currency, setCurrency] = useState('XOF');
+  const bounds = PRICE_BOUNDS[currency] ?? PRICE_BOUNDS.XOF;
 
   useEffect(() => {
     void marketplaceApi.listMyTemplates().then((res) => {
       setTemplates(res.items.map((t) => ({ id: t.id, name: t.name })));
     });
+    void marketplaceApi
+      .listPayouts()
+      .then((res) => setCurrency(res.currency.toUpperCase()))
+      .catch(() => undefined);
   }, []);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -22,7 +37,7 @@ export default function NewListingPage() {
     setPending(true);
     const form = new FormData(e.currentTarget);
     const title = String(form.get('title') ?? '').trim();
-    const price = Number(form.get('price') ?? 12.99);
+    const price = Number(form.get('price') ?? bounds.initial);
     const description = String(form.get('description') ?? '').trim();
     const templateId = String(form.get('templateId') ?? '');
     const slug =
@@ -51,7 +66,8 @@ export default function NewListingPage() {
     <div className="mx-auto max-w-lg px-4 py-8">
       <h1 className="text-2xl font-semibold">Upload template</h1>
       <p className="mt-2 text-sm text-content-secondary">
-        Price $4.99–$49.99 · submit for quality review (≤72h).
+        Price {formatListingPrice(bounds.min * 100, currency)}–
+        {formatListingPrice(bounds.max * 100, currency)} · submit for quality review (≤72h).
       </p>
       <form className="mt-6 space-y-4" onSubmit={onSubmit} data-testid="seller-new-listing-form">
         <label className="block text-sm font-medium">
@@ -80,15 +96,17 @@ export default function NewListingPage() {
           />
         </label>
         <label className="block text-sm font-medium">
-          Price (USD)
+          Price ({currency})
           <input
+            // Remount when the currency arrives so the default matches its bounds.
+            key={currency}
             className="mt-1 w-full rounded-lg border px-3 py-2"
             name="price"
             type="number"
-            min={4.99}
-            max={49.99}
-            step={0.5}
-            defaultValue={12.99}
+            min={bounds.min}
+            max={bounds.max}
+            step={bounds.step}
+            defaultValue={bounds.initial}
             required
           />
         </label>

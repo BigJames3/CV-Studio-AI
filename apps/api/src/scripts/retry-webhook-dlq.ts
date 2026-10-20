@@ -1,5 +1,5 @@
 /**
- * CLI: retry Stripe webhook DLQ messages.
+ * CLI: retry payment webhook DLQ messages.
  * Usage: pnpm --filter @cvstudio/api webhook:retry-dlq
  */
 import { NestFactory } from '@nestjs/core';

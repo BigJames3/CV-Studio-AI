@@ -6,7 +6,6 @@ import { DashboardPage } from '../pages/dashboard.page';
 import { EditorPage } from '../pages/editor.page';
 import { PricingPage } from '../pages/pricing.page';
 import { BillingPage } from '../pages/billing.page';
-import { StripeCheckoutPage } from '../pages/checkout.page';
 import { waitForDashboard } from '../utils/wait-helpers';
 
 type Pages = {
@@ -16,7 +15,6 @@ type Pages = {
   editorPage: EditorPage;
   pricingPage: PricingPage;
   billingPage: BillingPage;
-  stripeCheckoutPage: StripeCheckoutPage;
 };
 
 type AuthFixtures = Pages & {
@@ -30,7 +28,6 @@ export const test = base.extend<AuthFixtures>({
   editorPage: async ({ page }, use) => use(new EditorPage(page)),
   pricingPage: async ({ page }, use) => use(new PricingPage(page)),
   billingPage: async ({ page }, use) => use(new BillingPage(page)),
-  stripeCheckoutPage: async ({ page }, use) => use(new StripeCheckoutPage(page)),
 
   testUser: async ({ request }, use) => {
     const user = await apiRegister(request);

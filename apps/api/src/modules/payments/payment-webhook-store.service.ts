@@ -4,9 +4,9 @@ import { PrismaService } from '../../database/prisma.module';
 import { RedisService } from '../../redis/redis.module';
 
 const REDIS_PROCESSED_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
-/** Covers Stripe retrieve + 3 retries with backoff; expires so a crashed pod cannot block Stripe retries. */
+/** Covers the Paystack verify call + 3 retries with backoff; expires so a crashed pod cannot block Paystack retries. */
 export const WEBHOOK_LOCK_TTL_SECONDS = 60;
-const REDIS_PREFIX = 'stripe:webhook:';
+const REDIS_PREFIX = 'payment:webhook:';
 
 export type DlqMessage = {
   eventId: string;
@@ -18,8 +18,8 @@ export type DlqMessage = {
 };
 
 @Injectable()
-export class StripeWebhookStoreService {
-  private readonly logger = new Logger(StripeWebhookStoreService.name);
+export class PaymentWebhookStoreService {
+  private readonly logger = new Logger(PaymentWebhookStoreService.name);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -46,7 +46,7 @@ export class StripeWebhookStoreService {
     const cached = await this.redis.get(`${REDIS_PREFIX}processed:${eventId}`);
     if (cached === '1') return true;
 
-    const row = await this.prisma.stripeWebhookEvent.findUnique({
+    const row = await this.prisma.paymentWebhookEvent.findUnique({
       where: { id: eventId },
       select: { status: true },
     });
@@ -55,7 +55,7 @@ export class StripeWebhookStoreService {
 
   async markProcessing(eventId: string, type: string, payload: unknown): Promise<boolean> {
     try {
-      await this.prisma.stripeWebhookEvent.create({
+      await this.prisma.paymentWebhookEvent.create({
         data: {
           id: eventId,
           type,
@@ -67,7 +67,7 @@ export class StripeWebhookStoreService {
       return true;
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        const existing = await this.prisma.stripeWebhookEvent.findUnique({
+        const existing = await this.prisma.paymentWebhookEvent.findUnique({
           where: { id: eventId },
         });
         if (existing?.status === 'processed') return false;
@@ -81,7 +81,7 @@ export class StripeWebhookStoreService {
   }
 
   async markProcessed(eventId: string): Promise<void> {
-    await this.prisma.stripeWebhookEvent.update({
+    await this.prisma.paymentWebhookEvent.update({
       where: { id: eventId },
       data: {
         status: 'processed',
@@ -93,7 +93,7 @@ export class StripeWebhookStoreService {
   }
 
   async incrementAttempts(eventId: string, errorMessage: string): Promise<number> {
-    const updated = await this.prisma.stripeWebhookEvent.update({
+    const updated = await this.prisma.paymentWebhookEvent.update({
       where: { id: eventId },
       data: {
         attempts: { increment: 1 },
@@ -104,7 +104,7 @@ export class StripeWebhookStoreService {
   }
 
   async pushDlq(message: DlqMessage): Promise<void> {
-    await this.prisma.stripeWebhookEvent.upsert({
+    await this.prisma.paymentWebhookEvent.upsert({
       where: { id: message.eventId },
       create: {
         id: message.eventId,
@@ -140,7 +140,7 @@ export class StripeWebhookStoreService {
       createdAt: Date;
     }>
   > {
-    return this.prisma.stripeWebhookEvent.findMany({
+    return this.prisma.paymentWebhookEvent.findMany({
       where: { status: 'dlq' },
       orderBy: { createdAt: 'asc' },
       take: limit,
@@ -156,7 +156,7 @@ export class StripeWebhookStoreService {
   }
 
   async reclaimFromDlq(eventId: string): Promise<void> {
-    await this.prisma.stripeWebhookEvent.update({
+    await this.prisma.paymentWebhookEvent.update({
       where: { id: eventId },
       data: { status: 'processing' },
     });

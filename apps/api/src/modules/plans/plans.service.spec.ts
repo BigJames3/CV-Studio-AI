@@ -5,7 +5,6 @@ import {
   mapPlanToPublicDto,
   PLAN_CACHE_KEY,
   PlansService,
-  TRIAL_PERIOD_DAYS,
   UNSHIPPED_FEATURES,
 } from './plans.service';
 import { TEMPLATE_SEEDS } from '../templates/template-seeds';
@@ -50,6 +49,34 @@ const BUSINESS = {
 };
 
 describe('mapPlanToPublicDto', () => {
+  const env = { ...process.env };
+  beforeEach(() => {
+    delete process.env.PAYMENT_CURRENCY;
+    delete process.env.PAYSTACK_PRICE_PRO_MONTHLY;
+    delete process.env.PAYSTACK_PRICE_PRO_YEARLY;
+  });
+  afterAll(() => {
+    process.env = env;
+  });
+
+  it('shows EUR catalog prices as is when payments are taken in EUR', () => {
+    process.env.PAYMENT_CURRENCY = 'EUR';
+    expect(mapPlanToPublicDto(PRO)).toMatchObject({ currency: 'EUR', priceMonthly: 9.99 });
+  });
+
+  it('shows configured prices, and EUR when a currency has none', () => {
+    process.env.PAYSTACK_PRICE_PRO_MONTHLY = '5000';
+    process.env.PAYSTACK_PRICE_PRO_YEARLY = '50000';
+    expect(mapPlanToPublicDto(PRO)).toMatchObject({
+      currency: 'XOF',
+      priceMonthly: 5000,
+      priceAnnual: 50000,
+    });
+    delete process.env.PAYSTACK_PRICE_PRO_MONTHLY;
+    process.env.PAYMENT_CURRENCY = 'GHS';
+    expect(mapPlanToPublicDto(PRO)).toMatchObject({ currency: 'EUR', priceMonthly: 9.99 });
+  });
+
   it('maps Free with display name Gratuit and no annual price or trial', () => {
     const dto = mapPlanToPublicDto(FREE);
     expect(dto).toMatchObject({
@@ -60,14 +87,13 @@ describe('mapPlanToPublicDto', () => {
       priceAnnual: null,
       trialDays: null,
       recommended: false,
-      currency: 'EUR',
+      currency: 'XOF',
     });
     expect(dto.entitlements.find((e) => e.feature === 'cvLimit')).toEqual({
       feature: 'cvLimit',
       value: '1',
       included: true,
     });
-    expect(dto.currency).toBe('EUR');
     expect(dto.entitlements.find((e) => e.feature === 'downloadPdf')?.included).toBe(false);
     expect(dto.entitlements.find((e) => e.feature === 'share')?.included).toBe(false);
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(false);
@@ -88,20 +114,18 @@ describe('mapPlanToPublicDto', () => {
     expect(FREE_TEMPLATE_COUNT).toBe(10);
   });
 
-  it('maps Pro with annual savings inputs and 14-day trial', () => {
+  it('maps Pro in the charged currency (XOF at the fixed EUR parity), without trial', () => {
     const dto = mapPlanToPublicDto(PRO);
     expect(dto).toMatchObject({
       id: 'pro',
       name: 'Pro',
       position: 1,
-      priceMonthly: 9.99,
-      priceAnnual: 99,
-      trialDays: TRIAL_PERIOD_DAYS,
+      priceMonthly: 6600,
+      priceAnnual: 65000,
+      trialDays: null,
       recommended: true,
-      currency: 'EUR',
+      currency: 'XOF',
     });
-    expect(dto.currency).toBe('EUR');
-    expect(dto.currency).toBe('EUR');
     expect(dto.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('5');
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'templates')?.value).toBe('unlimited');
@@ -110,8 +134,8 @@ describe('mapPlanToPublicDto', () => {
   it('maps Business with the Pro features and 20 CVs', () => {
     const dto = mapPlanToPublicDto(BUSINESS);
     expect(dto.id).toBe('business');
-    expect(dto.priceMonthly).toBe(29.99);
-    expect(dto.priceAnnual).toBe(299);
+    expect(dto.priceMonthly).toBe(19700);
+    expect(dto.priceAnnual).toBe(196200);
     expect(dto.entitlements.find((e) => e.feature === 'aiFeatures')?.included).toBe(true);
     expect(dto.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('20');
   });
@@ -214,8 +238,8 @@ describe('PlansService.findAll', () => {
     prisma.plan.findMany.mockResolvedValue([]);
     const plans = await service.findAll();
     expect(plans.map((p) => p.id)).toEqual(['free', 'pro', 'business']);
-    expect(plans[1]?.priceMonthly).toBe(9.99);
-    expect(plans[1]?.priceAnnual).toBe(99);
+    expect(plans[1]?.priceMonthly).toBe(6600);
+    expect(plans[1]?.priceAnnual).toBe(65000);
     expect(plans[1]?.recommended).toBe(true);
     expect(plans[0]?.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('1');
     expect(plans[1]?.entitlements.find((e) => e.feature === 'cvLimit')?.value).toBe('5');

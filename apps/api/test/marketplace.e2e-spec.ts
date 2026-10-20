@@ -4,10 +4,12 @@ import { createTestApp } from './create-test-app';
 import { STRONG_PASSWORD } from './auth-helpers';
 import { PrismaService } from '../src/database/prisma.module';
 import { MarketplaceService } from '../src/modules/marketplace/marketplace.service';
+import type { PaystackTransaction } from '../src/modules/payments/paystack.client';
+import { installFakePaystack } from './paystack-fake';
 
 /**
  * Marketplace phase 1 against the real Postgres (constraints, advisory locks, relation
- * filters). Stripe is faked: no network, no real payment, refund or transfer.
+ * filters). Paystack is faked: no network, no real payment, refund or settlement.
  */
 describe('Marketplace (e2e, real database)', () => {
   jest.setTimeout(90_000);
@@ -27,44 +29,19 @@ describe('Marketplace (e2e, real database)', () => {
   let templateId: string;
   let listingId: string;
 
-  const intents = new Map<string, Record<string, unknown>>();
-  const transfers: Array<{ id: string; transfer_group: string; amount: number }> = [];
-  const fakeStripe = {
-    checkout: {
-      sessions: {
-        create: jest.fn(async () => ({ id: 'cs_e2e', url: 'https://checkout.stripe.test/cs_e2e' })),
-      },
-    },
-    paymentIntents: {
-      retrieve: jest.fn(async (id: string) => {
-        const intent = intents.get(id);
-        if (!intent) throw new Error('No such payment_intent');
-        return intent;
-      }),
-    },
-    transfers: {
-      create: jest.fn(
-        async (
-          params: { amount: number; transfer_group: string },
-          opts: { idempotencyKey: string }
-        ) => {
-          // Stripe idempotency: the same key returns the first transfer.
-          await new Promise((resolve) => setTimeout(resolve, 20));
-          const existing = transfers.find((t) => t.id === `tr_${opts.idempotencyKey}`);
-          if (existing) return existing;
-          const transfer = {
-            id: `tr_${opts.idempotencyKey}`,
-            transfer_group: params.transfer_group,
-            amount: params.amount,
-          };
-          transfers.push(transfer);
-          return transfer;
-        }
-      ),
-      list: jest.fn(async ({ transfer_group }: { transfer_group: string }) => ({
-        data: transfers.filter((t) => t.transfer_group === transfer_group),
-      })),
-    },
+  /** 5 000 F CFA, in subunits. */
+  const PRICE = 500_000;
+  const fakePaystack = {
+    initializeTransaction: jest.fn(async (_params: Record<string, unknown>) => ({
+      authorization_url: 'https://checkout.paystack.test/e2e',
+      access_code: 'e2e',
+      reference: 'ignored',
+    })),
+    listBanks: jest.fn(async () => [
+      { name: 'MTN Mobile Money', code: 'MTN', type: 'mobile_money', active: true },
+    ]),
+    createSubaccount: jest.fn(async () => ({ subaccount_code: 'ACCT_e2e' })),
+    updateSubaccount: jest.fn(async () => ({ subaccount_code: 'ACCT_e2e' })),
   };
 
   const http = () => request(app.getHttpServer());
@@ -83,28 +60,36 @@ describe('Marketplace (e2e, real database)', () => {
     return { id, token: res.body.data.accessToken as string };
   }
 
-  function paidIntent(id: string, buyerId: string) {
-    intents.set(id, {
-      id,
-      status: 'succeeded',
-      amount: 1299,
-      amount_received: 1299,
-      currency: 'usd',
+  /** A successful Paystack transaction, as /transaction/verify returns it. */
+  function paidTx(
+    reference: string,
+    buyerId: string,
+    split?: { subaccount: string; sellerShareCents: number }
+  ): PaystackTransaction {
+    return {
+      id: Date.now(),
+      status: 'success',
+      reference,
+      amount: PRICE,
+      currency: 'XOF',
+      fees: 17_500,
+      subaccount: split ? { subaccount_code: split.subaccount } : {},
       metadata: {
         type: 'marketplace',
         listingId,
         buyerId,
-        priceCents: '1299',
-        currency: 'usd',
+        priceCents: PRICE,
+        currency: 'XOF',
+        sellerShareCents: split?.sellerShareCents ?? null,
       },
-    });
+    };
   }
 
   beforeAll(async () => {
     app = await createTestApp();
     prisma = app.get(PrismaService);
     marketplace = app.get(MarketplaceService);
-    (marketplace as unknown as { stripe: unknown }).stripe = fakeStripe;
+    installFakePaystack(app, fakePaystack);
 
     moderator = await register();
     seller = await register();
@@ -118,11 +103,11 @@ describe('Marketplace (e2e, real database)', () => {
         userId: seller.id,
         displayName: 'E2E Seller',
         slug: `e2e-seller-${Date.now()}`,
-        country: 'FR',
+        country: 'CI',
+        // Active with no payout account yet: sales are platform-held until it is set up.
         status: 'active',
         tier: 'trusted',
-        stripeAccountId: `acct_e2e_${Date.now()}`,
-        payoutsEnabled: true,
+        payoutsEnabled: false,
         tosAcceptedAt: new Date(),
       },
     });
@@ -165,10 +150,14 @@ describe('Marketplace (e2e, real database)', () => {
       const listing = await http()
         .post('/api/v1/marketplace/seller/listings')
         .set('Authorization', `Bearer ${seller.token}`)
-        .send({ templateId, title: 'E2E listing', slug: `e2e-${Date.now()}`, priceCents: 1299 })
+        .send({ templateId, title: 'E2E listing', slug: `e2e-${Date.now()}`, priceCents: PRICE })
         .expect(201);
       listingId = listing.body.data.id;
-      expect(listing.body.data).toMatchObject({ status: 'submitted', isPublished: false });
+      expect(listing.body.data).toMatchObject({
+        status: 'submitted',
+        isPublished: false,
+        currency: 'XOF',
+      });
 
       // Not in the catalogue yet.
       await http().get(`/api/v1/marketplace/templates/${listingId}`).expect(404);
@@ -249,28 +238,47 @@ describe('Marketplace (e2e, real database)', () => {
       expect(res.body.error.code).toBe('OWN_LISTING');
     });
 
+    it('the checkout opens a Paystack page bound to the buyer and the charged price', async () => {
+      const res = await http()
+        .post(`/api/v1/marketplace/templates/${listingId}/checkout`)
+        .set('Authorization', `Bearer ${free.token}`)
+        .send({})
+        .expect(201);
+      expect(res.body.data.url).toBe('https://checkout.paystack.test/e2e');
+      expect(fakePaystack.initializeTransaction).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          amount: PRICE,
+          currency: 'XOF',
+          reference: res.body.data.reference,
+          metadata: expect.objectContaining({
+            listingId,
+            buyerId: free.id,
+            sellerShareCents: null,
+          }),
+        })
+      );
+      // No payout account yet: no split.
+      expect(fakePaystack.initializeTransaction.mock.calls.at(-1)?.[0]).not.toHaveProperty(
+        'subaccount'
+      );
+    });
+
     it('a webhook replayed and a confirmation at once grant one licence and one ledger set', async () => {
-      paidIntent('pi_e2e_free_1', free.id);
-      const session = {
-        id: 'cs_e2e_1',
-        payment_status: 'paid',
-        payment_intent: 'pi_e2e_free_1',
-        client_reference_id: free.id,
-        metadata: { type: 'marketplace', listingId, buyerId: free.id },
-      } as never;
+      const tx = paidTx('mkt_e2e_free_1', free.id);
 
       const results = await Promise.all([
-        marketplace.fulfillCheckoutSession(session),
-        marketplace.fulfillCheckoutSession(session),
-        marketplace.fulfillCheckoutSession(session),
+        marketplace.fulfillTransaction(tx),
+        marketplace.fulfillTransaction(tx),
+        marketplace.fulfillTransaction(tx),
       ]);
 
-      expect(results.filter((r) => r?.outcome === 'fulfilled')).toHaveLength(1);
-      expect(results.every((r) => r?.outcome !== 'duplicate_payment')).toBe(true);
+      expect(results.filter((r) => r.outcome === 'fulfilled')).toHaveLength(1);
+      expect(results.every((r) => r.outcome !== 'duplicate_payment')).toBe(true);
       const purchases = await prisma.marketplacePurchase.findMany({
         where: { listingId, buyerId: free.id },
       });
       expect(purchases).toHaveLength(1);
+      expect(purchases[0]).toMatchObject({ paystackReference: 'mkt_e2e_free_1', currency: 'XOF' });
       const ledger = await prisma.marketplaceLedgerEntry.count({
         where: { purchaseId: purchases[0].id },
       });
@@ -287,13 +295,7 @@ describe('Marketplace (e2e, real database)', () => {
     });
 
     it('a second payment for the same licence grants nothing and is reported', async () => {
-      paidIntent('pi_e2e_free_2', free.id);
-      const result = await marketplace.fulfillCheckoutSession({
-        id: 'cs_e2e_2',
-        payment_status: 'paid',
-        payment_intent: 'pi_e2e_free_2',
-        metadata: { type: 'marketplace', listingId, buyerId: free.id },
-      } as never);
+      const result = await marketplace.fulfillTransaction(paidTx('mkt_e2e_free_2', free.id));
       expect(result).toEqual({ outcome: 'duplicate_payment', purchase: null });
       expect(
         await prisma.marketplacePurchase.count({ where: { listingId, buyerId: free.id } })
@@ -336,82 +338,64 @@ describe('Marketplace (e2e, real database)', () => {
     });
   });
 
-  describe('Lot E: payouts', () => {
-    it('three pods running the payout at once send one transfer', async () => {
-      // A Pro buyer's sale, platform-held and past the hold window.
-      paidIntent('pi_e2e_pro', pro.id);
-      await marketplace.fulfillCheckoutSession({
-        id: 'cs_e2e_pro',
-        payment_status: 'paid',
-        payment_intent: 'pi_e2e_pro',
-        metadata: { type: 'marketplace', listingId, buyerId: pro.id },
-      } as never);
-      const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      await prisma.marketplaceLedgerEntry.updateMany({
-        where: { sellerId: seller.id },
-        data: { createdAt: old },
-      });
-      // Two sales stay under the $25 minimum: add earnings from earlier sales.
-      await prisma.marketplaceLedgerEntry.create({
-        data: {
-          sellerId: seller.id,
-          entryType: 'seller_earning',
-          amountCents: 2000,
-          createdAt: old,
-        },
+  describe('Lot E: payouts (Paystack subaccount)', () => {
+    it('the seller registers a payout account and later sales are split', async () => {
+      const res = await http()
+        .post('/api/v1/marketplace/seller/payout-account')
+        .set('Authorization', `Bearer ${seller.token}`)
+        .send({ bankCode: 'MTN', accountNumber: '0701020304' })
+        .expect(201);
+      expect(res.body.data).toEqual({
+        status: 'active',
+        payoutsEnabled: true,
+        payoutAccount: { bankName: 'MTN Mobile Money', last4: '0304' },
       });
 
-      const runs = await Promise.all([
-        marketplace.processWeeklyPayouts(),
-        marketplace.processWeeklyPayouts(),
-        marketplace.processWeeklyPayouts(),
-      ]);
+      const checkout = await http()
+        .post(`/api/v1/marketplace/templates/${listingId}/checkout`)
+        .set('Authorization', `Bearer ${pro.token}`)
+        .send({})
+        .expect(201);
+      const params = fakePaystack.initializeTransaction.mock.calls.at(-1)?.[0] as {
+        subaccount: string;
+        transaction_charge: number;
+        metadata: { sellerShareCents: number };
+      };
+      expect(params).toMatchObject({ subaccount: 'ACCT_e2e', bearer: 'account' });
+      expect(params.transaction_charge + params.metadata.sellerShareCents).toBe(PRICE);
 
-      expect(runs.reduce((n, r) => n + r.paidCount, 0)).toBe(1);
-      expect(fakeStripe.transfers.create).toHaveBeenCalledTimes(1);
-      const payouts = await prisma.sellerPayout.findMany({ where: { sellerProfileId } });
-      expect(payouts).toHaveLength(1);
-      expect(payouts[0]).toMatchObject({ status: 'paid' });
-
-      // Nothing left to pay on the next run.
-      await marketplace.processWeeklyPayouts();
-      expect(fakeStripe.transfers.create).toHaveBeenCalledTimes(1);
+      await marketplace.fulfillTransaction(
+        paidTx(checkout.body.data.reference, pro.id, {
+          subaccount: 'ACCT_e2e',
+          sellerShareCents: params.metadata.sellerShareCents,
+        })
+      );
+      const purchase = await prisma.marketplacePurchase.findFirstOrThrow({
+        where: { listingId, buyerId: pro.id },
+        include: { ledger: true },
+      });
+      // Paystack already settled the seller's share: it is booked as paid out.
+      expect(purchase.ledger.find((l) => l.entryType === 'payout')?.amountCents).toBe(
+        params.metadata.sellerShareCents
+      );
     });
 
-    it('an abandoned pending payout is found on Stripe and not sent again', async () => {
-      const payout = await prisma.sellerPayout.create({
-        data: {
-          sellerProfileId,
-          amountCents: 3000,
-          status: 'pending',
-          periodStart: new Date(),
-          periodEnd: new Date(),
-          createdAt: new Date(Date.now() - 60 * 60 * 1000),
-        },
-      });
-      transfers.push({ id: 'tr_crashed', transfer_group: `payout_${payout.id}`, amount: 3000 });
-      const before = fakeStripe.transfers.create.mock.calls.length;
-
-      await marketplace.processWeeklyPayouts();
-
-      expect(fakeStripe.transfers.create.mock.calls.length).toBe(before);
-      const row = await prisma.sellerPayout.findUnique({ where: { id: payout.id } });
-      expect(row).toMatchObject({ status: 'paid', stripeTransferId: 'tr_crashed' });
+    it('a seller cannot register an operator Paystack does not offer', async () => {
+      const res = await http()
+        .post('/api/v1/marketplace/seller/payout-account')
+        .set('Authorization', `Bearer ${seller.token}`)
+        .send({ bankCode: 'NOPE', accountNumber: '0701020304' })
+        .expect(400);
+      expect(res.body.error.code).toBe('PAYOUT_BANK_UNKNOWN');
     });
   });
 
   describe('Lot D: refunds', () => {
     it('a full refund revokes the licence once and records the clawback', async () => {
-      const refund = {
-        id: 'ch_e2e',
-        payment_intent: 'pi_e2e_free_1',
-        amount: 1299,
-        amount_refunded: 1299,
-        refunded: true,
-      } as never;
+      const refund = { id: 1, transaction_reference: 'mkt_e2e_free_1', amount: PRICE };
 
-      await expect(marketplace.onChargeRefunded(refund)).resolves.toEqual({ outcome: 'revoked' });
-      await expect(marketplace.onChargeRefunded(refund)).resolves.toEqual({
+      await expect(marketplace.onRefundProcessed(refund)).resolves.toEqual({ outcome: 'revoked' });
+      await expect(marketplace.onRefundProcessed(refund)).resolves.toEqual({
         outcome: 'already_revoked',
       });
 

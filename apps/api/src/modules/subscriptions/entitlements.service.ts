@@ -7,7 +7,7 @@ import { AuditLogService } from '../../common/services/audit-log.service';
 import { resolveEffectiveTier, TIER_SOURCE_SELECT } from './effective-tier';
 
 /**
- * Server-side feature gates. Loads the effective tier from DB (JWT can be stale after Stripe
+ * Server-side feature gates. Loads the effective tier from DB (JWT can be stale after payment
  * webhooks, and expired or canceled subscriptions fall back to free), then delegates the
  * matrix to FeatureGateService.
  */

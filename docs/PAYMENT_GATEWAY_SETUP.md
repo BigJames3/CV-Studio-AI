@@ -1,24 +1,32 @@
 # Payment gateway setup
 
-Stripe is the only payment provider (cards, auto-renew). CinetPay (Mobile Money) was removed on 2026-09-27, together with its routes, its gateway and the geo-based payment suggestion. The unused `cinetpay_transaction_id` column is dropped by the following release (expand/contract).
+Paystack is the only payment provider (Côte d'Ivoire account, XOF: cards and Mobile Money Orange, MTN, Wave). Stripe was removed on 2026-10-20 because Côte d'Ivoire is not eligible; its columns (`stripe_*`) stay in the database as history. CinetPay was removed on 2026-09-27.
+
+Paystack offers no recurring billing in Côte d'Ivoire, so Pro and Business are **prepaid periods** (1 month or 12 months) bought as one-time transactions:
+
+- nothing renews by itself: access ends at the end of the period (the daily expiry job sets the account back to Free);
+- an e-mail reminder goes out 7 days before the end (`RenewalReminderJob`, 08:00 UTC);
+- buying the same plan again while it is active adds the period after the current end; switching plan starts now and credits the unused time at the ratio of the monthly prices;
+- no trial, no customer portal; `DELETE /subscriptions/me/cancel` only records that the user does not want to renew.
 
 ## Environment
 
 Copy from `apps/api/.env.example`. **Never commit real keys.** Do not put secrets in `apps/api/.env` in git.
 
-### Stripe
+### Paystack
 
-| Variable                                    | Role                                                                                                                                              |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `STRIPE_SECRET_KEY`                         | Server SDK. Placeholder `sk_test_xxx` = unconfigured                                                                                              |
-| `STRIPE_WEBHOOK_SECRET`                     | `POST /api/v1/payments/webhook` signature                                                                                                         |
-| `STRIPE_CONNECT_WEBHOOK_SECRET`             | Optional. Secret of the second endpoint ("events on connected accounts": `account.updated` for marketplace sellers).                              |
-| `STRIPE_PRICE_PRO_MONTHLY` / `_YEARLY`      | Price IDs                                                                                                                                         |
-| `STRIPE_PRICE_BUSINESS_MONTHLY` / `_YEARLY` | Price IDs                                                                                                                                         |
-| `STRIPE_FAIL_CLOSED`                        | Default on. Missing keys → checkout 400 / webhook 503 (no `dev_bypass`, no soft-ack). `0` disables the flag only; checkout still requires Stripe. |
-| `STRIPE_ALLOW_LIVE`                         | Staging must omit. Production go-live only (`1`) to allow `sk_live_` / `rk_live_`.                                                                |
+| Variable                                           | Role                                                                                                           |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `PAYSTACK_SECRET_KEY`                              | Server API key, also the webhook signing key (HMAC-SHA512). Placeholder `sk_test_xxx` = unconfigured           |
+| `PAYMENT_CURRENCY`                                 | Charge currency, default `XOF`. Prices and marketplace listings are in this currency                           |
+| `PAYMENT_FAIL_CLOSED`                              | Default on. Missing key → checkout 503 `PAYMENTS_NOT_CONFIGURED`, webhook 503. `0` disables the flag only      |
+| `PAYSTACK_ALLOW_LIVE`                              | Staging must omit. Production go-live only (`1`) to allow `sk_live_`                                           |
+| `PAYSTACK_PRICE_<PRO\|BUSINESS>_<MONTHLY\|YEARLY>` | Optional, in major units (F CFA). Default: EUR catalog (`plans` table) × 655.957, rounded up to the next 100 F |
+| `PAYSTACK_API_URL`                                 | Optional, defaults to `https://api.paystack.co` (tests only)                                                   |
 
-Web: `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`.
+Default XOF prices: Pro 6 600 F / month or 65 000 F / year, Business 19 700 F / month or 196 200 F / year.
+
+The web and mobile apps need no Paystack key: the API returns the hosted payment page URL.
 
 ### Logging / Sentry
 
@@ -31,45 +39,38 @@ Web: `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`.
 
 See [docs/pre-launch/OBSERVABILITY_SETUP.md](./pre-launch/OBSERVABILITY_SETUP.md).
 
+## Paystack dashboard
+
+1. Settings → API Keys & Webhooks: copy the test secret key (`sk_test_…`) into `PAYSTACK_SECRET_KEY`.
+2. Same page, **Test Webhook URL** (and later Live Webhook URL): `https://<API host>/api/v1/payments/webhook`. Paystack sends every event there; the API handles `charge.success`, `refund.processed` and `charge.dispute.*` and ignores the rest.
+3. Settings → Preferences: enable the payment channels (card, Mobile Money).
+4. For go-live: complete the business review (Paystack needs the public website URL), then set the live key and `PAYSTACK_ALLOW_LIVE=1` in production only.
+
 ## Check the configuration
 
 ```bash
-pnpm stripe:check
+pnpm paystack:check
 ```
 
-Read-only. It loads `apps/api/.env.local` then `apps/api/.env` (the process environment wins), then checks:
-
-- the keys: a test key, or a live key allowed by `STRIPE_ALLOW_LIVE`, plus `whsec_` webhook secrets;
-- that the Stripe account is reachable;
-- the 4 prices: they exist, are active, recurring, in EUR, with the right interval, and with the amounts the app displays; a trial set on a price is flagged, because the app adds the trial itself;
-- the webhook endpoints ending in `/api/v1/payments/webhook` and their events;
-- that the customer portal is activated.
-
-It exits with code 1 on any error.
+Read-only. It loads `apps/api/.env.local` then `apps/api/.env` (the process environment wins), then checks the key (test, or live allowed by `PAYSTACK_ALLOW_LIVE`), that the Paystack API answers, and the 4 prices in the charge currency. Paystack has no API to read the webhook URL, so it prints the URL and events to set as a reminder. It exits with code 1 on any error.
 
 ## Fail-closed
 
-- Missing Stripe keys → checkout 400 `STRIPE_NOT_CONFIGURED`, webhook 503 (see `docs/STRIPE-WEBHOOK-FAIL-CLOSED.md`).
-- `POST /api/v1/payments/webhook` is the only payment webhook; it requires a valid `stripe-signature`.
+- Missing Paystack key → checkout 503 `PAYMENTS_NOT_CONFIGURED`, webhook 503 (see `docs/STRIPE-WEBHOOK-FAIL-CLOSED.md`).
+- `POST /api/v1/payments/webhook` is the only payment webhook; it requires a valid `x-paystack-signature`.
+- Every `charge.success` is re-verified with `GET /transaction/verify/:reference`, and its amount and currency are compared with what the API asked for before anything is granted.
 
-## Local webhook (Stripe CLI)
+## Local webhook
 
-```bash
-stripe listen --forward-to localhost:3001/api/v1/payments/webhook
-# Copy the printed whsec_… into STRIPE_WEBHOOK_SECRET in apps/api/.env
-```
+Paystack must reach the API over HTTPS: expose `localhost:3001` with a tunnel (for example `cloudflared tunnel --url http://localhost:3001`) and set the Test Webhook URL to `<tunnel>/api/v1/payments/webhook`. Without a tunnel the return confirmation below still grants the plan.
 
-If the Stripe CLI is logged in to another account than `STRIPE_SECRET_KEY`, it forwards nothing (no `POST /api/v1/payments/webhook` in the API log). Pass the key explicitly: `stripe listen --api-key sk_test_… --forward-to …`.
+## Confirmation on return from Paystack
 
-## Confirmation on return from Checkout
+Paystack redirects to the `callback_url` with `?reference=…` (`/account/billing?checkout=success`, or `/marketplace/<id>?checkout=success`). The page then calls `POST /api/v1/payments/checkout/confirm` with that reference. The API verifies the transaction with Paystack, checks that it belongs to the signed-in user and is `success`, and runs the same fulfillment as the webhook. The redirect alone grants nothing. Both paths are idempotent (one `payments.transaction_id` per reference).
 
-Checkout redirects to `/account/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`. The billing page then calls `POST /api/v1/payments/checkout/confirm` with that id. The API reads the session from Stripe, checks that it belongs to the signed-in user and is `complete`, and runs the same fulfillment as `checkout.session.completed` (plan, then the first invoice if paid). The redirect alone grants nothing, and the webhook stays the source for renewals, failures, plan changes and cancellations. Both paths are idempotent.
+## Marketplace payouts
 
-## Customer portal
-
-"Gérer mon paiement et mes factures" on the billing page calls `POST /api/v1/subscriptions/me/portal`, which opens a Stripe Customer Portal session (update the card, pay an unpaid invoice, download invoices) and returns to `/account/billing`.
-
-Activate the portal once per mode (test and live): Dashboard → Settings → Billing → Customer portal. Until then the API answers 503 `BILLING_PORTAL_UNAVAILABLE`.
+Sellers register a bank or Mobile Money account (`GET /marketplace/seller/payout-banks`, `POST /marketplace/seller/payout-account`), which creates a Paystack **subaccount**. Each sale is then split by Paystack: the seller's share goes to the subaccount, and the platform keeps the commission (`transaction_charge`, fees borne by the platform). A seller without a subaccount cannot publish paid listings.
 
 ## Tests
 
@@ -79,14 +80,13 @@ pnpm --filter @cvstudio/api test:e2e
 pnpm --filter @cvstudio/web test:e2e
 ```
 
-Stripe hosted checkout remains opt-in (`E2E_STRIPE=1`).
+API e2e tests replace the Paystack client with a fake (`apps/api/test/paystack-fake.ts`) and sign webhooks with its secret.
 
 ## Monitoring
 
-- Health: `GET /api/v1/health` → `observability.payments.stripe`.
 - Sentry: new issue + error spike (see observability setup).
 - Grafana notes: `infrastructure/k8s/monitoring/grafana-notes.yaml` (API golden signals — no fictional DataDog dashboard in this repo).
-- Watch: failed invoices, webhook failures and latency (Stripe dashboard + Sentry).
+- Watch: webhook failures and latency (Paystack dashboard → Webhooks logs + Sentry), `PAY-01` / `MKT-*` security alerts (amount mismatch, duplicate payment, partial refund, dispute).
 
 ## Rollback
 
@@ -94,7 +94,7 @@ See [runbooks/production-rollback.md](./runbooks/production-rollback.md).
 
 | Severity                | Action                                                                                   |
 | ----------------------- | ---------------------------------------------------------------------------------------- |
-| Webhook failures        | Check `STRIPE_WEBHOOK_SECRET` and the Stripe dashboard; replay with `webhook:retry-dlq`. |
+| Webhook failures        | Check `PAYSTACK_SECRET_KEY` and the Paystack dashboard; replay with `webhook:retry-dlq`. |
 | Critical (wrong grants) | Rollback the API image; restore DB only if the release migrated. Notify affected users.  |
 
 Never delete payment records.

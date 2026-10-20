@@ -36,20 +36,20 @@ Une feature du PRD absente du code est `NOT_IMPLEMENTED`. Une route qui renvoie 
 
 Domaines secondaires (pas d'agent permanent) :
 
-| Domaine                            | Propriétaire                           | Secondaires                                              |
-| ---------------------------------- | -------------------------------------- | -------------------------------------------------------- |
-| PDF export                         | Backend                                | Security, QA                                             |
-| Marketplace HTTP / listings        | Backend                                | Billing (argent), Frontend (UI), Security                |
-| Stripe Connect, transfers, payouts | Billing                                | Backend, Security, QA                                    |
-| Analytics                          | Backend (persistance) + Frontend (SDK) | Architect pour le choix d'outil                          |
-| Prisma / migrations                | Backend                                | Architect (approbation), Billing si modèles d'abonnement |
-| Mobile                             | Frontend                               | Backend pour le contrat API                              |
-| `docs/architecture`, `docs/adr`    | Architect                              | Tous en lecture                                          |
-| `docs/security`                    | Security                               | Architect                                                |
-| `docs/ai`                          | AI                                     | Architect                                                |
-| `docs/webhooks`                    | Billing                                | Backend                                                  |
-| `docs/e2e`                         | QA                                     | Tous                                                     |
-| `docs/agents`                      | Architect                              | Tous en lecture                                          |
+| Domaine                         | Propriétaire                           | Secondaires                                              |
+| ------------------------------- | -------------------------------------- | -------------------------------------------------------- |
+| PDF export                      | Backend                                | Security, QA                                             |
+| Marketplace HTTP / listings     | Backend                                | Billing (argent), Frontend (UI), Security                |
+| Sous-comptes Paystack, payouts  | Billing                                | Backend, Security, QA                                    |
+| Analytics                       | Backend (persistance) + Frontend (SDK) | Architect pour le choix d'outil                          |
+| Prisma / migrations             | Backend                                | Architect (approbation), Billing si modèles d'abonnement |
+| Mobile                          | Frontend                               | Backend pour le contrat API                              |
+| `docs/architecture`, `docs/adr` | Architect                              | Tous en lecture                                          |
+| `docs/security`                 | Security                               | Architect                                                |
+| `docs/ai`                       | AI                                     | Architect                                                |
+| `docs/webhooks`                 | Billing                                | Backend                                                  |
+| `docs/e2e`                      | QA                                     | Tous                                                     |
+| `docs/agents`                   | Architect                              | Tous en lecture                                          |
 
 ## Règle anti-conflit
 

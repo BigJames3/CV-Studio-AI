@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { marketplaceApi } from '@/lib/api';
+import { formatListingPrice } from '@/lib/marketplace/types';
 
 type SalesResponse = Awaited<ReturnType<typeof marketplaceApi.sales>>;
 
@@ -30,14 +31,17 @@ export default function SellerHomePage() {
     };
   }, []);
 
+  // Listings are priced in the payment currency (XOF by default).
+  const salesCurrency = sales?.listings[0]?.currency ?? 'XOF';
+
   return (
     <div className="mx-auto max-w-content px-4 py-8">
       <h1 className="text-3xl font-semibold">Seller hub</h1>
       <p className="mt-2 text-sm text-content-secondary">
-        Keep 70% after processing fees · weekly payouts via Stripe Connect · quality review before
-        publish. Complete{' '}
+        Keep 70% after processing fees · paid out automatically by Paystack to your bank or mobile
+        money account · quality review before publish. Add your{' '}
         <Link href="/seller/payouts" className="text-primary">
-          payouts verification
+          payout account
         </Link>{' '}
         before listing.
       </p>
@@ -69,8 +73,8 @@ export default function SellerHomePage() {
         {sales ? (
           <>
             <p className="mt-2 text-sm text-content-secondary">
-              Revenue ${(sales.revenueCents / 100).toFixed(2)} · Your share $
-              {(sales.sellerShareCents / 100).toFixed(2)}
+              Revenue {formatListingPrice(sales.revenueCents, salesCurrency)} · Your share{' '}
+              {formatListingPrice(sales.sellerShareCents, salesCurrency)}
             </p>
             <table className="mt-4 w-full text-left text-sm">
               <thead>
@@ -89,7 +93,7 @@ export default function SellerHomePage() {
                       <td className="py-2">{t.title}</td>
                       <td>{t.status}</td>
                       <td>{t.purchases.length}</td>
-                      <td>${(revenue / 100).toFixed(2)}</td>
+                      <td>{formatListingPrice(revenue, t.currency)}</td>
                     </tr>
                   );
                 })}

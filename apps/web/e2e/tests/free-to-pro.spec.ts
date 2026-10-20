@@ -4,11 +4,11 @@ import { apiAuthHeaders } from '../utils/api';
 import { expectSubscriptionTier } from '../utils/assertions';
 
 /**
- * Without Stripe, checkout is fail-closed: no plan is ever granted without a
- * verified payment (see docs/PAYMENT_GATEWAY_SETUP.md). The paid upgrade path
- * itself is covered by stripe-checkout.spec.ts (E2E_STRIPE=1).
+ * Without Paystack keys, checkout is fail-closed: no plan is ever granted without a
+ * verified payment (see docs/PAYMENT_GATEWAY_SETUP.md). The paid path needs a real
+ * Paystack account and is not run here.
  */
-test.describe('Free → Pro upgrade (Stripe not configured)', () => {
+test.describe('Free → Pro upgrade (payments not configured)', () => {
   test('billing CTA shows an error and keeps the user on Free @payment @upgrade', async ({
     page,
     request,
@@ -36,9 +36,9 @@ test.describe('Free → Pro upgrade (Stripe not configured)', () => {
         headers: await apiAuthHeaders(testUser.accessToken),
         data: { plan: 'pro', interval: 'month' },
       });
-      expect(res.status()).toBe(400);
+      expect(res.status()).toBe(503);
       const body = (await res.json()) as { error?: { code?: string } };
-      expect(body.error?.code).toBe('STRIPE_NOT_CONFIGURED');
+      expect(body.error?.code).toBe('PAYMENTS_NOT_CONFIGURED');
     }
     await expectSubscriptionTier(request, testUser.accessToken, 'free');
   });

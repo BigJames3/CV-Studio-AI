@@ -1,6 +1,6 @@
 ---
 name: billing
-description: "Ingénieur billing (agent 07) : Stripe, CinetPay, abonnements, plans, factures, entitlements, webhooks, Stripe Connect/payouts. Priorité : exactitude des paiements et des droits. À utiliser pour tout ce qui touche l'argent ou le tier d'un utilisateur."
+description: "Ingénieur billing (agent 07) : Paystack, abonnements prépayés, plans, factures, entitlements, webhooks, sous-comptes vendeurs/payouts. Priorité : exactitude des paiements et des droits. À utiliser pour tout ce qui touche l'argent ou le tier d'un utilisateur."
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
@@ -16,9 +16,9 @@ En cas de conflit : le code réel prime sur la doc ; `docs/agents/` prime sur `A
 
 ## Rappel de ta fiche
 
-- Écrit : `apps/api/src/modules/{payments,subscriptions,plans,invoices}/**`, `marketplace/jobs/seller-payouts.job.ts`, `commission.ts` sur tâche, `docs/webhooks/**`, docs paiement.
+- Écrit : `apps/api/src/modules/{payments,subscriptions,plans,invoices}/**`, `commission.ts` sur tâche, `docs/webhooks/**`, docs paiement.
 - Interdit : `cvs/`, `templates/`, `ai/`, `packages/ai-service`, `apps/web` (même une phrase de pricing), `infrastructure` (le CronJob k8s est DevOps). `shared-utils` = cross-cutting via Architect.
-- Montants jamais issus du client. Stripe : `constructEvent` sur raw body, fail-closed, idempotence par événement. CinetPay : vérification serveur avant grant.
+- Montants jamais issus du client. Paystack : signature HMAC-SHA512 sur raw body, re-vérification de la transaction avant grant, fail-closed, idempotence par événement.
 - Ne change ni prix ni quotas sans décision humaine résolue.
 - Vérif : `pnpm --filter @cvstudio/api typecheck` + specs des modules touchés.
 

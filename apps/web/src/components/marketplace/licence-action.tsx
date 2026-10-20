@@ -8,17 +8,17 @@ import { BuyLicenceButton } from '@/components/marketplace/buy-licence-button';
 import { UseLicenceButton } from '@/components/marketplace/use-licence-button';
 
 /**
- * Buy or use, from the licence the API reports. Back from Stripe, the session id is sent to
- * /payments/checkout/confirm, which reads the payment from Stripe: the redirect proves nothing.
+ * Buy or use, from the licence the API reports. Back from Paystack, the reference is sent to
+ * /payments/checkout/confirm, which reads the payment from Paystack: the redirect proves nothing.
  */
 export function LicenceAction({
   listingId,
   title,
-  checkoutSessionId,
+  checkoutReference,
 }: {
   listingId: string;
   title: string;
-  checkoutSessionId: string | null;
+  checkoutReference: string | null;
 }) {
   const { data: user, isLoading: userLoading } = useMe();
   const qc = useQueryClient();
@@ -30,19 +30,19 @@ export function LicenceAction({
     enabled: Boolean(user),
     // Until the payment is applied, poll briefly after the redirect.
     refetchInterval: (query) =>
-      checkoutSessionId && query.state.data?.status === 'none' ? 3_000 : false,
+      checkoutReference && query.state.data?.status === 'none' ? 3_000 : false,
   });
 
   useEffect(() => {
-    if (!user || !checkoutSessionId || confirmed.current) return;
+    if (!user || !checkoutReference || confirmed.current) return;
     confirmed.current = true;
     paymentsApi
-      .confirmCheckout(checkoutSessionId)
+      .confirmCheckout(checkoutReference)
       .catch(() => undefined) // the webhook applies it anyway
       .finally(
         () => void qc.invalidateQueries({ queryKey: queryKeys.marketplaceLicence(listingId) })
       );
-  }, [user, checkoutSessionId, listingId, qc]);
+  }, [user, checkoutReference, listingId, qc]);
 
   if (!user || userLoading) return <BuyLicenceButton listingId={listingId} />;
 
@@ -64,7 +64,7 @@ export function LicenceAction({
       </p>
     );
   }
-  if (checkoutSessionId && status === 'none') {
+  if (checkoutReference && status === 'none') {
     return (
       <p className="mt-4 text-sm" role="status" data-testid="marketplace-licence-pending">
         Paiement en cours de confirmation…

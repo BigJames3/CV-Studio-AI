@@ -10,14 +10,12 @@ export function CheckoutResultScreen({ route, navigation }: Props) {
   const ok = route.params.status === 'success';
   return (
     <View style={styles.root}>
-      <Text style={styles.title}>{ok ? 'You are Pro' : 'Checkout cancelled'}</Text>
+      <Text style={styles.title}>{ok ? 'Paiement confirmé' : 'Paiement annulé'}</Text>
       <Text style={styles.body}>
-        {ok
-          ? 'Entitlements refresh via GET /subscriptions/me after webhook.'
-          : 'No charge was made.'}
+        {ok ? 'Votre formule est active.' : 'Aucun débit n’a été effectué.'}
       </Text>
       <Pressable style={styles.cta} onPress={() => navigation.navigate('MainTabs')}>
-        <Text style={styles.ctaText}>Back home</Text>
+        <Text style={styles.ctaText}>Retour à l’accueil</Text>
       </Pressable>
     </View>
   );

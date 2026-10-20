@@ -6,7 +6,6 @@ export const API_URL = (
   'http://localhost:3001/api/v1'
 ).replace(/\/$/, '');
 
-export const stripeEnabled = process.env.E2E_STRIPE === '1';
 export const realPdfEnabled = process.env.E2E_REAL_PDF === '1';
 
 export function uniqueEmail(prefix = 'e2e'): string {

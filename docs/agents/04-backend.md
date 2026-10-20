@@ -42,7 +42,7 @@ Les zones ci-dessus, plus les tests **seulement** si QA n'est pas dans la même 
 - `packages/ai-service/**`
 - `apps/web/**`, `apps/mobile/**`, `packages/ui/**`
 - `infrastructure/**`, `.github/**`
-- Jobs Stripe Connect / `seller-payouts.job.ts` (Billing)
+- Sous-comptes Paystack et split des ventes (Billing)
 
 `EntitlementsService` vit sous `subscriptions/`. Backend ne le modifie pas. Il l'appelle.
 

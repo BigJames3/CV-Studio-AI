@@ -12,7 +12,7 @@ import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, AuthUser, Public, RequireEntitlement } from '../../common/decorators';
 import { EntitlementsGuard } from '../../common/guards/entitlements.guard';
-import { ConfirmPurchaseDto } from './dto/confirm-purchase.dto';
+import { PayoutAccountDto } from './dto/payout-account.dto';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { CreateSellerTemplateDto } from './dto/create-seller-template.dto';
 import { MarketplaceService } from './marketplace.service';
@@ -70,32 +70,10 @@ export class MarketplaceController {
   @UseGuards(EntitlementsGuard)
   @RequireEntitlement('marketplace:buy')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @Post('templates/:id/payment-intent')
-  @ApiOperation({ summary: 'Create Stripe PaymentIntent for a listing' })
-  createPaymentIntent(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.marketplace.createPaymentIntent(user.id, id);
-  }
-
-  @ApiBearerAuth('JWT')
-  @UseGuards(EntitlementsGuard)
-  @RequireEntitlement('marketplace:buy')
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('templates/:id/checkout')
-  @ApiOperation({ summary: 'Create Stripe Checkout Session for a listing (hosted payment)' })
+  @ApiOperation({ summary: 'Open a Paystack payment page for a listing licence' })
   createListingCheckout(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.marketplace.createListingCheckout(user.id, id);
-  }
-
-  @ApiBearerAuth('JWT')
-  @UseGuards(EntitlementsGuard)
-  @RequireEntitlement('marketplace:buy')
-  @Post('templates/:id/purchase')
-  purchase(
-    @CurrentUser() user: AuthUser,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: ConfirmPurchaseDto
-  ) {
-    return this.marketplace.purchase(user.id, id, body.paymentIntentId);
   }
 
   @ApiBearerAuth('JWT')
@@ -171,29 +149,23 @@ export class MarketplaceController {
   }
 
   @ApiBearerAuth('JWT')
-  @Post('seller/connect/onboarding')
-  @ApiOperation({ summary: 'Create Stripe Express Account Link for seller KYC' })
-  startConnectOnboarding(@CurrentUser() user: AuthUser) {
-    return this.marketplace.startConnectOnboarding(user.id);
+  @Get('seller/payout-banks')
+  @ApiOperation({ summary: 'Banks and mobile money operators sellers can be paid to' })
+  listPayoutBanks() {
+    return this.marketplace.listPayoutBanks();
   }
 
   @ApiBearerAuth('JWT')
-  @Post('seller/connect/sync')
-  @ApiOperation({ summary: 'Refresh connected-account payouts status from Stripe' })
-  refreshConnectAccount(@CurrentUser() user: AuthUser) {
-    return this.marketplace.refreshConnectAccount(user.id);
-  }
-
-  @ApiBearerAuth('JWT')
-  @Post('seller/connect/login')
-  @ApiOperation({ summary: 'Express Dashboard login link for the current seller' })
-  createConnectLoginLink(@CurrentUser() user: AuthUser) {
-    return this.marketplace.createConnectLoginLink(user.id);
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('seller/payout-account')
+  @ApiOperation({ summary: 'Register the seller payout account (Paystack subaccount)' })
+  setupPayoutAccount(@CurrentUser() user: AuthUser, @Body() body: PayoutAccountDto) {
+    return this.marketplace.setupPayoutAccount(user.id, body);
   }
 
   @ApiBearerAuth('JWT')
   @Get('seller/payouts')
-  @ApiOperation({ summary: 'Seller payout history and Connect status' })
+  @ApiOperation({ summary: 'Seller payout account and payout history' })
   listPayouts(@CurrentUser() user: AuthUser) {
     return this.marketplace.listPayouts(user.id);
   }

@@ -18,7 +18,7 @@
     "db:seed": "prisma db seed",
     "db:generate": "prisma generate",
     "webhook:retry-dlq": "ts-node --compiler-options {\"module\":\"CommonJS\"} src/scripts/retry-webhook-dlq.ts",
-    "stripe:check": "ts-node src/scripts/stripe-check.ts"
+    "paystack:check": "ts-node src/scripts/paystack-check.ts"
   },
   "prisma": {
     "schema": "prisma/schema.prisma",
@@ -59,7 +59,6 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "sharp": "^0.35.3",
-    "stripe": "^17.5.0",
     "uuid": "^11.0.3"
   },
   "devDependencies": {

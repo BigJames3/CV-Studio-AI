@@ -6,8 +6,8 @@ import { captureServerException } from '../../observability';
  * Uses Sentry when SENTRY_DSN is set; always logs at fatal level.
  */
 @Injectable()
-export class StripeAlertService {
-  private readonly logger = new Logger(StripeAlertService.name);
+export class PaymentAlertService {
+  private readonly logger = new Logger(PaymentAlertService.name);
 
   captureException(
     error: unknown,
@@ -37,7 +37,7 @@ export class StripeAlertService {
 
     captureServerException(err, {
       level,
-      tags: { module: 'stripe-webhook' },
+      tags: { module: 'payment-webhook' },
       extra: payload,
     });
   }
